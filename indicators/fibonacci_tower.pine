@@ -49,6 +49,10 @@ threeBearishCandles = bearishCandle and bearishCandle[1] and bearishCandle[2]
 // Combine all conditions for buy signal
 buySignal = threeBearishCandles and rsiOversoldCondition and macdReversal
 
+// Track if we have active Fibonacci levels to display
+var bool fibLevelsActive = false
+var int fibActivationBar = na
+
 // ============================================================================
 // FIBONACCI LEVELS CALCULATION
 // ============================================================================
@@ -56,26 +60,29 @@ buySignal = threeBearishCandles and rsiOversoldCondition and macdReversal
 // Find swing high and low within lookback period
 var float swingHigh = na
 var float swingLow = na
-var int swingHighBar = na
-var int swingLowBar = na
 
 // Update swing points when buy signal occurs
 if buySignal
     // Find highest high and lowest low in lookback period
-    swingHigh := ta.highest(high, fibLookback)
-    swingLow := ta.lowest(low, fibLookback)
-    swingHighBar := bar_index
-    swingLowBar := bar_index
+    float tempHigh = ta.highest(high, fibLookback)
+    float tempLow = ta.lowest(low, fibLookback)
 
-// Calculate Fibonacci levels
-fibRange = swingHigh - swingLow
-fib0 = swingLow
-fib236 = swingLow + fibRange * 0.236
-fib382 = swingLow + fibRange * 0.382
-fib50 = swingLow + fibRange * 0.500
-fib618 = swingLow + fibRange * 0.618
-fib786 = swingLow + fibRange * 0.786
-fib100 = swingHigh
+    // Only update if we have valid values and a meaningful range
+    if not na(tempHigh) and not na(tempLow) and (tempHigh - tempLow) > 0
+        swingHigh := tempHigh
+        swingLow := tempLow
+        fibLevelsActive := true
+        fibActivationBar := bar_index
+
+// Calculate Fibonacci levels only if we have valid swing points
+fibRange = not na(swingHigh) and not na(swingLow) ? swingHigh - swingLow : 0.0
+fib0 = not na(swingLow) ? swingLow : close
+fib236 = fib0 + fibRange * 0.236
+fib382 = fib0 + fibRange * 0.382
+fib50 = fib0 + fibRange * 0.500
+fib618 = fib0 + fibRange * 0.618
+fib786 = fib0 + fibRange * 0.786
+fib100 = not na(swingHigh) ? swingHigh : close
 
 // ============================================================================
 // VISUALIZATION
@@ -109,42 +116,46 @@ var label fibLabel618 = na
 var label fibLabel786 = na
 var label fibLabel100 = na
 
-if buySignal and showFibLevels and not na(swingHigh) and not na(swingLow)
-    // Delete old lines and labels
-    line.delete(fibLine0)
-    line.delete(fibLine236)
-    line.delete(fibLine382)
-    line.delete(fibLine50)
-    line.delete(fibLine618)
-    line.delete(fibLine786)
-    line.delete(fibLine100)
+// Draw Fibonacci lines when buy signal occurs with enhanced validation
+if buySignal and showFibLevels and fibLevelsActive and fibRange > 0
+    // Delete old lines and labels if they exist
+    if not na(fibLine0)
+        line.delete(fibLine0)
+        line.delete(fibLine236)
+        line.delete(fibLine382)
+        line.delete(fibLine50)
+        line.delete(fibLine618)
+        line.delete(fibLine786)
+        line.delete(fibLine100)
 
-    label.delete(fibLabel0)
-    label.delete(fibLabel236)
-    label.delete(fibLabel382)
-    label.delete(fibLabel50)
-    label.delete(fibLabel618)
-    label.delete(fibLabel786)
-    label.delete(fibLabel100)
+    if not na(fibLabel0) and showLabels
+        label.delete(fibLabel0)
+        label.delete(fibLabel236)
+        label.delete(fibLabel382)
+        label.delete(fibLabel50)
+        label.delete(fibLabel618)
+        label.delete(fibLabel786)
+        label.delete(fibLabel100)
 
-    // Draw new Fibonacci lines with extend parameter
-    fibLine0 := line.new(bar_index, fib0, bar_index + 1, fib0, color=color.new(color.red, 0), width=1, style=line.style_solid, extend=extend.right)
-    fibLine236 := line.new(bar_index, fib236, bar_index + 1, fib236, color=color.new(color.orange, 0), width=1, style=line.style_dashed, extend=extend.right)
-    fibLine382 := line.new(bar_index, fib382, bar_index + 1, fib382, color=color.new(color.yellow, 0), width=1, style=line.style_dashed, extend=extend.right)
-    fibLine50 := line.new(bar_index, fib50, bar_index + 1, fib50, color=color.new(color.blue, 0), width=2, style=line.style_solid, extend=extend.right)
-    fibLine618 := line.new(bar_index, fib618, bar_index + 1, fib618, color=color.new(color.green, 0), width=2, style=line.style_dashed, extend=extend.right)
-    fibLine786 := line.new(bar_index, fib786, bar_index + 1, fib786, color=color.new(color.purple, 0), width=1, style=line.style_dashed, extend=extend.right)
-    fibLine100 := line.new(bar_index, fib100, bar_index + 1, fib100, color=color.new(color.red, 0), width=1, style=line.style_solid, extend=extend.right)
+    // Draw new Fibonacci lines with enhanced visibility
+    // Using thicker lines and solid styles for better visibility
+    fibLine0 := line.new(bar_index, fib0, bar_index + 1, fib0, color=color.new(color.red, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine236 := line.new(bar_index, fib236, bar_index + 1, fib236, color=color.new(color.orange, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine382 := line.new(bar_index, fib382, bar_index + 1, fib382, color=color.new(color.yellow, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine50 := line.new(bar_index, fib50, bar_index + 1, fib50, color=color.new(color.blue, 0), width=3, style=line.style_solid, extend=extend.right)
+    fibLine618 := line.new(bar_index, fib618, bar_index + 1, fib618, color=color.new(color.green, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine786 := line.new(bar_index, fib786, bar_index + 1, fib786, color=color.new(color.purple, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine100 := line.new(bar_index, fib100, bar_index + 1, fib100, color=color.new(color.red, 0), width=2, style=line.style_solid, extend=extend.right)
 
-    // Add labels if enabled
+    // Add labels with better visibility
     if showLabels
-        fibLabel0 := label.new(bar_index, fib0, "0.0% (Tower Base)", style=label.style_label_left, color=color.new(color.red, 80), textcolor=color.red, textalign=text.align_left)
-        fibLabel236 := label.new(bar_index, fib236, "23.6%", style=label.style_label_left, color=color.new(color.orange, 80), textcolor=color.orange, textalign=text.align_left)
-        fibLabel382 := label.new(bar_index, fib382, "38.2%", style=label.style_label_left, color=color.new(color.yellow, 80), textcolor=color.yellow, textalign=text.align_left)
-        fibLabel50 := label.new(bar_index, fib50, "50.0%", style=label.style_label_left, color=color.new(color.blue, 80), textcolor=color.blue, textalign=text.align_left)
-        fibLabel618 := label.new(bar_index, fib618, "61.8% (Golden Ratio)", style=label.style_label_left, color=color.new(color.green, 80), textcolor=color.green, textalign=text.align_left)
-        fibLabel786 := label.new(bar_index, fib786, "78.6%", style=label.style_label_left, color=color.new(color.purple, 80), textcolor=color.purple, textalign=text.align_left)
-        fibLabel100 := label.new(bar_index, fib100, "100.0% (Tower Top)", style=label.style_label_left, color=color.new(color.red, 80), textcolor=color.red, textalign=text.align_left)
+        fibLabel0 := label.new(bar_index, fib0, "0.0% (Tower Base)", style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel236 := label.new(bar_index, fib236, "23.6%", style=label.style_label_left, color=color.new(color.orange, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel382 := label.new(bar_index, fib382, "38.2%", style=label.style_label_left, color=color.new(color.yellow, 70), textcolor=color.black, size=size.normal, textalign=text.align_left)
+        fibLabel50 := label.new(bar_index, fib50, "50.0%", style=label.style_label_left, color=color.new(color.blue, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel618 := label.new(bar_index, fib618, "61.8% (Golden Ratio)", style=label.style_label_left, color=color.new(color.green, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel786 := label.new(bar_index, fib786, "78.6%", style=label.style_label_left, color=color.new(color.purple, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel100 := label.new(bar_index, fib100, "100.0% (Tower Top)", style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
 
 // ============================================================================
 // ALERTS
@@ -157,9 +168,45 @@ alertcondition(buySignal, title="Fibonacci Tower Buy Signal", message="Fibonacci
 bgcolor(buySignal ? color.new(color.green, 90) : na, title="Buy Signal Background")
 
 // ============================================================================
-// PLOTS FOR DEBUGGING (Optional - can be commented out)
+// DEBUG TABLE (Shows key metrics)
 // ============================================================================
 
-// Plot RSI in separate pane (optional)
-// plot(rsi, "RSI", color=color.blue, display=display.none)
-// hline(rsiOversold, "RSI Oversold", color=color.red, linestyle=hline.style_dotted, display=display.none)
+// Count total buy signals for debugging
+var int totalBuySignals = 0
+if buySignal
+    totalBuySignals := totalBuySignals + 1
+
+// Create debug table to show if indicator is working
+var table debugTable = table.new(position.top_right, 2, 5, border_width=1)
+
+if barstate.islast
+    // Show buy signal count
+    table.cell(debugTable, 0, 0, "Buy Signals", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(debugTable, 1, 0, str.tostring(totalBuySignals), text_color=totalBuySignals > 0 ? color.lime : color.red, bgcolor=color.new(color.gray, 50))
+
+    // Show current RSI
+    table.cell(debugTable, 0, 1, "RSI", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(debugTable, 1, 1, str.tostring(rsi, "#.##"), text_color=rsi < rsiOversold ? color.lime : color.white, bgcolor=color.new(color.gray, 50))
+
+    // Show if levels are active
+    table.cell(debugTable, 0, 2, "Fib Active", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(debugTable, 1, 2, fibLevelsActive ? "YES" : "NO", text_color=fibLevelsActive ? color.lime : color.red, bgcolor=color.new(color.gray, 50))
+
+    // Show swing range
+    table.cell(debugTable, 0, 3, "Swing Range", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    table.cell(debugTable, 1, 3, fibRange > 0 ? str.tostring(fibRange, "#.####") : "N/A", text_color=color.yellow, bgcolor=color.new(color.gray, 50))
+
+    // Show indicator status
+    table.cell(debugTable, 0, 4, "Status", text_color=color.white, bgcolor=color.new(color.gray, 30))
+    string statusText = totalBuySignals == 0 ? "No signals yet" : fibLevelsActive ? "Lines drawn!" : "Waiting..."
+    color statusColor = totalBuySignals == 0 ? color.orange : fibLevelsActive ? color.lime : color.yellow
+    table.cell(debugTable, 1, 4, statusText, text_color=statusColor, bgcolor=color.new(color.gray, 50))
+
+// ============================================================================
+// ADDITIONAL DEBUGGING AIDS
+// ============================================================================
+
+// Visual markers for individual conditions (helps user understand why no signals)
+plotchar(threeBearishCandles and not buySignal, char="3", location=location.abovebar, color=color.new(color.orange, 50), size=size.tiny, title="3 Bearish (partial)")
+plotchar(rsiOversoldCondition and not buySignal, char="R", location=location.belowbar, color=color.new(color.blue, 50), size=size.tiny, title="RSI Oversold (partial)")
+plotchar(macdBullishCross, char="M", location=location.abovebar, color=color.new(color.purple, 50), size=size.tiny, title="MACD Cross")

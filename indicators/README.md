@@ -110,42 +110,97 @@ You can modify the script to:
 
 ## Troubleshooting
 
+### 🚨 IMPORTANT: Check the Debug Table First! (v1.2+)
+
+The indicator now shows a **debug table in the top-right corner** with critical information:
+
+```
+Buy Signals: 0        ← If this is 0 (RED), signals haven't triggered yet
+RSI: 45.23           ← Current RSI value (GREEN if < 30)
+Fib Active: NO       ← Whether Fibonacci lines are currently drawn
+Swing Range: N/A     ← Calculated swing high-low range
+Status: No signals yet ← Overall status message
+```
+
 ### No Visualization Appearing?
 
-If you don't see Fibonacci levels or buy signals after adding the indicator:
+**Step 1: Look at the Debug Table**
 
-1. **Check Signal Conditions**: The indicator requires ALL three conditions simultaneously:
-   - 3 consecutive bearish candles (close < open)
-   - RSI below 30 (oversold)
-   - MACD bullish crossover with negative histogram
+#### Case A: "Buy Signals: 0" (shown in RED)
+**Meaning**: No buy signals have triggered yet on this chart.
 
-   These conditions may be rare on some timeframes/assets. Try:
-   - Looking at longer historical data (scroll back further)
-   - Testing on volatile assets (BTC, ETH) with 4H or 1D timeframes
-   - Adjusting RSI threshold (increase to 35-40 for more signals)
+**Why**: The indicator requires ALL three conditions simultaneously:
+- 3 consecutive bearish candles (close < open for 3 bars)
+- RSI below 30 (oversold)
+- MACD bullish crossover with negative histogram
 
-2. **Verify Settings**:
-   - Ensure "Show Fibonacci Levels" is enabled in indicator settings
-   - Ensure "Show Buy Signals" is enabled
-   - Check that "Show Level Labels" is enabled to see the level markers
+These conditions are RARE and may not occur on all timeframes/assets.
 
-3. **Chart Requirements**:
-   - Need at least 100+ bars of history (default Fibonacci lookback period)
-   - Indicator works best with sufficient price data
+**Solutions**:
+1. ✅ **Try different timeframes**: 4H or 1D work better than 15m or 1H
+2. ✅ **Try volatile pairs**: BTC/USD, ETH/USD, or crypto pairs during corrections
+3. ✅ **Scroll through historical data**: Look back several weeks or months
+4. ✅ **Temporarily adjust RSI**: In settings, try RSI=35 or RSI=40 for testing
+5. ✅ **Watch for partial markers**:
+   - **Orange "3"**: Three bearish candles condition met
+   - **Blue "R"**: RSI oversold condition met
+   - **Purple "M"**: MACD bullish crossover occurred
 
-4. **Script Compilation**:
-   - Make sure there are no compilation errors in Pine Editor
-   - Code should be Pine Script v5 compatible
+   When you see all three markers together, you're close to a signal!
+
+#### Case B: "Buy Signals: 5" (GREEN) but "Fib Active: NO"
+**Meaning**: Signals triggered but lines weren't drawn due to validation failure.
+
+**Likely causes**:
+- Swing high equals swing low (no price range)
+- Invalid coordinate values
+
+**Solution**: This is a bug - please report with screenshot!
+
+#### Case C: "Buy Signals: 5" (GREEN) and "Fib Active: YES" but can't see lines
+**Meaning**: Lines are drawn but not visible in current view.
+
+**Solutions**:
+1. ✅ **Scroll to the signal bar**: Lines appear where the buy signal triggered
+2. ✅ **Zoom out vertically**: Lines might be outside visible price range
+3. ✅ **Check other indicators**: Too many overlays might hide the lines
+4. ✅ **Verify settings**: "Show Fibonacci Levels" must be enabled
+5. ✅ **Check line visibility**: Lines are now thicker (width=2-3) and solid style
+
+**Step 2: Verify Settings**
+- Ensure "Show Fibonacci Levels" is enabled
+- Ensure "Show Buy Signals" is enabled
+- Ensure "Show Level Labels" is enabled
+
+**Step 3: Chart Requirements**
+- Need at least 100+ bars of history (default lookback period)
+- Sufficient price volatility to create oversold conditions
+
+**Step 4: Script Compilation**
+- No compilation errors in Pine Editor
+- Pine Script v5 compatible
 
 ### Common Issues
 
-- **Lines not extending**: Lines now use `extend=extend.right` to automatically extend to chart edge
-- **Labels not showing**: Labels appear at signal bar with left alignment
-- **Old signals disappearing**: By design, only the most recent signal's Fibonacci levels are shown
+- **"No signals yet" status**: Normal if market conditions don't meet all three criteria. Try different assets/timeframes.
+- **Lines not extending**: Lines use `extend=extend.right` to auto-extend to chart edge
+- **Labels not visible**: Labels now have white text on semi-transparent colored backgrounds (enhanced in v1.2)
+- **Old signals disappearing**: By design, only most recent signal's levels are shown
+- **Partial conditions met**: You'll see "3", "R", or "M" markers when individual conditions are true
 
 ## Version History
 
-- **v1.1**: Bug fixes for visualization (2025-01-27)
+- **v1.2**: Major enhancement with debugging tools (2026-01-27)
+  - ✅ **Added debug table** showing real-time indicator status
+  - ✅ **Visual condition markers** (3/R/M) for partial signals
+  - ✅ **Enhanced line visibility** with thicker, solid lines (width=2-3)
+  - ✅ **Improved label contrast** with white text on colored backgrounds
+  - ✅ **Better validation** with fibRange > 0 check before drawing
+  - ✅ **Safer line deletion** with existence check before delete
+  - ✅ **Buy signal counter** to track historical trigger count
+  - ⚠️ **Key insight**: If you see no lines, check the debug table first!
+
+- **v1.1**: Bug fixes for visualization (2026-01-27)
   - Fixed line rendering using `extend=extend.right` instead of future bar indices
   - Added validation to prevent drawing with NA coordinates
   - Improved label positioning for consistency

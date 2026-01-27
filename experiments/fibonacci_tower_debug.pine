@@ -1,0 +1,198 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TRADERAGENT
+// DEBUG VERSION - Enhanced with debugging outputs
+
+//@version=5
+indicator("Fibonacci Tower DEBUG", overlay=true, max_lines_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// RSI Settings
+rsiLength = input.int(14, "RSI Length", minval=1, group="RSI Settings")
+rsiOversold = input.int(30, "RSI Oversold Level", minval=1, maxval=50, group="RSI Settings")
+
+// MACD Settings
+macdFastLength = input.int(12, "MACD Fast Length", minval=1, group="MACD Settings")
+macdSlowLength = input.int(26, "MACD Slow Length", minval=1, group="MACD Settings")
+macdSignalLength = input.int(9, "MACD Signal Length", minval=1, group="MACD Settings")
+
+// Fibonacci Settings
+fibLookback = input.int(100, "Fibonacci Lookback Period", minval=10, group="Fibonacci Settings")
+showFibLevels = input.bool(true, "Show Fibonacci Levels", group="Fibonacci Settings")
+
+// Signal Display Settings
+showBuySignals = input.bool(true, "Show Buy Signals", group="Display Settings")
+showLabels = input.bool(true, "Show Level Labels", group="Display Settings")
+
+// Debug Settings
+showDebugInfo = input.bool(true, "Show Debug Info", group="Debug Settings")
+
+// ============================================================================
+// INDICATOR CALCULATIONS
+// ============================================================================
+
+// RSI Calculation
+rsi = ta.rsi(close, rsiLength)
+rsiOversoldCondition = rsi < rsiOversold
+
+// MACD Calculation
+[macdLine, signalLine, histLine] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+macdBullishCross = ta.crossover(macdLine, signalLine)
+macdReversal = macdBullishCross and histLine[1] < 0
+
+// Bearish Candles Detection (3 consecutive bearish candles)
+bearishCandle = close < open
+threeBearishCandles = bearishCandle and bearishCandle[1] and bearishCandle[2]
+
+// ============================================================================
+// BUY SIGNAL LOGIC
+// ============================================================================
+
+// Combine all conditions for buy signal
+buySignal = threeBearishCandles and rsiOversoldCondition and macdReversal
+
+// Debug: Count how many times buySignal has triggered
+var int buySignalCount = 0
+if buySignal
+    buySignalCount := buySignalCount + 1
+
+// ============================================================================
+// FIBONACCI LEVELS CALCULATION
+// ============================================================================
+
+// Find swing high and low within lookback period
+var float swingHigh = na
+var float swingLow = na
+var int lastBuySignalBar = na
+
+// Update swing points when buy signal occurs
+if buySignal
+    // Find highest high and lowest low in lookback period
+    swingHigh := ta.highest(high, fibLookback)
+    swingLow := ta.lowest(low, fibLookback)
+    lastBuySignalBar := bar_index
+
+// Calculate Fibonacci levels
+fibRange = swingHigh - swingLow
+fib0 = swingLow
+fib236 = swingLow + fibRange * 0.236
+fib382 = swingLow + fibRange * 0.382
+fib50 = swingLow + fibRange * 0.500
+fib618 = swingLow + fibRange * 0.618
+fib786 = swingLow + fibRange * 0.786
+fib100 = swingHigh
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// Plot Buy Signals
+plotshape(
+     showBuySignals and buySignal,
+     title="Buy Signal",
+     location=location.belowbar,
+     color=color.new(color.green, 0),
+     style=shape.triangleup,
+     size=size.normal,
+     text="BUY"
+ )
+
+// Debug: Show individual conditions
+plotchar(showDebugInfo and threeBearishCandles, char="3", location=location.abovebar, color=color.orange, size=size.tiny, title="3 Bearish")
+plotchar(showDebugInfo and rsiOversoldCondition, char="R", location=location.belowbar, color=color.blue, size=size.tiny, title="RSI Oversold")
+plotchar(showDebugInfo and macdBullishCross, char="M", location=location.abovebar, color=color.purple, size=size.tiny, title="MACD Cross")
+
+// Plot Fibonacci Levels
+var line fibLine0 = na
+var line fibLine236 = na
+var line fibLine382 = na
+var line fibLine50 = na
+var line fibLine618 = na
+var line fibLine786 = na
+var line fibLine100 = na
+
+var label fibLabel0 = na
+var label fibLabel236 = na
+var label fibLabel382 = na
+var label fibLabel50 = na
+var label fibLabel618 = na
+var label fibLabel786 = na
+var label fibLabel100 = na
+
+var int linesDrawnCount = 0
+
+if buySignal and showFibLevels and not na(swingHigh) and not na(swingLow)
+    linesDrawnCount := linesDrawnCount + 1
+
+    // Delete old lines and labels
+    line.delete(fibLine0)
+    line.delete(fibLine236)
+    line.delete(fibLine382)
+    line.delete(fibLine50)
+    line.delete(fibLine618)
+    line.delete(fibLine786)
+    line.delete(fibLine100)
+
+    label.delete(fibLabel0)
+    label.delete(fibLabel236)
+    label.delete(fibLabel382)
+    label.delete(fibLabel50)
+    label.delete(fibLabel618)
+    label.delete(fibLabel786)
+    label.delete(fibLabel100)
+
+    // Draw new Fibonacci lines with extend parameter
+    fibLine0 := line.new(bar_index, fib0, bar_index + 1, fib0, color=color.new(color.red, 0), width=2, style=line.style_solid, extend=extend.right)
+    fibLine236 := line.new(bar_index, fib236, bar_index + 1, fib236, color=color.new(color.orange, 0), width=2, style=line.style_dashed, extend=extend.right)
+    fibLine382 := line.new(bar_index, fib382, bar_index + 1, fib382, color=color.new(color.yellow, 0), width=2, style=line.style_dashed, extend=extend.right)
+    fibLine50 := line.new(bar_index, fib50, bar_index + 1, fib50, color=color.new(color.blue, 0), width=3, style=line.style_solid, extend=extend.right)
+    fibLine618 := line.new(bar_index, fib618, bar_index + 1, fib618, color=color.new(color.green, 0), width=2, style=line.style_dashed, extend=extend.right)
+    fibLine786 := line.new(bar_index, fib786, bar_index + 1, fib786, color=color.new(color.purple, 0), width=2, style=line.style_dashed, extend=extend.right)
+    fibLine100 := line.new(bar_index, fib100, bar_index + 1, fib100, color=color.new(color.red, 0), width=2, style=line.style_solid, extend=extend.right)
+
+    // Add labels if enabled
+    if showLabels
+        fibLabel0 := label.new(bar_index, fib0, "0.0% (Tower Base)", style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel236 := label.new(bar_index, fib236, "23.6%", style=label.style_label_left, color=color.new(color.orange, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel382 := label.new(bar_index, fib382, "38.2%", style=label.style_label_left, color=color.new(color.yellow, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel50 := label.new(bar_index, fib50, "50.0%", style=label.style_label_left, color=color.new(color.blue, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel618 := label.new(bar_index, fib618, "61.8% (Golden)", style=label.style_label_left, color=color.new(color.green, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel786 := label.new(bar_index, fib786, "78.6%", style=label.style_label_left, color=color.new(color.purple, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+        fibLabel100 := label.new(bar_index, fib100, "100.0% (Tower Top)", style=label.style_label_left, color=color.new(color.red, 70), textcolor=color.white, size=size.normal, textalign=text.align_left)
+
+// Debug table showing status
+var table debugTable = table.new(position.top_right, 2, 6, border_width=1)
+
+if showDebugInfo and barstate.islast
+    table.cell(debugTable, 0, 0, "Buy Signals", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 0, str.tostring(buySignalCount), text_color=color.yellow, bgcolor=color.new(color.gray, 70))
+
+    table.cell(debugTable, 0, 1, "Lines Drawn", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 1, str.tostring(linesDrawnCount), text_color=color.yellow, bgcolor=color.new(color.gray, 70))
+
+    table.cell(debugTable, 0, 2, "RSI", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 2, str.tostring(rsi, "#.##"), text_color=rsi < rsiOversold ? color.lime : color.white, bgcolor=color.new(color.gray, 70))
+
+    table.cell(debugTable, 0, 3, "Swing High", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 3, na(swingHigh) ? "N/A" : str.tostring(swingHigh, "#.####"), text_color=color.yellow, bgcolor=color.new(color.gray, 70))
+
+    table.cell(debugTable, 0, 4, "Swing Low", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 4, na(swingLow) ? "N/A" : str.tostring(swingLow, "#.####"), text_color=color.yellow, bgcolor=color.new(color.gray, 70))
+
+    table.cell(debugTable, 0, 5, "Fib Range", text_color=color.white, bgcolor=color.new(color.gray, 50))
+    table.cell(debugTable, 1, 5, na(fibRange) ? "N/A" : str.tostring(fibRange, "#.####"), text_color=color.yellow, bgcolor=color.new(color.gray, 70))
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+// Alert condition for buy signals
+alertcondition(buySignal, title="Fibonacci Tower Buy Signal", message="Fibonacci Tower: Buy signal detected! 3 bearish candles + RSI oversold + MACD reversal")
+
+// Alert when lines are drawn
+alertcondition(buySignal and showFibLevels and not na(swingHigh) and not na(swingLow), title="Fibonacci Lines Drawn", message="Fibonacci Tower: Lines have been drawn at bar " + str.tostring(bar_index))
+
+// Background highlighting for buy signals
+bgcolor(buySignal ? color.new(color.green, 85) : na, title="Buy Signal Background")

@@ -1,0 +1,63 @@
+// SIMPLIFIED TEST VERSION
+// This version triggers on ANY bearish candle to verify line drawing works
+//@version=5
+indicator("Fibonacci Tower TEST (Relaxed Conditions)", overlay=true, max_lines_count=500)
+
+// Simplified trigger - just need ONE bearish candle for testing
+buySignal = close < open
+
+// Fibonacci Settings
+fibLookback = 50  // Reduced for faster testing
+showFibLevels = true
+
+// Find swing high and low
+var float swingHigh = na
+var float swingLow = na
+
+if buySignal
+    swingHigh := ta.highest(high, fibLookback)
+    swingLow := ta.lowest(low, fibLookback)
+
+// Calculate Fibonacci levels
+fibRange = swingHigh - swingLow
+fib0 = swingLow
+fib236 = swingLow + fibRange * 0.236
+fib382 = swingLow + fibRange * 0.382
+fib50 = swingLow + fibRange * 0.500
+fib618 = swingLow + fibRange * 0.618
+fib786 = swingLow + fibRange * 0.786
+fib100 = swingHigh
+
+// Plot Buy Signal
+plotshape(buySignal, title="Test Signal", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
+
+// Draw Fibonacci lines
+var line fibLine0 = na
+var line fibLine236 = na
+var line fibLine382 = na
+var line fibLine50 = na
+var line fibLine618 = na
+var line fibLine786 = na
+var line fibLine100 = na
+
+if buySignal and not na(swingHigh) and not na(swingLow) and fibRange > 0
+    // Delete old lines
+    line.delete(fibLine0)
+    line.delete(fibLine236)
+    line.delete(fibLine382)
+    line.delete(fibLine50)
+    line.delete(fibLine618)
+    line.delete(fibLine786)
+    line.delete(fibLine100)
+
+    // Draw new lines
+    fibLine0 := line.new(bar_index, fib0, bar_index + 1, fib0, color=color.red, width=2, extend=extend.right)
+    fibLine236 := line.new(bar_index, fib236, bar_index + 1, fib236, color=color.orange, width=2, extend=extend.right)
+    fibLine382 := line.new(bar_index, fib382, bar_index + 1, fib382, color=color.yellow, width=2, extend=extend.right)
+    fibLine50 := line.new(bar_index, fib50, bar_index + 1, fib50, color=color.blue, width=3, extend=extend.right)
+    fibLine618 := line.new(bar_index, fib618, bar_index + 1, fib618, color=color.green, width=2, extend=extend.right)
+    fibLine786 := line.new(bar_index, fib786, bar_index + 1, fib786, color=color.purple, width=2, extend=extend.right)
+    fibLine100 := line.new(bar_index, fib100, bar_index + 1, fib100, color=color.red, width=2, extend=extend.right)
+
+// Background on signal
+bgcolor(buySignal ? color.new(color.green, 90) : na)
