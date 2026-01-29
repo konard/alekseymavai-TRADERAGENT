@@ -229,28 +229,28 @@ if barstate.islast
                text_size=size.normal)
 
     // Volume Momentum with gradient
-    volumeColor = strongMomentum and volumeMomentum > momentumThreshold * 1.5 ? color.new(color.lime, 75) :
+    color volumeColor = strongMomentum and volumeMomentum > momentumThreshold * 1.5 ? color.new(color.lime, 75) :
                   strongMomentum ? color.new(color.green, 80) :
                   color.new(color.gray, 85)
     table.cell(debugTable, 0, 3, "Volume Power",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
                text_size=size.small)
-    volumeText = str.tostring(volumeMomentum, "#.##") + "x"
+    string volumeText = str.tostring(volumeMomentum, "#.##") + "x"
     table.cell(debugTable, 1, 3, volumeText,
                bgcolor=volumeColor,
                text_color=color.white,
                text_size=size.normal)
 
     // Candle pattern detection
-    currentCandleType = close > open ? "🟢 Bullish" :
+    string currentCandleType = close > open ? "🟢 Bullish" :
                        close < open ? "🔴 Bearish" :
                        "⚪ Doji"
     table.cell(debugTable, 0, 4, "Candle Type",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
                text_size=size.small)
-    candleColor = close > open ? color.new(color.green, 85) :
+    color candleColor = close > open ? color.new(color.green, 85) :
                   close < open ? color.new(color.red, 85) :
                   color.new(color.gray, 85)
     table.cell(debugTable, 1, 4, currentCandleType,
@@ -269,8 +269,8 @@ if barstate.islast
                text_size=size.tiny)
 
     // Last Bullish Signal
-    bullishBarsAgo = not na(lastBullishBar) ? bar_index - lastBullishBar : -1
-    bullishText = bullishBarsAgo >= 0 ? "🟢 " + str.tostring(bullishBarsAgo) + " bars" : "⏳ None"
+    int bullishBarsAgo = not na(lastBullishBar) ? bar_index - lastBullishBar : -1
+    string bullishText = bullishBarsAgo >= 0 ? "🟢 " + str.tostring(bullishBarsAgo) + " bars" : "⏳ None"
     table.cell(debugTable, 0, 6, "Last LONG",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
@@ -281,8 +281,8 @@ if barstate.islast
                text_size=size.small)
 
     // Last Bearish Signal
-    bearishBarsAgo = not na(lastBearishBar) ? bar_index - lastBearishBar : -1
-    bearishText = bearishBarsAgo >= 0 ? "🔴 " + str.tostring(bearishBarsAgo) + " bars" : "⏳ None"
+    int bearishBarsAgo = not na(lastBearishBar) ? bar_index - lastBearishBar : -1
+    string bearishText = bearishBarsAgo >= 0 ? "🔴 " + str.tostring(bearishBarsAgo) + " bars" : "⏳ None"
     table.cell(debugTable, 0, 7, "Last SHORT",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
@@ -293,7 +293,7 @@ if barstate.islast
                text_size=size.small)
 
     // Bullish Fib Range
-    bullishFibText = bullishFibRange > 0 ? str.tostring(bullishFibRange, "#.####") : "N/A"
+    string bullishFibText = bullishFibRange > 0 ? str.tostring(bullishFibRange, "#.####") : "N/A"
     table.cell(debugTable, 0, 8, "LONG Range",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
@@ -304,7 +304,7 @@ if barstate.islast
                text_size=size.tiny)
 
     // Bearish Fib Range
-    bearishFibText = bearishFibRange > 0 ? str.tostring(bearishFibRange, "#.####") : "N/A"
+    string bearishFibText = bearishFibRange > 0 ? str.tostring(bearishFibRange, "#.####") : "N/A"
     table.cell(debugTable, 0, 9, "SHORT Range",
                bgcolor=color.new(color.gray, 90),
                text_color=color.white,
