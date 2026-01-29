@@ -323,9 +323,9 @@ var table tradingTable = table.new(position.top_right, 2, 11,
 
 if barstate.islast and showTradingInfo
     // Header
-    headerBgColor = activeSignalType == "LONG" ? color.new(color.green, 70) :
-                    activeSignalType == "SHORT" ? color.new(color.red, 70) :
-                    color.new(color.gray, 70)
+    color headerBgColor = activeSignalType == "LONG" ? color.new(color.green, 70) :
+                          activeSignalType == "SHORT" ? color.new(color.red, 70) :
+                          color.new(color.gray, 70)
 
     table.cell(tradingTable, 0, 0, "📊 Trading Levels",
                bgcolor=headerBgColor,
@@ -343,39 +343,39 @@ if barstate.islast and showTradingInfo
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    entryText = not na(activeEntryPrice) ? str.tostring(activeEntryPrice, format.mintick) : "N/A"
+    string entryText = not na(activeEntryPrice) ? str.tostring(activeEntryPrice, format.mintick) : "N/A"
     table.cell(tradingTable, 1, 1, entryText,
                bgcolor=color.new(color.green, 80),
                text_color=color.white,
                text_size=size.small)
 
     // Entry #2 (0.500)
-    entry2Price = activeSignalType == "LONG" and not na(activeEntryPrice) and not na(activeStopLoss) ?
-                  activeStopLoss + (activeEntryPrice - activeStopLoss) * (0.5 / (1.0 - 0.820)) :
-                  activeSignalType == "SHORT" and not na(activeEntryPrice) and not na(activeStopLoss) ?
-                  activeStopLoss - (activeStopLoss - activeEntryPrice) * 0.5 / 0.820 :
-                  na
+    float entry2Price = activeSignalType == "LONG" and not na(activeEntryPrice) and not na(activeStopLoss) ?
+                        activeStopLoss + (activeEntryPrice - activeStopLoss) * (0.5 / (1.0 - 0.820)) :
+                        activeSignalType == "SHORT" and not na(activeEntryPrice) and not na(activeStopLoss) ?
+                        activeStopLoss - (activeStopLoss - activeEntryPrice) * 0.5 / 0.820 :
+                        na
     table.cell(tradingTable, 0, 2, "Entry #2",
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    entry2Text = not na(entry2Price) ? str.tostring(entry2Price, format.mintick) + " (1%)" : "N/A"
+    string entry2Text = not na(entry2Price) ? str.tostring(entry2Price, format.mintick) + " (1%)" : "N/A"
     table.cell(tradingTable, 1, 2, entry2Text,
                bgcolor=color.new(color.yellow, 80),
                text_color=color.black,
                text_size=size.small)
 
     // Entry #3 (0.618)
-    entry3Price = activeSignalType == "LONG" and not na(activeEntryPrice) and not na(activeStopLoss) ?
-                  activeStopLoss + (activeEntryPrice - activeStopLoss) * (0.618 / (1.0 - 0.820)) :
-                  activeSignalType == "SHORT" and not na(activeEntryPrice) and not na(activeStopLoss) ?
-                  activeStopLoss - (activeStopLoss - activeEntryPrice) * 0.618 / 0.820 :
-                  na
+    float entry3Price = activeSignalType == "LONG" and not na(activeEntryPrice) and not na(activeStopLoss) ?
+                        activeStopLoss + (activeEntryPrice - activeStopLoss) * (0.618 / (1.0 - 0.820)) :
+                        activeSignalType == "SHORT" and not na(activeEntryPrice) and not na(activeStopLoss) ?
+                        activeStopLoss - (activeStopLoss - activeEntryPrice) * 0.618 / 0.820 :
+                        na
     table.cell(tradingTable, 0, 3, "Entry #3",
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    entry3Text = not na(entry3Price) ? str.tostring(entry3Price, format.mintick) + " (1%)" : "N/A"
+    string entry3Text = not na(entry3Price) ? str.tostring(entry3Price, format.mintick) + " (1%)" : "N/A"
     table.cell(tradingTable, 1, 3, entry3Text,
                bgcolor=color.new(color.orange, 80),
                text_color=color.white,
@@ -396,7 +396,7 @@ if barstate.islast and showTradingInfo
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    slText = not na(activeStopLoss) ? str.tostring(activeStopLoss, format.mintick) : "N/A"
+    string slText = not na(activeStopLoss) ? str.tostring(activeStopLoss, format.mintick) : "N/A"
     table.cell(tradingTable, 1, 5, slText,
                bgcolor=color.new(color.red, 70),
                text_color=color.white,
@@ -417,7 +417,7 @@ if barstate.islast and showTradingInfo
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    tp1Text = not na(activeTP1) ? str.tostring(activeTP1, format.mintick) + " (30%)" : "N/A"
+    string tp1Text = not na(activeTP1) ? str.tostring(activeTP1, format.mintick) + " (30%)" : "N/A"
     table.cell(tradingTable, 1, 7, tp1Text,
                bgcolor=color.new(color.lime, 80),
                text_color=color.black,
@@ -428,7 +428,7 @@ if barstate.islast and showTradingInfo
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    tp2Text = not na(activeTP2) ? str.tostring(activeTP2, format.mintick) + " (30%)" : "N/A"
+    string tp2Text = not na(activeTP2) ? str.tostring(activeTP2, format.mintick) + " (30%)" : "N/A"
     table.cell(tradingTable, 1, 8, tp2Text,
                bgcolor=color.new(color.aqua, 80),
                text_color=color.black,
@@ -439,19 +439,19 @@ if barstate.islast and showTradingInfo
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.small)
-    tp3Text = not na(activeTP3) ? str.tostring(activeTP3, format.mintick) + " (40%)" : "N/A"
+    string tp3Text = not na(activeTP3) ? str.tostring(activeTP3, format.mintick) + " (40%)" : "N/A"
     table.cell(tradingTable, 1, 9, tp3Text,
                bgcolor=color.new(color.fuchsia, 80),
                text_color=color.white,
                text_size=size.small)
 
     // Signal age
-    barsAgo = not na(activeSignalBar) ? bar_index - activeSignalBar : 0
+    int barsAgo = not na(activeSignalBar) ? bar_index - activeSignalBar : 0
     table.cell(tradingTable, 0, 10, "Signal Age",
                bgcolor=color.new(color.gray, 85),
                text_color=color.white,
                text_size=size.tiny)
-    ageText = activeSignalType != "None" ? str.tostring(barsAgo) + " bars ago" : "Waiting..."
+    string ageText = activeSignalType != "None" ? str.tostring(barsAgo) + " bars ago" : "Waiting..."
     table.cell(tradingTable, 1, 10, ageText,
                bgcolor=color.new(color.blue, 85),
                text_color=color.white,
