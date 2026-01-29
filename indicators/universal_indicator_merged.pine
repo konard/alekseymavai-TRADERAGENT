@@ -106,12 +106,12 @@ deleteOldFibonacci(array<line> lines, array<label> labels) =>
 // Function to draw Fibonacci levels with trading information
 drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
     if not na(lowPrice) and not na(highPrice) and (highPrice - lowPrice) > 0
-        fibRange = highPrice - lowPrice
+        float fibRange = highPrice - lowPrice
 
         if isBullish
             // Bullish levels: from low (1.0) going up to extensions above high (negative ratios)
-            levels = array.from(1.0, 0.820, 0.618, 0.5, 0.0, -0.618, -1.618, -2.618)
-            levelNames = array.from(
+            array<float> levels = array.from(1.0, 0.820, 0.618, 0.5, 0.0, -0.618, -1.618, -2.618)
+            array<string> levelNames = array.from(
                  "1.000 Low (Base)",
                  "0.820 STOP-LOSS",
                  "0.618 Entry #3 (1%)",
@@ -121,7 +121,7 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                  "-1.618 TP2 (30%)",
                  "-2.618 TP3 (40%)"
              )
-            levelColors = array.from(
+            array<color> levelColors = array.from(
                  color.new(color.blue, 20),       // Base - blue
                  color.new(color.red, 10),        // Stop Loss - red
                  color.new(color.orange, 20),     // Entry #3 - orange
@@ -131,18 +131,18 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                  color.new(color.aqua, 20),       // TP2 - aqua
                  color.new(color.fuchsia, 20)     // TP3 - fuchsia
              )
-            levelWidths = array.from(3, 3, 2, 2, 3, 2, 2, 3)
+            array<int> levelWidths = array.from(3, 3, 2, 2, 3, 2, 2, 3)
 
             // Draw each level
             for i = 0 to array.size(levels) - 1
-                levelRatio = array.get(levels, i)
-                levelPrice = lowPrice + fibRange * (1.0 - levelRatio)
-                levelName = array.get(levelNames, i)
-                lineColor = array.get(levelColors, i)
-                lineWidth = array.get(levelWidths, i)
+                float levelRatio = array.get(levels, i)
+                float levelPrice = lowPrice + fibRange * (1.0 - levelRatio)
+                string levelName = array.get(levelNames, i)
+                color lineColor = array.get(levelColors, i)
+                int lineWidth = array.get(levelWidths, i)
 
                 // Create line extending to the right
-                newLine = line.new(
+                line newLine = line.new(
                      x1=signalBar,
                      y1=levelPrice,
                      x2=signalBar + 50,
@@ -157,8 +157,8 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
 
                 // Create label if enabled
                 if showLabels
-                    labelText = levelName + " (" + str.tostring(levelPrice, format.mintick) + ")"
-                    newLabel = label.new(
+                    string labelText = levelName + " (" + str.tostring(levelPrice, format.mintick) + ")"
+                    label newLabel = label.new(
                          x=signalBar,
                          y=levelPrice,
                          text=labelText,
@@ -170,8 +170,8 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                     array.push(bullishLabels, newLabel)
         else
             // Bearish levels: mirror of bullish for short positions
-            levels = array.from(0.0, 0.180, 0.382, 0.5, 1.0, 1.618, 2.618, 3.618)
-            levelNames = array.from(
+            array<float> levels = array.from(0.0, 0.180, 0.382, 0.5, 1.0, 1.618, 2.618, 3.618)
+            array<string> levelNames = array.from(
                  "0.000 High (Base)",
                  "0.180 STOP-LOSS",
                  "0.382 Entry #3 (1%)",
@@ -181,7 +181,7 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                  "2.618 TP2 (30%)",
                  "3.618 TP3 (40%)"
              )
-            levelColors = array.from(
+            array<color> levelColors = array.from(
                  color.new(color.blue, 20),       // Base - blue
                  color.new(color.red, 10),        // Stop Loss - red
                  color.new(color.orange, 20),     // Entry #3 - orange
@@ -191,17 +191,17 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                  color.new(color.aqua, 20),       // TP2 - aqua
                  color.new(color.fuchsia, 20)     // TP3 - fuchsia
              )
-            levelWidths = array.from(3, 3, 2, 2, 3, 2, 2, 3)
+            array<int> levelWidths = array.from(3, 3, 2, 2, 3, 2, 2, 3)
 
             // Draw each level
             for i = 0 to array.size(levels) - 1
-                levelRatio = array.get(levels, i)
-                levelPrice = highPrice - fibRange * levelRatio
-                levelName = array.get(levelNames, i)
-                lineColor = array.get(levelColors, i)
-                lineWidth = array.get(levelWidths, i)
+                float levelRatio = array.get(levels, i)
+                float levelPrice = highPrice - fibRange * levelRatio
+                string levelName = array.get(levelNames, i)
+                color lineColor = array.get(levelColors, i)
+                int lineWidth = array.get(levelWidths, i)
 
-                newLine = line.new(
+                line newLine = line.new(
                      x1=signalBar,
                      y1=levelPrice,
                      x2=signalBar + 50,
@@ -215,8 +215,8 @@ drawFibonacci(float lowPrice, float highPrice, int signalBar, bool isBullish) =>
                 array.push(bearishLines, newLine)
 
                 if showLabels
-                    labelText = levelName + " (" + str.tostring(levelPrice, format.mintick) + ")"
-                    newLabel = label.new(
+                    string labelText = levelName + " (" + str.tostring(levelPrice, format.mintick) + ")"
+                    label newLabel = label.new(
                          x=signalBar,
                          y=levelPrice,
                          text=labelText,
@@ -288,18 +288,18 @@ barcolor(bearishSignal and showBearishSignals ? color.new(color.red, 70) : na, t
 // This provides a visual representation without requiring a separate panel
 if showRsiPanel
     // Calculate price range for scaling
-    priceRange = ta.highest(high, 50) - ta.lowest(low, 50)
-    priceLow = ta.lowest(low, 50)
+    float priceRange = ta.highest(high, 50) - ta.lowest(low, 50)
+    float priceLow = ta.lowest(low, 50)
 
     // Scale RSI to fit in a small portion of the price chart (bottom 20%)
-    rsiScaled = priceLow + (rsi / 100.0) * (priceRange * 0.2)
-    rsiSmoothScaled = priceLow + (rsiSmooth / 100.0) * (priceRange * 0.2)
+    float rsiScaled = priceLow + (rsi / 100.0) * (priceRange * 0.2)
+    float rsiSmoothScaled = priceLow + (rsiSmooth / 100.0) * (priceRange * 0.2)
 
     // Enhanced color scheme for better readability
-    rsiColor = isOversold ? color.new(color.lime, 0) :
-                isOverbought ? color.new(color.red, 0) :
-                rsi > 50 ? color.new(color.aqua, 0) :
-                color.new(color.orange, 0)
+    color rsiColor = isOversold ? color.new(color.lime, 0) :
+                     isOverbought ? color.new(color.red, 0) :
+                     rsi > 50 ? color.new(color.aqua, 0) :
+                     color.new(color.orange, 0)
 
     plot(rsiScaled, "RSI (Scaled)", color=rsiColor, linewidth=2, display=display.none)
     plot(rsiSmoothScaled, "RSI Smooth (Scaled)", color=color.new(color.yellow, 0), linewidth=1, display=display.none)
