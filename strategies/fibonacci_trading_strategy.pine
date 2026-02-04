@@ -1,0 +1,343 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TRADERAGENT
+
+//@version=6
+strategy("Fibonacci Trading Strategy", shorttitle="Fib Strategy", overlay=true,
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+         commission_type=strategy.commission.percent, commission_value=0.1)
+
+// ============================================================================
+// ОПИСАНИЕ / DESCRIPTION
+// ============================================================================
+// Стратегия для автоматической торговли по уровням Фибоначчи
+// Strategy for automatic trading using Fibonacci levels
+//
+// Особенности / Features:
+// 1. Пользователь выбирает свечи через настройки времени
+// 2. Стратегия выполняет ордера по описанному алгоритму
+// 3. Отслеживает успех сделок (все TP достигнуты или график завершился)
+// 4. Журнал сделок экспортируется из TradingView
+//
+// 1. User selects candles via timestamp settings
+// 2. Strategy executes orders following the algorithm
+// 3. Tracks trade success (all TPs hit or chart ended)
+// 4. Trade journal exported from TradingView
+// ============================================================================
+
+// ============================================================================
+// НАСТРОЙКИ / SETTINGS
+// ============================================================================
+
+// === 📅 Candle Selection / Выбор свечей ===
+enableTrade1 = input.bool(false, "Enable Trade 1", group="📅 Candle Selection 1")
+trade1_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Trade 1 Candle Time",
+                             tooltip="Выберите дату и время свечи для анализа", group="📅 Candle Selection 1")
+
+enableTrade2 = input.bool(false, "Enable Trade 2", group="📅 Candle Selection 2")
+trade2_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Trade 2 Candle Time", group="📅 Candle Selection 2")
+
+enableTrade3 = input.bool(false, "Enable Trade 3", group="📅 Candle Selection 3")
+trade3_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Trade 3 Candle Time", group="📅 Candle Selection 3")
+
+enableTrade4 = input.bool(false, "Enable Trade 4", group="📅 Candle Selection 4")
+trade4_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Trade 4 Candle Time", group="📅 Candle Selection 4")
+
+enableTrade5 = input.bool(false, "Enable Trade 5", group="📅 Candle Selection 5")
+trade5_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Trade 5 Candle Time", group="📅 Candle Selection 5")
+
+// === 📐 Fibonacci Settings / Настройки Фибоначчи ===
+entry1_percent = input.float(1.0, "Entry #1 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+entry2_percent = input.float(1.0, "Entry #2 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+entry3_percent = input.float(1.0, "Entry #3 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+
+// === 💰 Position Exit Settings / Настройки выхода ===
+tp1_close_percent = input.float(30.0, "TP1 Close %", minval=1, maxval=100, group="💰 Position Exit")
+tp2_close_percent = input.float(30.0, "TP2 Close %", minval=1, maxval=100, group="💰 Position Exit")
+tp3_close_percent = input.float(40.0, "TP3 Close %", minval=1, maxval=100, group="💰 Position Exit")
+
+// === 🎨 Display Settings / Настройки отображения ===
+showLevels = input.bool(true, "Show Levels on Chart / Показать уровни на графике", group="🎨 Display")
+showLabels = input.bool(true, "Show Labels / Показать метки", group="🎨 Display")
+
+// ============================================================================
+// ФУНКЦИИ РАСЧЕТА УРОВНЕЙ / LEVEL CALCULATION FUNCTIONS
+// ============================================================================
+
+// Функция расчета уровней Фибоначчи для одной свечи
+calcFibLevels(candleHigh, candleLow, candleClose, candleOpen) =>
+    isGreen = candleClose > candleOpen
+    candleRange = candleHigh - candleLow
+
+    // Расчет уровней
+    var float fib_entry1 = na
+    var float fib_entry2 = na
+    var float fib_entry3 = na
+    var float fib_stop = na
+    var float fib_tp1 = na
+    var float fib_tp2 = na
+    var float fib_tp3 = na
+
+    if isGreen
+        // LONG (зеленая свеча)
+        fib_entry1 := candleHigh                              // 0.0
+        fib_entry2 := candleLow + candleRange * 0.500         // 0.5
+        fib_entry3 := candleLow + candleRange * 0.382         // 0.618
+        fib_stop := candleLow + candleRange * 0.180           // 0.820
+        fib_tp1 := candleHigh + candleRange * 0.618           // -0.618
+        fib_tp2 := candleHigh + candleRange * 1.618           // -1.618
+        fib_tp3 := candleHigh + candleRange * 2.618           // -2.618
+    else
+        // SHORT (красная свеча)
+        fib_entry1 := candleLow                               // 0.0
+        fib_entry2 := candleHigh - candleRange * 0.500        // 0.5
+        fib_entry3 := candleHigh - candleRange * 0.382        // 0.618
+        fib_stop := candleHigh - candleRange * 0.180          // 0.820
+        fib_tp1 := candleLow - candleRange * 0.618            // -0.618
+        fib_tp2 := candleLow - candleRange * 1.618            // -1.618
+        fib_tp3 := candleLow - candleRange * 2.618            // -2.618
+
+    [isGreen, fib_entry1, fib_entry2, fib_entry3, fib_stop, fib_tp1, fib_tp2, fib_tp3]
+
+// ============================================================================
+// ОБРАБОТКА СДЕЛОК / TRADE PROCESSING
+// ============================================================================
+
+// Переменные для отслеживания состояния сделок
+var int activeTrade = 0  // 0 = нет сделки, 1-5 = номер активной сделки
+var bool entry1_filled = false
+var bool entry2_filled = false
+var bool entry3_filled = false
+var bool tp1_hit = false
+var bool tp2_hit = false
+var bool tp3_hit = false
+var int tradeStartBar = 0
+
+var float saved_entry1 = na
+var float saved_entry2 = na
+var float saved_entry3 = na
+var float saved_stop = na
+var float saved_tp1 = na
+var float saved_tp2 = na
+var float saved_tp3 = na
+var bool saved_isLong = na
+
+// Функция для начала новой сделки
+startTrade(tradeNumber, candleHigh, candleLow, candleClose, candleOpen) =>
+    [isLong, entry1, entry2, entry3, stop, tp1, tp2, tp3] = calcFibLevels(candleHigh, candleLow, candleClose, candleOpen)
+
+    // Сохраняем уровни
+    saved_entry1 := entry1
+    saved_entry2 := entry2
+    saved_entry3 := entry3
+    saved_stop := stop
+    saved_tp1 := tp1
+    saved_tp2 := tp2
+    saved_tp3 := tp3
+    saved_isLong := isLong
+
+    // Сбрасываем флаги
+    entry1_filled := false
+    entry2_filled := false
+    entry3_filled := false
+    tp1_hit := false
+    tp2_hit := false
+    tp3_hit := false
+
+    // Устанавливаем активную сделку
+    activeTrade := tradeNumber
+    tradeStartBar := bar_index
+
+    // Рисуем уровни если включено
+    if showLevels
+        line.new(bar_index, entry1, bar_index + 20, entry1, color=color.green, width=2)
+        line.new(bar_index, entry2, bar_index + 20, entry2, color=color.blue, width=1)
+        line.new(bar_index, entry3, bar_index + 20, entry3, color=color.blue, width=1)
+        line.new(bar_index, stop, bar_index + 20, stop, color=color.red, width=2)
+        line.new(bar_index, tp1, bar_index + 20, tp1, color=color.yellow, width=2)
+        line.new(bar_index, tp2, bar_index + 20, tp2, color=color.orange, width=2)
+        line.new(bar_index, tp3, bar_index + 20, tp3, color=color.lime, width=2)
+
+    if showLabels
+        label.new(bar_index, entry1, "Entry #1", style=label.style_label_left, color=color.green, textcolor=color.white, size=size.small)
+        label.new(bar_index, stop, "STOP", style=label.style_label_left, color=color.red, textcolor=color.white, size=size.small)
+        label.new(bar_index, tp1, "TP1", style=label.style_label_left, color=color.yellow, textcolor=color.black, size=size.small)
+        label.new(bar_index, tp2, "TP2", style=label.style_label_left, color=color.orange, textcolor=color.white, size=size.small)
+        label.new(bar_index, tp3, "TP3", style=label.style_label_left, color=color.lime, textcolor=color.black, size=size.small)
+
+// Проверка на выбранные свечи и начало сделок
+if enableTrade1 and time == trade1_timestamp and activeTrade == 0
+    startTrade(1, high, low, close, open)
+
+if enableTrade2 and time == trade2_timestamp and activeTrade == 0
+    startTrade(2, high, low, close, open)
+
+if enableTrade3 and time == trade3_timestamp and activeTrade == 0
+    startTrade(3, high, low, close, open)
+
+if enableTrade4 and time == trade4_timestamp and activeTrade == 0
+    startTrade(4, high, low, close, open)
+
+if enableTrade5 and time == trade5_timestamp and activeTrade == 0
+    startTrade(5, high, low, close, open)
+
+// ============================================================================
+// ЛОГИКА ВЫПОЛНЕНИЯ ОРДЕРОВ / ORDER EXECUTION LOGIC
+// ============================================================================
+
+// Обработка активной сделки
+if activeTrade > 0 and not na(saved_entry1)
+
+    // === Entry #1 (рыночный ордер на уровне 0.0) ===
+    if not entry1_filled
+        if saved_isLong
+            if high >= saved_entry1
+                strategy.entry("Entry1_Long_" + str.tostring(activeTrade), strategy.long,
+                              qty=entry1_percent, comment="Entry #1 LONG")
+                entry1_filled := true
+        else
+            if low <= saved_entry1
+                strategy.entry("Entry1_Short_" + str.tostring(activeTrade), strategy.short,
+                              qty=entry1_percent, comment="Entry #1 SHORT")
+                entry1_filled := true
+
+    // === Entry #2 (лимитный ордер на уровне 0.5) ===
+    if not entry2_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry2
+                strategy.entry("Entry2_Long_" + str.tostring(activeTrade), strategy.long,
+                              qty=entry2_percent, comment="Entry #2 LONG")
+                entry2_filled := true
+        else
+            if high >= saved_entry2
+                strategy.entry("Entry2_Short_" + str.tostring(activeTrade), strategy.short,
+                              qty=entry2_percent, comment="Entry #2 SHORT")
+                entry2_filled := true
+
+    // === Entry #3 (лимитный ордер на уровне 0.618) ===
+    if not entry3_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry3
+                strategy.entry("Entry3_Long_" + str.tostring(activeTrade), strategy.long,
+                              qty=entry3_percent, comment="Entry #3 LONG")
+                entry3_filled := true
+        else
+            if high >= saved_entry3
+                strategy.entry("Entry3_Short_" + str.tostring(activeTrade), strategy.short,
+                              qty=entry3_percent, comment="Entry #3 SHORT")
+                entry3_filled := true
+
+    // === Stop Loss (проверка на всех входах) ===
+    if entry1_filled
+        if saved_isLong
+            if low <= saved_stop
+                strategy.close_all(comment="STOP LOSS")
+                activeTrade := 0  // Завершаем сделку
+        else
+            if high >= saved_stop
+                strategy.close_all(comment="STOP LOSS")
+                activeTrade := 0  // Завершаем сделку
+
+    // === Take Profit 1 (закрыть 30%) ===
+    if not tp1_hit and entry1_filled
+        if saved_isLong
+            if high >= saved_tp1
+                strategy.close("Entry1_Long_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                if entry2_filled
+                    strategy.close("Entry2_Long_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                if entry3_filled
+                    strategy.close("Entry3_Long_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                tp1_hit := true
+        else
+            if low <= saved_tp1
+                strategy.close("Entry1_Short_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                if entry2_filled
+                    strategy.close("Entry2_Short_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                if entry3_filled
+                    strategy.close("Entry3_Short_" + str.tostring(activeTrade), qty_percent=tp1_close_percent, comment="TP1")
+                tp1_hit := true
+
+    // === Take Profit 2 (закрыть 30%) ===
+    if not tp2_hit and tp1_hit
+        if saved_isLong
+            if high >= saved_tp2
+                strategy.close("Entry1_Long_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP2")
+                if entry2_filled
+                    strategy.close("Entry2_Long_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP2")
+                if entry3_filled
+                    strategy.close("Entry3_Long_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP2")
+                tp2_hit := true
+        else
+            if low <= saved_tp2
+                strategy.close("Entry1_Short_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP2")
+                if entry2_filled
+                    strategy.close("Entry2_Short_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP2")
+                if entry3_filled
+                    strategy.close("Entry3_Short_" + str.tostring(activeTrade), qty_percent=tp2_close_percent, comment="TP3")
+                tp2_hit := true
+
+    // === Take Profit 3 (закрыть 40% - все остальное) ===
+    if not tp3_hit and tp2_hit
+        if saved_isLong
+            if high >= saved_tp3
+                strategy.close_all(comment="TP3 - ALL TARGETS HIT")
+                tp3_hit := true
+                activeTrade := 0  // Завершаем сделку успешно
+        else
+            if low <= saved_tp3
+                strategy.close_all(comment="TP3 - ALL TARGETS HIT")
+                tp3_hit := true
+                activeTrade := 0  // Завершаем сделку успешно
+
+// ============================================================================
+// ИНФОРМАЦИОННАЯ ТАБЛИЦА / INFO TABLE
+// ============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 8, border_width=1)
+
+if barstate.islast
+    // Заголовок
+    table.cell(infoTable, 0, 0, "Параметр", bgcolor=color.new(color.blue, 70), text_color=color.white)
+    table.cell(infoTable, 1, 0, "Значение", bgcolor=color.new(color.blue, 70), text_color=color.white)
+
+    // Информация
+    table.cell(infoTable, 0, 1, "Активная сделка", text_color=color.white)
+    table.cell(infoTable, 1, 1, activeTrade > 0 ? "Trade #" + str.tostring(activeTrade) : "Нет",
+              bgcolor=activeTrade > 0 ? color.new(color.green, 70) : color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 2, "Entry #1 заполнен", text_color=color.white)
+    table.cell(infoTable, 1, 2, entry1_filled ? "✓" : "✗",
+              bgcolor=entry1_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 3, "Entry #2 заполнен", text_color=color.white)
+    table.cell(infoTable, 1, 3, entry2_filled ? "✓" : "✗",
+              bgcolor=entry2_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 4, "Entry #3 заполнен", text_color=color.white)
+    table.cell(infoTable, 1, 4, entry3_filled ? "✓" : "✗",
+              bgcolor=entry3_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 5, "TP1 достигнут", text_color=color.white)
+    table.cell(infoTable, 1, 5, tp1_hit ? "✓" : "✗",
+              bgcolor=tp1_hit ? color.new(color.yellow, 70) : color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 6, "TP2 достигнут", text_color=color.white)
+    table.cell(infoTable, 1, 6, tp2_hit ? "✓" : "✗",
+              bgcolor=tp2_hit ? color.new(color.orange, 70) : color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 7, "TP3 достигнут", text_color=color.white)
+    table.cell(infoTable, 1, 7, tp3_hit ? "✓" : "✗",
+              bgcolor=tp3_hit ? color.new(color.lime, 70) : color.new(color.gray, 70), text_color=color.white)
+
+// ============================================================================
+// ЭКСПОРТ ЖУРНАЛА / JOURNAL EXPORT
+// ============================================================================
+// Журнал сделок доступен в:
+// 1. Strategy Tester -> List of Trades (экспорт в CSV)
+// 2. Strategy Tester -> Performance Summary (детальная статистика)
+// 3. Strategy Tester -> Overview (общая информация)
+//
+// Для экспорта:
+// 1. Откройте Strategy Tester внизу экрана
+// 2. Перейдите на вкладку "List of Trades"
+// 3. Нажмите на иконку "Export" (экспорт в CSV)
+// ============================================================================
