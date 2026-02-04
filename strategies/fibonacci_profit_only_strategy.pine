@@ -1,0 +1,515 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TRADERAGENT
+
+//@version=6
+strategy("Fibonacci Profit-Only Strategy", shorttitle="Fib Profit", overlay=true,
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+         commission_type=strategy.commission.percent, commission_value=0.1,
+         max_bars_back=5000, calc_on_every_tick=false, calc_on_order_fills=false)
+
+// ============================================================================
+// ОПИСАНИЕ / DESCRIPTION
+// ============================================================================
+// Стратегия анализирует ВСЕ свечи в выбранном временном диапазоне
+// и записывает в журнал ТОЛЬКО прибыльные сделки
+//
+// Strategy analyzes ALL candles in selected time range
+// and records ONLY profitable trades in journal
+//
+// Как использовать / How to use:
+// 1. Откройте график нужной пары (например, ETHUSDT 1H)
+// 2. Выберите диапазон времени на графике (например, 1 месяц)
+// 3. Стратегия рассчитает прибыль/убыток по каждой свече
+// 4. В журнал попадут ТОЛЬКО свечи с профитом
+// 5. Экспортируйте журнал: Strategy Tester → List of Trades → Export CSV
+//
+// 1. Open chart for desired pair (e.g., ETHUSDT 1H)
+// 2. Select time range on chart (e.g., 1 month)
+// 3. Strategy calculates profit/loss for each candle
+// 4. Journal includes ONLY profitable candles
+// 5. Export journal: Strategy Tester → List of Trades → Export CSV
+// ============================================================================
+
+// ============================================================================
+// НАСТРОЙКИ / SETTINGS
+// ============================================================================
+
+// === 📐 Fibonacci Settings / Настройки Фибоначчи ===
+entry1_percent = input.float(1.0, "Entry #1 Size (% of equity)", minval=0.1, step=0.1, group="📐 Position Size")
+entry2_percent = input.float(1.0, "Entry #2 Size (% of equity)", minval=0.1, step=0.1, group="📐 Position Size")
+entry3_percent = input.float(1.0, "Entry #3 Size (% of equity)", minval=0.1, step=0.1, group="📐 Position Size")
+
+// === 💰 Position Exit Settings / Настройки выхода ===
+tp1_close_percent = input.float(30.0, "TP1 Close %", minval=1, maxval=100, group="💰 Exit Settings")
+tp2_close_percent = input.float(30.0, "TP2 Close %", minval=1, maxval=100, group="💰 Exit Settings")
+tp3_close_percent = input.float(40.0, "TP3 Close %", minval=1, maxval=100, group="💰 Exit Settings")
+
+// === 🎯 Profit Filter Settings / Настройки фильтра прибыли ===
+minProfitPercent = input.float(0.1, "Minimum Profit % to Record", minval=0.0, step=0.1,
+                               tooltip="Минимальная прибыль в % для записи в журнал. 0 = все прибыльные.",
+                               group="🎯 Profit Filter")
+
+// === 📅 Candle Filter Settings / Настройки фильтра свечей ===
+minCandleSize = input.float(0.0, "Min Candle Size (%)", minval=0.0, step=0.1,
+                           tooltip="Минимальный размер свечи в %. 0 = без фильтра.",
+                           group="📅 Candle Filter")
+
+maxCandleSize = input.float(100.0, "Max Candle Size (%)", minval=0.1, step=0.1,
+                            tooltip="Максимальный размер свечи в %.",
+                            group="📅 Candle Filter")
+
+analyzeDirection = input.string("ANY", "Analyze Candles",
+                                options=["ANY", "GREEN", "RED"],
+                                tooltip="ANY = все свечи, GREEN = только зеленые, RED = только красные",
+                                group="📅 Candle Filter")
+
+// === 🎨 Display Settings / Настройки отображения ===
+showProfitableOnly = input.bool(true, "Show Only Profitable Trades",
+                                tooltip="Показывать маркеры только для прибыльных свечей",
+                                group="🎨 Display")
+showMarkers = input.bool(true, "Show Candle Markers", group="🎨 Display")
+showLevels = input.bool(false, "Show Fibonacci Levels",
+                       tooltip="Внимание: может замедлить график при большом количестве свечей",
+                       group="🎨 Display")
+
+// ============================================================================
+// ФУНКЦИИ / FUNCTIONS
+// ============================================================================
+
+// Функция расчета уровней Фибоначчи
+calcFibLevels(candleHigh, candleLow, candleClose, candleOpen) =>
+    isGreen = candleClose > candleOpen
+    candleRange = candleHigh - candleLow
+
+    var float fib_entry1 = na
+    var float fib_entry2 = na
+    var float fib_entry3 = na
+    var float fib_stop = na
+    var float fib_tp1 = na
+    var float fib_tp2 = na
+    var float fib_tp3 = na
+
+    if isGreen
+        // LONG (зеленая свеча)
+        fib_entry1 := candleHigh                              // 0.0
+        fib_entry2 := candleLow + candleRange * 0.500         // 0.5
+        fib_entry3 := candleLow + candleRange * 0.382         // 0.618
+        fib_stop := candleLow + candleRange * 0.180           // 0.820
+        fib_tp1 := candleHigh + candleRange * 0.618           // -0.618
+        fib_tp2 := candleHigh + candleRange * 1.618           // -1.618
+        fib_tp3 := candleHigh + candleRange * 2.618           // -2.618
+    else
+        // SHORT (красная свеча)
+        fib_entry1 := candleLow                               // 0.0
+        fib_entry2 := candleHigh - candleRange * 0.500        // 0.5
+        fib_entry3 := candleHigh - candleRange * 0.382        // 0.618
+        fib_stop := candleHigh - candleRange * 0.180          // 0.820
+        fib_tp1 := candleLow - candleRange * 0.618            // -0.618
+        fib_tp2 := candleLow - candleRange * 1.618            // -1.618
+        fib_tp3 := candleLow - candleRange * 2.618            // -2.618
+
+    [isGreen, fib_entry1, fib_entry2, fib_entry3, fib_stop, fib_tp1, fib_tp2, fib_tp3]
+
+// Функция симуляции сделки для проверки прибыльности
+// Возвращает: [isProfitable, profitPercent, tp1Hit, tp2Hit, tp3Hit, stopHit]
+simulateTrade(isLong, entry1, entry2, entry3, stopLevel, tp1, tp2, tp3, startBar) =>
+    var bool tp1Hit = false
+    var bool tp2Hit = false
+    var bool tp3Hit = false
+    var bool stopHit = false
+    var float totalProfit = 0.0
+
+    // Сбрасываем флаги
+    tp1Hit := false
+    tp2Hit := false
+    tp3Hit := false
+    stopHit := false
+    totalProfit := 0.0
+
+    // Проверяем следующие свечи после entry свечи
+    lookAhead = 0
+    maxLookAhead = 500  // Проверяем до 500 свечей вперед
+
+    // Простая симуляция: проверяем достижение уровней
+    for i = 1 to maxLookAhead
+        if startBar + i > bar_index
+            break
+
+        futureHigh = high[bar_index - (startBar + i)]
+        futureLow = low[bar_index - (startBar + i)]
+
+        if na(futureHigh) or na(futureLow)
+            break
+
+        // Проверка Stop Loss
+        if not stopHit
+            if isLong
+                if futureLow <= stopLevel
+                    stopHit := true
+                    break
+            else
+                if futureHigh >= stopLevel
+                    stopHit := true
+                    break
+
+        // Проверка TP1
+        if not tp1Hit
+            if isLong
+                if futureHigh >= tp1
+                    tp1Hit := true
+            else
+                if futureLow <= tp1
+                    tp1Hit := true
+
+        // Проверка TP2
+        if not tp2Hit and tp1Hit
+            if isLong
+                if futureHigh >= tp2
+                    tp2Hit := true
+            else
+                if futureLow <= tp2
+                    tp2Hit := true
+
+        // Проверка TP3
+        if not tp3Hit and tp2Hit
+            if isLong
+                if futureHigh >= tp3
+                    tp3Hit := true
+                    break  // Все цели достигнуты
+            else
+                if futureLow <= tp3
+                    tp3Hit := true
+                    break  // Все цели достигнуты
+
+    // Расчет общей прибыли
+    if not stopHit
+        // Расчет прибыли от каждого уровня
+        if tp1Hit
+            if isLong
+                totalProfit += ((tp1 - entry1) / entry1) * tp1_close_percent
+            else
+                totalProfit += ((entry1 - tp1) / entry1) * tp1_close_percent
+
+        if tp2Hit
+            if isLong
+                totalProfit += ((tp2 - entry1) / entry1) * tp2_close_percent
+            else
+                totalProfit += ((entry1 - tp2) / entry1) * tp2_close_percent
+
+        if tp3Hit
+            if isLong
+                totalProfit += ((tp3 - entry1) / entry1) * tp3_close_percent
+            else
+                totalProfit += ((entry1 - tp3) / entry1) * tp3_close_percent
+
+    isProfitable = not stopHit and totalProfit > minProfitPercent
+
+    [isProfitable, totalProfit, tp1Hit, tp2Hit, tp3Hit, stopHit]
+
+// ============================================================================
+// ПЕРЕМЕННЫЕ СОСТОЯНИЯ / STATE VARIABLES
+// ============================================================================
+
+var int totalCandlesAnalyzed = 0
+var int profitableCandlesFound = 0
+var bool inTrade = false
+var int currentTradeBar = na
+
+var float saved_entry1 = na
+var float saved_entry2 = na
+var float saved_entry3 = na
+var float saved_stop = na
+var float saved_tp1 = na
+var float saved_tp2 = na
+var float saved_tp3 = na
+var bool saved_isLong = na
+var float saved_profit = na
+
+var bool entry1_filled = false
+var bool entry2_filled = false
+var bool entry3_filled = false
+var bool tp1_hit = false
+var bool tp2_hit = false
+var bool tp3_hit = false
+
+// ============================================================================
+// АНАЛИЗ СВЕЧЕЙ И СИМУЛЯЦИЯ / CANDLE ANALYSIS AND SIMULATION
+// ============================================================================
+
+// Проверяем каждую свечу (только если не в активной сделке)
+if not inTrade
+    // Проверка фильтра направления
+    isGreen = close > open
+    directionMatch = analyzeDirection == "ANY" or
+                    (analyzeDirection == "GREEN" and isGreen) or
+                    (analyzeDirection == "RED" and not isGreen)
+
+    // Проверка размера свечи
+    candleRange = high - low
+    candleSizePercent = (candleRange / low) * 100
+    sizeMatch = candleSizePercent >= minCandleSize and candleSizePercent <= maxCandleSize
+
+    // Если свеча подходит под фильтры
+    if directionMatch and sizeMatch and not na(high) and not na(low)
+        totalCandlesAnalyzed := totalCandlesAnalyzed + 1
+
+        // Рассчитываем уровни Фибоначчи
+        [isLong, entry1, entry2, entry3, stopLevel, tp1, tp2, tp3] = calcFibLevels(high, low, close, open)
+
+        // Симулируем сделку для проверки прибыльности
+        [isProfitable, profitPercent, tp1Reached, tp2Reached, tp3Reached, stopReached] =
+            simulateTrade(isLong, entry1, entry2, entry3, stopLevel, tp1, tp2, tp3, bar_index)
+
+        // Если сделка прибыльная - выполняем её реально
+        if isProfitable
+            profitableCandlesFound := profitableCandlesFound + 1
+
+            // Сохраняем данные для текущей сделки
+            saved_entry1 := entry1
+            saved_entry2 := entry2
+            saved_entry3 := entry3
+            saved_stop := stopLevel
+            saved_tp1 := tp1
+            saved_tp2 := tp2
+            saved_tp3 := tp3
+            saved_isLong := isLong
+            saved_profit := profitPercent
+            currentTradeBar := bar_index
+
+            // Сбрасываем флаги
+            entry1_filled := false
+            entry2_filled := false
+            entry3_filled := false
+            tp1_hit := false
+            tp2_hit := false
+            tp3_hit := false
+            inTrade := true
+
+            // Визуализация (опционально)
+            if showMarkers
+                markerColor = isLong ? color.new(color.green, 30) : color.new(color.red, 30)
+                candleInfo = "💰 PROFIT: " + str.tostring(profitPercent, "#.##") + "%\n" +
+                            "Trade #" + str.tostring(profitableCandlesFound) + " | " +
+                            (isLong ? "LONG ↗" : "SHORT ↘") + "\n" +
+                            "━━━━━━━━━━━━━━━━\n" +
+                            "📊 OHLC:\n" +
+                            "O: " + str.tostring(open, "#.##") + "\n" +
+                            "H: " + str.tostring(high, "#.##") + "\n" +
+                            "L: " + str.tostring(low, "#.##") + "\n" +
+                            "C: " + str.tostring(close, "#.##") + "\n" +
+                            "━━━━━━━━━━━━━━━━\n" +
+                            "📈 Entries:\n" +
+                            "E1: " + str.tostring(entry1, "#.##") + "\n" +
+                            "E2: " + str.tostring(entry2, "#.##") + "\n" +
+                            "E3: " + str.tostring(entry3, "#.##") + "\n" +
+                            "━━━━━━━━━━━━━━━━\n" +
+                            "🎯 Targets:\n" +
+                            "TP1: " + str.tostring(tp1, "#.##") + (tp1Reached ? " ✓" : "") + "\n" +
+                            "TP2: " + str.tostring(tp2, "#.##") + (tp2Reached ? " ✓" : "") + "\n" +
+                            "TP3: " + str.tostring(tp3, "#.##") + (tp3Reached ? " ✓" : "") + "\n" +
+                            "SL: " + str.tostring(stopLevel, "#.##")
+
+                label.new(bar_index, high, candleInfo,
+                         style=label.style_label_down, color=markerColor, textcolor=color.white,
+                         size=size.normal, textalign=text.align_left)
+
+            if showLevels
+                // Рисуем уровни для прибыльных свечей
+                line.new(bar_index, entry1, bar_index + 50, entry1, color=color.new(color.green, 50), width=1, style=line.style_dashed)
+                line.new(bar_index, stopLevel, bar_index + 50, stopLevel, color=color.new(color.red, 50), width=2)
+                line.new(bar_index, tp1, bar_index + 50, tp1, color=color.new(color.yellow, 50), width=1)
+                line.new(bar_index, tp2, bar_index + 50, tp2, color=color.new(color.orange, 50), width=1)
+                line.new(bar_index, tp3, bar_index + 50, tp3, color=color.new(color.lime, 50), width=2)
+
+// ============================================================================
+// ВЫПОЛНЕНИЕ ОРДЕРОВ ДЛЯ ПРИБЫЛЬНЫХ СДЕЛОК / ORDER EXECUTION FOR PROFITABLE TRADES
+// ============================================================================
+
+if inTrade and not na(saved_entry1)
+
+    tradeID = str.tostring(profitableCandlesFound)
+    direction = saved_isLong ? "LONG" : "SHORT"
+
+    // Формируем детальную информацию о свече для комментария
+    candleData = "O:" + str.tostring(open[bar_index - currentTradeBar], "#.##") +
+                " H:" + str.tostring(high[bar_index - currentTradeBar], "#.##") +
+                " L:" + str.tostring(low[bar_index - currentTradeBar], "#.##") +
+                " C:" + str.tostring(close[bar_index - currentTradeBar], "#.##")
+
+    profitInfo = "Profit:" + str.tostring(saved_profit, "#.##") + "%"
+
+    fibLevels = "E1:" + str.tostring(saved_entry1, "#.##") +
+               " E2:" + str.tostring(saved_entry2, "#.##") +
+               " E3:" + str.tostring(saved_entry3, "#.##") +
+               " SL:" + str.tostring(saved_stop, "#.##") +
+               " TP1:" + str.tostring(saved_tp1, "#.##") +
+               " TP2:" + str.tostring(saved_tp2, "#.##") +
+               " TP3:" + str.tostring(saved_tp3, "#.##")
+
+    // === Entry #1 (рыночный ордер) ===
+    if not entry1_filled
+        if saved_isLong
+            if high >= saved_entry1
+                entryComment = "T#" + tradeID + " " + direction + " E1 | " + profitInfo + " | " + candleData + " | " + fibLevels
+                strategy.entry("E1_L_" + tradeID, strategy.long, qty=entry1_percent, comment=entryComment)
+                entry1_filled := true
+        else
+            if low <= saved_entry1
+                entryComment = "T#" + tradeID + " " + direction + " E1 | " + profitInfo + " | " + candleData + " | " + fibLevels
+                strategy.entry("E1_S_" + tradeID, strategy.short, qty=entry1_percent, comment=entryComment)
+                entry1_filled := true
+
+    // === Entry #2 (лимитный ордер) ===
+    if not entry2_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry2
+                strategy.entry("E2_L_" + tradeID, strategy.long, qty=entry2_percent,
+                              comment="T#" + tradeID + " " + direction + " E2")
+                entry2_filled := true
+        else
+            if high >= saved_entry2
+                strategy.entry("E2_S_" + tradeID, strategy.short, qty=entry2_percent,
+                              comment="T#" + tradeID + " " + direction + " E2")
+                entry2_filled := true
+
+    // === Entry #3 (лимитный ордер) ===
+    if not entry3_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry3
+                strategy.entry("E3_L_" + tradeID, strategy.long, qty=entry3_percent,
+                              comment="T#" + tradeID + " " + direction + " E3")
+                entry3_filled := true
+        else
+            if high >= saved_entry3
+                strategy.entry("E3_S_" + tradeID, strategy.short, qty=entry3_percent,
+                              comment="T#" + tradeID + " " + direction + " E3")
+                entry3_filled := true
+
+    // === Stop Loss ===
+    if entry1_filled
+        if saved_isLong
+            if low <= saved_stop
+                strategy.close_all(comment="T#" + tradeID + " STOP")
+                inTrade := false
+        else
+            if high >= saved_stop
+                strategy.close_all(comment="T#" + tradeID + " STOP")
+                inTrade := false
+
+    // === Take Profit 1 ===
+    if not tp1_hit and entry1_filled
+        if saved_isLong
+            if high >= saved_tp1
+                strategy.close("E1_L_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                if entry2_filled
+                    strategy.close("E2_L_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                if entry3_filled
+                    strategy.close("E3_L_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                tp1_hit := true
+        else
+            if low <= saved_tp1
+                strategy.close("E1_S_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                if entry2_filled
+                    strategy.close("E2_S_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                if entry3_filled
+                    strategy.close("E3_S_" + tradeID, qty_percent=tp1_close_percent, comment="T#" + tradeID + " TP1")
+                tp1_hit := true
+
+    // === Take Profit 2 ===
+    if not tp2_hit and tp1_hit
+        if saved_isLong
+            if high >= saved_tp2
+                strategy.close("E1_L_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                if entry2_filled
+                    strategy.close("E2_L_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                if entry3_filled
+                    strategy.close("E3_L_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                tp2_hit := true
+        else
+            if low <= saved_tp2
+                strategy.close("E1_S_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                if entry2_filled
+                    strategy.close("E2_S_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                if entry3_filled
+                    strategy.close("E3_S_" + tradeID, qty_percent=tp2_close_percent, comment="T#" + tradeID + " TP2")
+                tp2_hit := true
+
+    // === Take Profit 3 ===
+    if not tp3_hit and tp2_hit
+        if saved_isLong
+            if high >= saved_tp3
+                strategy.close_all(comment="T#" + tradeID + " TP3 COMPLETE " + profitInfo)
+                tp3_hit := true
+                inTrade := false
+        else
+            if low <= saved_tp3
+                strategy.close_all(comment="T#" + tradeID + " TP3 COMPLETE " + profitInfo)
+                tp3_hit := true
+                inTrade := false
+
+// ============================================================================
+// ИНФОРМАЦИОННАЯ ТАБЛИЦА / INFO TABLE
+// ============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 8, border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "📊 Статистика", bgcolor=color.new(color.blue, 50), text_color=color.white)
+    table.cell(infoTable, 1, 0, "Значение", bgcolor=color.new(color.blue, 50), text_color=color.white)
+
+    table.cell(infoTable, 0, 1, "Всего свечей проверено", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(totalCandlesAnalyzed),
+              bgcolor=color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 2, "💰 Прибыльных найдено", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(profitableCandlesFound),
+              bgcolor=color.new(color.green, 50), text_color=color.white)
+
+    winRate = totalCandlesAnalyzed > 0 ? (profitableCandlesFound / totalCandlesAnalyzed) * 100 : 0
+    table.cell(infoTable, 0, 3, "% Прибыльных", text_color=color.white)
+    table.cell(infoTable, 1, 3, str.tostring(winRate, "#.#") + "%",
+              bgcolor=winRate >= 50 ? color.new(color.green, 50) : color.new(color.orange, 50),
+              text_color=color.white)
+
+    table.cell(infoTable, 0, 4, "Активная сделка", text_color=color.white)
+    table.cell(infoTable, 1, 4, inTrade ? "T#" + str.tostring(profitableCandlesFound) : "Нет",
+              bgcolor=inTrade ? color.new(color.green, 70) : color.new(color.gray, 70),
+              text_color=color.white)
+
+    table.cell(infoTable, 0, 5, "Текущий Equity", text_color=color.white)
+    table.cell(infoTable, 1, 5, str.tostring(strategy.equity, "#.##"),
+              bgcolor=strategy.equity >= strategy.initial_capital ?
+                     color.new(color.green, 70) : color.new(color.red, 70),
+              text_color=color.white)
+
+    netProfitPercent = ((strategy.equity - strategy.initial_capital) / strategy.initial_capital) * 100
+    table.cell(infoTable, 0, 6, "Net Profit %", text_color=color.white)
+    table.cell(infoTable, 1, 6, str.tostring(netProfitPercent, "#.##") + "%",
+              bgcolor=netProfitPercent >= 0 ? color.new(color.green, 70) : color.new(color.red, 70),
+              text_color=color.white)
+
+    table.cell(infoTable, 0, 7, "📤 Экспорт", text_color=color.white)
+    table.cell(infoTable, 1, 7, "Strategy Tester → CSV",
+              bgcolor=color.new(color.purple, 70), text_color=color.white)
+
+// ============================================================================
+// ЭКСПОРТ ЖУРНАЛА / JOURNAL EXPORT
+// ============================================================================
+// В журнал попадают ТОЛЬКО ПРИБЫЛЬНЫЕ сделки!
+// Only PROFITABLE trades are included in the journal!
+//
+// Как экспортировать / How to export:
+// 1. Strategy Tester → List of Trades
+// 2. Export to CSV
+//
+// Формат комментариев / Comment format:
+// T#123 LONG E1 | Profit:2.5% | O:93000 H:93500 L:93000 C:93450 | E1:93500 E2:93250 E3:93191 SL:93090 TP1:93809 TP2:94309 TP3:94809
+//
+// Где / Where:
+// - T#123 = Номер сделки / Trade number
+// - LONG/SHORT = Направление / Direction
+// - E1/E2/E3/TP1/TP2/TP3 = Тип ордера / Order type
+// - Profit:2.5% = Ожидаемая прибыль / Expected profit
+// - OHLC = Данные свечи / Candle data
+// - Fibonacci levels = Все уровни / All levels
+// ============================================================================
