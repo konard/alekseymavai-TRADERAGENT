@@ -1,0 +1,436 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TRADERAGENT
+
+//@version=6
+strategy("Fibonacci Auto Strategy (Multi-Candle)", shorttitle="Fib Auto", overlay=true,
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity,
+         commission_type=strategy.commission.percent, commission_value=0.1,
+         max_bars_back=5000)
+
+// ============================================================================
+// ОПИСАНИЕ / DESCRIPTION
+// ============================================================================
+// Расширенная стратегия для автоматической торговли по уровням Фибоначчи
+// Enhanced strategy for automatic trading using Fibonacci levels
+//
+// Особенности / Features:
+// 1. Автоматический отбор свечей по условиям (до 1000+ свечей)
+// 2. Гибкие фильтры: направление, размер свечи, период
+// 3. Последовательная обработка сделок (одна за другой)
+// 4. Расширенный журнал с информацией о свече (OHLC, уровни)
+// 5. Полный экспорт в CSV из TradingView
+//
+// 1. Automatic candle selection based on conditions (up to 1000+ candles)
+// 2. Flexible filters: direction, candle size, period
+// 3. Sequential trade processing (one after another)
+// 4. Extended journal with candle info (OHLC, levels)
+// 5. Full CSV export from TradingView
+// ============================================================================
+
+// ============================================================================
+// НАСТРОЙКИ / SETTINGS
+// ============================================================================
+
+// === 🎯 Selection Mode / Режим выбора свечей ===
+selectionMode = input.string("AUTO", "Selection Mode",
+                             options=["AUTO", "MANUAL"],
+                             tooltip="AUTO: Автоматический отбор по условиям\nMANUAL: Ручной выбор до 10 свечей",
+                             group="🎯 Selection Mode")
+
+// === 📅 AUTO Mode Settings / Настройки авто-режима ===
+candleDirection = input.string("ANY", "Candle Direction",
+                               options=["ANY", "GREEN", "RED"],
+                               tooltip="Направление свечей для анализа",
+                               group="📅 AUTO Mode")
+
+minCandleSize = input.float(0.0, "Min Candle Size (%)", minval=0.0, step=0.1,
+                           tooltip="Минимальный размер свечи в % от цены. 0 = без фильтра",
+                           group="📅 AUTO Mode")
+
+maxCandleSize = input.float(100.0, "Max Candle Size (%)", minval=0.1, step=0.1,
+                            tooltip="Максимальный размер свечи в % от цены",
+                            group="📅 AUTO Mode")
+
+candleInterval = input.int(1, "Process Every N Candle", minval=1, maxval=100,
+                          tooltip="Обрабатывать каждую N-ю свечу (1 = каждую, 10 = каждую 10-ю)",
+                          group="📅 AUTO Mode")
+
+lookbackBars = input.int(100, "Lookback Period (bars)", minval=10, maxval=5000,
+                        tooltip="Сколько свечей назад анализировать",
+                        group="📅 AUTO Mode")
+
+// === 📅 MANUAL Mode Settings / Настройки ручного режима ===
+enableManual1 = input.bool(false, "Enable Candle 1", group="📅 MANUAL: Candle 1")
+manual1_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 1 Time", group="📅 MANUAL: Candle 1")
+
+enableManual2 = input.bool(false, "Enable Candle 2", group="📅 MANUAL: Candle 2")
+manual2_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 2 Time", group="📅 MANUAL: Candle 2")
+
+enableManual3 = input.bool(false, "Enable Candle 3", group="📅 MANUAL: Candle 3")
+manual3_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 3 Time", group="📅 MANUAL: Candle 3")
+
+enableManual4 = input.bool(false, "Enable Candle 4", group="📅 MANUAL: Candle 4")
+manual4_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 4 Time", group="📅 MANUAL: Candle 4")
+
+enableManual5 = input.bool(false, "Enable Candle 5", group="📅 MANUAL: Candle 5")
+manual5_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 5 Time", group="📅 MANUAL: Candle 5")
+
+enableManual6 = input.bool(false, "Enable Candle 6", group="📅 MANUAL: Candle 6")
+manual6_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 6 Time", group="📅 MANUAL: Candle 6")
+
+enableManual7 = input.bool(false, "Enable Candle 7", group="📅 MANUAL: Candle 7")
+manual7_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 7 Time", group="📅 MANUAL: Candle 7")
+
+enableManual8 = input.bool(false, "Enable Candle 8", group="📅 MANUAL: Candle 8")
+manual8_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 8 Time", group="📅 MANUAL: Candle 8")
+
+enableManual9 = input.bool(false, "Enable Candle 9", group="📅 MANUAL: Candle 9")
+manual9_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 9 Time", group="📅 MANUAL: Candle 9")
+
+enableManual10 = input.bool(false, "Enable Candle 10", group="📅 MANUAL: Candle 10")
+manual10_timestamp = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Candle 10 Time", group="📅 MANUAL: Candle 10")
+
+// === 📐 Fibonacci Settings / Настройки Фибоначчи ===
+entry1_percent = input.float(1.0, "Entry #1 Size (% of equity)", minval=0.1, step=0.1, group="📐 Fibonacci")
+entry2_percent = input.float(1.0, "Entry #2 Size (% of equity)", minval=0.1, step=0.1, group="📐 Fibonacci")
+entry3_percent = input.float(1.0, "Entry #3 Size (% of equity)", minval=0.1, step=0.1, group="📐 Fibonacci")
+
+// === 💰 Position Exit Settings / Настройки выхода ===
+tp1_close_percent = input.float(30.0, "TP1 Close %", minval=1, maxval=100, group="💰 Exit")
+tp2_close_percent = input.float(30.0, "TP2 Close %", minval=1, maxval=100, group="💰 Exit")
+tp3_close_percent = input.float(40.0, "TP3 Close %", minval=1, maxval=100, group="💰 Exit")
+
+// === 🎨 Display Settings / Настройки отображения ===
+showLevels = input.bool(true, "Show Levels on Chart", group="🎨 Display")
+showLabels = input.bool(true, "Show Labels", group="🎨 Display")
+showMarkers = input.bool(true, "Show Candle Markers", group="🎨 Display",
+                        tooltip="Отмечать выбранные свечи маркерами")
+
+// ============================================================================
+// ФУНКЦИИ / FUNCTIONS
+// ============================================================================
+
+// Функция проверки соответствия свечи условиям
+candleMatchesFilter(candleHigh, candleLow, candleClose, candleOpen) =>
+    isGreen = candleClose > candleOpen
+    candleRange = candleHigh - candleLow
+    candleSizePercent = (candleRange / candleLow) * 100
+
+    // Проверка направления
+    directionMatch = candleDirection == "ANY" or
+                    (candleDirection == "GREEN" and isGreen) or
+                    (candleDirection == "RED" and not isGreen)
+
+    // Проверка размера
+    sizeMatch = candleSizePercent >= minCandleSize and candleSizePercent <= maxCandleSize
+
+    directionMatch and sizeMatch
+
+// Функция расчета уровней Фибоначчи
+calcFibLevels(candleHigh, candleLow, candleClose, candleOpen) =>
+    isGreen = candleClose > candleOpen
+    candleRange = candleHigh - candleLow
+
+    var float fib_entry1 = na
+    var float fib_entry2 = na
+    var float fib_entry3 = na
+    var float fib_stop = na
+    var float fib_tp1 = na
+    var float fib_tp2 = na
+    var float fib_tp3 = na
+
+    if isGreen
+        // LONG (зеленая свеча)
+        fib_entry1 := candleHigh                              // 0.0
+        fib_entry2 := candleLow + candleRange * 0.500         // 0.5
+        fib_entry3 := candleLow + candleRange * 0.382         // 0.618
+        fib_stop := candleLow + candleRange * 0.180           // 0.820
+        fib_tp1 := candleHigh + candleRange * 0.618           // -0.618
+        fib_tp2 := candleHigh + candleRange * 1.618           // -1.618
+        fib_tp3 := candleHigh + candleRange * 2.618           // -2.618
+    else
+        // SHORT (красная свеча)
+        fib_entry1 := candleLow                               // 0.0
+        fib_entry2 := candleHigh - candleRange * 0.500        // 0.5
+        fib_entry3 := candleHigh - candleRange * 0.382        // 0.618
+        fib_stop := candleHigh - candleRange * 0.180          // 0.820
+        fib_tp1 := candleLow - candleRange * 0.618            // -0.618
+        fib_tp2 := candleLow - candleRange * 1.618            // -1.618
+        fib_tp3 := candleLow - candleRange * 2.618            // -2.618
+
+    [isGreen, fib_entry1, fib_entry2, fib_entry3, fib_stop, fib_tp1, fib_tp2, fib_tp3]
+
+// ============================================================================
+// ПЕРЕМЕННЫЕ СОСТОЯНИЯ / STATE VARIABLES
+// ============================================================================
+
+var int tradCounter = 0              // Счетчик обработанных сделок
+var bool inTrade = false             // Активная сделка?
+var bool entry1_filled = false
+var bool entry2_filled = false
+var bool entry3_filled = false
+var bool tp1_hit = false
+var bool tp2_hit = false
+var bool tp3_hit = false
+
+var float saved_entry1 = na
+var float saved_entry2 = na
+var float saved_entry3 = na
+var float saved_stop = na
+var float saved_tp1 = na
+var float saved_tp2 = na
+var float saved_tp3 = na
+var bool saved_isLong = na
+var int saved_candleBar = na
+
+// Для AUTO режима
+var int candleCounter = 0             // Счетчик свечей для interval
+var int totalCandlesProcessed = 0     // Всего обработано свечей
+
+// ============================================================================
+// ЛОГИКА ВЫБОРА СВЕЧЕЙ / CANDLE SELECTION LOGIC
+// ============================================================================
+
+// Определяем, нужно ли начинать новую сделку на этой свече
+shouldStartTrade = false
+
+if selectionMode == "AUTO"
+    // AUTO режим: проверяем условия
+    if not inTrade and bar_index >= (bar_index[lookbackBars] > 0 ? bar_index - lookbackBars : 0)
+        candleCounter += 1
+        if candleCounter % candleInterval == 0
+            if candleMatchesFilter(high, low, close, open)
+                shouldStartTrade := true
+else
+    // MANUAL режим: проверяем timestamps
+    if not inTrade
+        if (enableManual1 and time == manual1_timestamp) or
+           (enableManual2 and time == manual2_timestamp) or
+           (enableManual3 and time == manual3_timestamp) or
+           (enableManual4 and time == manual4_timestamp) or
+           (enableManual5 and time == manual5_timestamp) or
+           (enableManual6 and time == manual6_timestamp) or
+           (enableManual7 and time == manual7_timestamp) or
+           (enableManual8 and time == manual8_timestamp) or
+           (enableManual9 and time == manual9_timestamp) or
+           (enableManual10 and time == manual10_timestamp)
+            shouldStartTrade := true
+
+// ============================================================================
+// НАЧАЛО НОВОЙ СДЕЛКИ / START NEW TRADE
+// ============================================================================
+
+if shouldStartTrade
+    tradCounter += 1
+    totalCandlesProcessed := totalCandlesProcessed + 1
+
+    [isLong, entry1, entry2, entry3, stop, tp1, tp2, tp3] = calcFibLevels(high, low, close, open)
+
+    // Сохраняем уровни
+    saved_entry1 := entry1
+    saved_entry2 := entry2
+    saved_entry3 := entry3
+    saved_stop := stop
+    saved_tp1 := tp1
+    saved_tp2 := tp2
+    saved_tp3 := tp3
+    saved_isLong := isLong
+    saved_candleBar := bar_index
+
+    // Сбрасываем флаги
+    entry1_filled := false
+    entry2_filled := false
+    entry3_filled := false
+    tp1_hit := false
+    tp2_hit := false
+    tp3_hit := false
+    inTrade := true
+
+    // Рисуем уровни
+    if showLevels
+        line.new(bar_index, entry1, bar_index + 20, entry1, color=color.green, width=2)
+        line.new(bar_index, entry2, bar_index + 20, entry2, color=color.blue, width=1)
+        line.new(bar_index, entry3, bar_index + 20, entry3, color=color.blue, width=1)
+        line.new(bar_index, stop, bar_index + 20, stop, color=color.red, width=2)
+        line.new(bar_index, tp1, bar_index + 20, tp1, color=color.yellow, width=2)
+        line.new(bar_index, tp2, bar_index + 20, tp2, color=color.orange, width=2)
+        line.new(bar_index, tp3, bar_index + 20, tp3, color=color.lime, width=2)
+
+    if showLabels
+        label.new(bar_index, entry1, "E1", style=label.style_label_left, color=color.green, textcolor=color.white, size=size.tiny)
+        label.new(bar_index, stop, "SL", style=label.style_label_left, color=color.red, textcolor=color.white, size=size.tiny)
+        label.new(bar_index, tp3, "TP3", style=label.style_label_left, color=color.lime, textcolor=color.black, size=size.tiny)
+
+    if showMarkers
+        markerColor = isLong ? color.new(color.green, 50) : color.new(color.red, 50)
+        markerText = "Trade #" + str.tostring(tradCounter) + "\nOHLC: " + str.tostring(open, "#.##") +
+                     "/" + str.tostring(high, "#.##") + "/" + str.tostring(low, "#.##") + "/" + str.tostring(close, "#.##")
+        label.new(bar_index, high, markerText,
+                 style=label.style_label_down, color=markerColor, textcolor=color.white, size=size.small)
+
+// ============================================================================
+// ЛОГИКА ВЫПОЛНЕНИЯ ОРДЕРОВ / ORDER EXECUTION LOGIC
+// ============================================================================
+
+if inTrade and not na(saved_entry1)
+
+    tradeID = str.tostring(tradCounter)
+
+    // === Entry #1 (рыночный ордер) ===
+    if not entry1_filled
+        if saved_isLong
+            if high >= saved_entry1
+                strategy.entry("E1_L_" + tradeID, strategy.long, qty=entry1_percent,
+                              comment="Trade #" + tradeID + " Entry1")
+                entry1_filled := true
+        else
+            if low <= saved_entry1
+                strategy.entry("E1_S_" + tradeID, strategy.short, qty=entry1_percent,
+                              comment="Trade #" + tradeID + " Entry1")
+                entry1_filled := true
+
+    // === Entry #2 (лимитный ордер) ===
+    if not entry2_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry2
+                strategy.entry("E2_L_" + tradeID, strategy.long, qty=entry2_percent,
+                              comment="Trade #" + tradeID + " Entry2")
+                entry2_filled := true
+        else
+            if high >= saved_entry2
+                strategy.entry("E2_S_" + tradeID, strategy.short, qty=entry2_percent,
+                              comment="Trade #" + tradeID + " Entry2")
+                entry2_filled := true
+
+    // === Entry #3 (лимитный ордер) ===
+    if not entry3_filled and entry1_filled
+        if saved_isLong
+            if low <= saved_entry3
+                strategy.entry("E3_L_" + tradeID, strategy.long, qty=entry3_percent,
+                              comment="Trade #" + tradeID + " Entry3")
+                entry3_filled := true
+        else
+            if high >= saved_entry3
+                strategy.entry("E3_S_" + tradeID, strategy.short, qty=entry3_percent,
+                              comment="Trade #" + tradeID + " Entry3")
+                entry3_filled := true
+
+    // === Stop Loss ===
+    if entry1_filled
+        if saved_isLong
+            if low <= saved_stop
+                strategy.close_all(comment="Trade #" + tradeID + " STOP LOSS")
+                inTrade := false
+        else
+            if high >= saved_stop
+                strategy.close_all(comment="Trade #" + tradeID + " STOP LOSS")
+                inTrade := false
+
+    // === Take Profit 1 ===
+    if not tp1_hit and entry1_filled
+        if saved_isLong
+            if high >= saved_tp1
+                strategy.close("E1_L_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                if entry2_filled
+                    strategy.close("E2_L_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                if entry3_filled
+                    strategy.close("E3_L_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                tp1_hit := true
+        else
+            if low <= saved_tp1
+                strategy.close("E1_S_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                if entry2_filled
+                    strategy.close("E2_S_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                if entry3_filled
+                    strategy.close("E3_S_" + tradeID, qty_percent=tp1_close_percent, comment="Trade #" + tradeID + " TP1")
+                tp1_hit := true
+
+    // === Take Profit 2 ===
+    if not tp2_hit and tp1_hit
+        if saved_isLong
+            if high >= saved_tp2
+                strategy.close("E1_L_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                if entry2_filled
+                    strategy.close("E2_L_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                if entry3_filled
+                    strategy.close("E3_L_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                tp2_hit := true
+        else
+            if low <= saved_tp2
+                strategy.close("E1_S_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                if entry2_filled
+                    strategy.close("E2_S_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                if entry3_filled
+                    strategy.close("E3_S_" + tradeID, qty_percent=tp2_close_percent, comment="Trade #" + tradeID + " TP2")
+                tp2_hit := true
+
+    // === Take Profit 3 ===
+    if not tp3_hit and tp2_hit
+        if saved_isLong
+            if high >= saved_tp3
+                strategy.close_all(comment="Trade #" + tradeID + " TP3 ALL COMPLETE")
+                tp3_hit := true
+                inTrade := false
+        else
+            if low <= saved_tp3
+                strategy.close_all(comment="Trade #" + tradeID + " TP3 ALL COMPLETE")
+                tp3_hit := true
+                inTrade := false
+
+// ============================================================================
+// ИНФОРМАЦИОННАЯ ТАБЛИЦА / INFO TABLE
+// ============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 10, border_width=1)
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Параметр", bgcolor=color.new(color.blue, 70), text_color=color.white)
+    table.cell(infoTable, 1, 0, "Значение", bgcolor=color.new(color.blue, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 1, "Режим", text_color=color.white)
+    table.cell(infoTable, 1, 1, selectionMode, bgcolor=color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 2, "Обработано свечей", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(totalCandlesProcessed), bgcolor=color.new(color.blue, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 3, "Всего сделок", text_color=color.white)
+    table.cell(infoTable, 1, 3, str.tostring(tradCounter), bgcolor=color.new(color.purple, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 4, "Активная сделка", text_color=color.white)
+    table.cell(infoTable, 1, 4, inTrade ? "Trade #" + str.tostring(tradCounter) : "Нет",
+              bgcolor=inTrade ? color.new(color.green, 70) : color.new(color.gray, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 5, "Entry #1", text_color=color.white)
+    table.cell(infoTable, 1, 5, entry1_filled ? "✓" : "✗",
+              bgcolor=entry1_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 6, "Entry #2", text_color=color.white)
+    table.cell(infoTable, 1, 6, entry2_filled ? "✓" : "✗",
+              bgcolor=entry2_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 7, "Entry #3", text_color=color.white)
+    table.cell(infoTable, 1, 7, entry3_filled ? "✓" : "✗",
+              bgcolor=entry3_filled ? color.new(color.green, 70) : color.new(color.red, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 8, "TP1/TP2/TP3", text_color=color.white)
+    tp_status = (tp1_hit ? "✓" : "✗") + "/" + (tp2_hit ? "✓" : "✗") + "/" + (tp3_hit ? "✓" : "✗")
+    table.cell(infoTable, 1, 8, tp_status, bgcolor=color.new(color.orange, 70), text_color=color.white)
+
+    table.cell(infoTable, 0, 9, "Текущий Equity", text_color=color.white)
+    table.cell(infoTable, 1, 9, str.tostring(strategy.equity, "#.##"),
+              bgcolor=strategy.equity >= strategy.initial_capital ? color.new(color.green, 70) : color.new(color.red, 70),
+              text_color=color.white)
+
+// ============================================================================
+// ЭКСПОРТ ЖУРНАЛА / JOURNAL EXPORT
+// ============================================================================
+// Журнал сделок с информацией о свечах доступен в:
+// 1. Strategy Tester -> List of Trades (полный список с комментариями)
+// 2. В комментариях к сделкам указан номер Trade и тип ордера
+// 3. Для получения OHLC свечи - см. маркеры на графике
+//
+// Для экспорта:
+// 1. Откройте Strategy Tester
+// 2. List of Trades -> Export to CSV
+// 3. CSV файл содержит все сделки с комментариями "Trade #N Entry1/TP1/etc"
+// ============================================================================
