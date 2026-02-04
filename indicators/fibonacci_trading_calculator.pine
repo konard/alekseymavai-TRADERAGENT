@@ -1,0 +1,406 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TRADERAGENT
+
+//@version=6
+indicator("Fibonacci Trading Calculator", shorttitle="Fib Calc", overlay=true)
+
+// ============================================================================
+// ОПИСАНИЕ / DESCRIPTION
+// ============================================================================
+// Калькулятор для расчета торговых уровней на основе Фибоначчи
+// Calculator for Fibonacci-based trading levels
+//
+// Использование / Usage:
+// 1. Выберите свечу (зеленую для LONG, красную для SHORT)
+// 2. Используйте стандартный инструмент "Коррекция по Фибоначчи"
+// 3. Индикатор отобразит таблицу с расчетами для журнала
+//
+// 1. Select a candle (green for LONG, red for SHORT)
+// 2. Use standard "Fibonacci Retracement" tool
+// 3. Indicator displays table with calculations for journal
+// ============================================================================
+
+// ============================================================================
+// НАСТРОЙКИ / SETTINGS
+// ============================================================================
+
+// === 📐 Fibonacci Settings / Настройки Фибоначчи ===
+lookbackBars = input.int(1, "Lookback Bars / Баров назад", minval=0, maxval=100,
+                         tooltip="Количество баров назад от текущей свечи для анализа", group="📐 Fibonacci Settings")
+depositPercent1 = input.float(1.0, "Entry #1 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+depositPercent2 = input.float(1.0, "Entry #2 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+depositPercent3 = input.float(1.0, "Entry #3 Size (% депозита)", minval=0.1, step=0.1, group="📐 Fibonacci Settings")
+
+// === 💰 Position Exit Settings / Настройки выхода ===
+tp1ClosePercent = input.float(30.0, "TP1 Close %", minval=1, maxval=100, group="💰 Position Exit")
+tp2ClosePercent = input.float(30.0, "TP2 Close %", minval=1, maxval=100, group="💰 Position Exit")
+tp3ClosePercent = input.float(40.0, "TP3 Close %", minval=1, maxval=100, group="💰 Position Exit")
+
+// === 🎨 Display Settings / Настройки отображения ===
+showTable = input.bool(true, "Show Calculation Table / Показать таблицу расчетов", group="🎨 Display")
+showLevelsOnChart = input.bool(true, "Show Levels on Chart / Показать уровни на графике", group="🎨 Display")
+tablePosition = input.string("top_right", "Table Position / Позиция таблицы",
+                             options=["top_left", "top_center", "top_right", "middle_left", "middle_center",
+                                     "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+                             group="🎨 Display")
+
+// ============================================================================
+// ОПРЕДЕЛЕНИЕ ВЫБРАННОЙ СВЕЧИ / SELECTED CANDLE DETECTION
+// ============================================================================
+
+// Получаем данные выбранной свечи (текущая минус lookback)
+selectedBarIndex = bar_index - lookbackBars
+selectedHigh = high[lookbackBars]
+selectedLow = low[lookbackBars]
+selectedOpen = open[lookbackBars]
+selectedClose = close[lookbackBars]
+
+// Определяем тип свечи
+isGreenCandle = selectedClose > selectedOpen
+isRedCandle = selectedClose < selectedOpen
+candleColor = isGreenCandle ? "🟢 Зеленая (LONG)" : "🔴 Красная (SHORT)"
+
+// ============================================================================
+// РАСЧЕТ УРОВНЕЙ ФИБОНАЧЧИ / FIBONACCI LEVELS CALCULATION
+// ============================================================================
+
+// Для зеленой свечи (LONG):
+// 1.000 = Low свечи (основание)
+// 0.000 = High свечи (вход #1)
+
+// Для красной свечи (SHORT):
+// 1.000 = High свечи (основание)
+// 0.000 = Low свечи (вход #1)
+
+// Базовые точки
+var float fibBase = na
+var float fibTop = na
+var float fibRange = na
+
+if isGreenCandle
+    fibBase := selectedLow      // 1.0 уровень
+    fibTop := selectedHigh      // 0.0 уровень
+    fibRange := fibTop - fibBase
+else  // Red candle
+    fibBase := selectedHigh     // 1.0 уровень
+    fibTop := selectedLow       // 0.0 уровень
+    fibRange := fibBase - fibTop
+
+// Расчет уровней для LONG (зеленая свеча)
+var float long_fib_1_0 = na     // Основание (Low)
+var float long_fib_0_820 = na   // Stop Loss
+var float long_fib_0_618 = na   // Entry #3
+var float long_fib_0_5 = na     // Entry #2
+var float long_fib_0_0 = na     // Entry #1 (High)
+var float long_fib_n0_618 = na  // TP1
+var float long_fib_n1_618 = na  // TP2
+var float long_fib_n2_618 = na  // TP3
+
+// Расчет уровней для SHORT (красная свеча)
+var float short_fib_1_0 = na    // Основание (High)
+var float short_fib_0_820 = na  // Stop Loss
+var float short_fib_0_618 = na  // Entry #3
+var float short_fib_0_5 = na    // Entry #2
+var float short_fib_0_0 = na    // Entry #1 (Low)
+var float short_fib_n0_618 = na // TP1
+var float short_fib_n1_618 = na // TP2
+var float short_fib_n2_618 = na // TP3
+
+if isGreenCandle
+    // Для LONG (зеленая свеча)
+    long_fib_1_0 := selectedLow                           // 1.0
+    long_fib_0_820 := selectedLow + fibRange * 0.180      // 0.820
+    long_fib_0_618 := selectedLow + fibRange * 0.382      // 0.618
+    long_fib_0_5 := selectedLow + fibRange * 0.500        // 0.5
+    long_fib_0_0 := selectedHigh                          // 0.0
+    long_fib_n0_618 := selectedHigh + fibRange * 0.618    // -0.618
+    long_fib_n1_618 := selectedHigh + fibRange * 1.618    // -1.618
+    long_fib_n2_618 := selectedHigh + fibRange * 2.618    // -2.618
+else
+    // Для SHORT (красная свеча)
+    short_fib_1_0 := selectedHigh                         // 1.0
+    short_fib_0_820 := selectedHigh - fibRange * 0.180    // 0.820
+    short_fib_0_618 := selectedHigh - fibRange * 0.382    // 0.618
+    short_fib_0_5 := selectedHigh - fibRange * 0.500      // 0.5
+    short_fib_0_0 := selectedLow                          // 0.0
+    short_fib_n0_618 := selectedLow - fibRange * 0.618    // -0.618
+    short_fib_n1_618 := selectedLow - fibRange * 1.618    // -1.618
+    short_fib_n2_618 := selectedLow - fibRange * 2.618    // -2.618
+
+// ============================================================================
+// ОТОБРАЖЕНИЕ УРОВНЕЙ НА ГРАФИКЕ / DISPLAY LEVELS ON CHART
+// ============================================================================
+
+if showLevelsOnChart and barstate.islast
+    var line line_1_0 = na
+    var line line_0_820 = na
+    var line line_0_618 = na
+    var line line_0_5 = na
+    var line line_0_0 = na
+    var line line_n0_618 = na
+    var line line_n1_618 = na
+    var line line_n2_618 = na
+
+    var label label_1_0 = na
+    var label label_0_820 = na
+    var label label_0_618 = na
+    var label label_0_5 = na
+    var label label_0_0 = na
+    var label label_n0_618 = na
+    var label label_n1_618 = na
+    var label label_n2_618 = na
+
+    // Удаляем старые линии и метки
+    if not na(line_1_0)
+        line.delete(line_1_0)
+        line.delete(line_0_820)
+        line.delete(line_0_618)
+        line.delete(line_0_5)
+        line.delete(line_0_0)
+        line.delete(line_n0_618)
+        line.delete(line_n1_618)
+        line.delete(line_n2_618)
+
+    if not na(label_1_0)
+        label.delete(label_1_0)
+        label.delete(label_0_820)
+        label.delete(label_0_618)
+        label.delete(label_0_5)
+        label.delete(label_0_0)
+        label.delete(label_n0_618)
+        label.delete(label_n1_618)
+        label.delete(label_n2_618)
+
+    if isGreenCandle
+        // Рисуем уровни для LONG
+        line_1_0 := line.new(selectedBarIndex, long_fib_1_0, bar_index + 10, long_fib_1_0,
+                            color=color.new(color.gray, 30), width=1, style=line.style_dotted)
+        line_0_820 := line.new(selectedBarIndex, long_fib_0_820, bar_index + 10, long_fib_0_820,
+                              color=color.new(color.red, 0), width=2)
+        line_0_618 := line.new(selectedBarIndex, long_fib_0_618, bar_index + 10, long_fib_0_618,
+                              color=color.new(color.blue, 50), width=1)
+        line_0_5 := line.new(selectedBarIndex, long_fib_0_5, bar_index + 10, long_fib_0_5,
+                            color=color.new(color.blue, 50), width=1)
+        line_0_0 := line.new(selectedBarIndex, long_fib_0_0, bar_index + 10, long_fib_0_0,
+                            color=color.new(color.green, 0), width=2)
+        line_n0_618 := line.new(selectedBarIndex, long_fib_n0_618, bar_index + 10, long_fib_n0_618,
+                               color=color.new(color.yellow, 0), width=2)
+        line_n1_618 := line.new(selectedBarIndex, long_fib_n1_618, bar_index + 10, long_fib_n1_618,
+                               color=color.new(color.orange, 0), width=2)
+        line_n2_618 := line.new(selectedBarIndex, long_fib_n2_618, bar_index + 10, long_fib_n2_618,
+                               color=color.new(color.lime, 0), width=2)
+
+        // Метки
+        label_1_0 := label.new(bar_index + 2, long_fib_1_0, "1.0 Основание",
+                              style=label.style_label_left, color=color.new(color.gray, 70),
+                              textcolor=color.white, size=size.tiny)
+        label_0_820 := label.new(bar_index + 2, long_fib_0_820, "0.820 STOP",
+                                style=label.style_label_left, color=color.new(color.red, 0),
+                                textcolor=color.white, size=size.small)
+        label_0_618 := label.new(bar_index + 2, long_fib_0_618, "0.618 Entry #3",
+                                style=label.style_label_left, color=color.new(color.blue, 50),
+                                textcolor=color.white, size=size.tiny)
+        label_0_5 := label.new(bar_index + 2, long_fib_0_5, "0.5 Entry #2",
+                              style=label.style_label_left, color=color.new(color.blue, 50),
+                              textcolor=color.white, size=size.tiny)
+        label_0_0 := label.new(bar_index + 2, long_fib_0_0, "0.0 Entry #1",
+                              style=label.style_label_left, color=color.new(color.green, 0),
+                              textcolor=color.white, size=size.small)
+        label_n0_618 := label.new(bar_index + 2, long_fib_n0_618, "-0.618 TP1",
+                                 style=label.style_label_left, color=color.new(color.yellow, 0),
+                                 textcolor=color.black, size=size.small)
+        label_n1_618 := label.new(bar_index + 2, long_fib_n1_618, "-1.618 TP2",
+                                 style=label.style_label_left, color=color.new(color.orange, 0),
+                                 textcolor=color.white, size=size.small)
+        label_n2_618 := label.new(bar_index + 2, long_fib_n2_618, "-2.618 TP3",
+                                 style=label.style_label_left, color=color.new(color.lime, 0),
+                                 textcolor=color.black, size=size.small)
+    else
+        // Рисуем уровни для SHORT
+        line_1_0 := line.new(selectedBarIndex, short_fib_1_0, bar_index + 10, short_fib_1_0,
+                            color=color.new(color.gray, 30), width=1, style=line.style_dotted)
+        line_0_820 := line.new(selectedBarIndex, short_fib_0_820, bar_index + 10, short_fib_0_820,
+                              color=color.new(color.red, 0), width=2)
+        line_0_618 := line.new(selectedBarIndex, short_fib_0_618, bar_index + 10, short_fib_0_618,
+                              color=color.new(color.blue, 50), width=1)
+        line_0_5 := line.new(selectedBarIndex, short_fib_0_5, bar_index + 10, short_fib_0_5,
+                            color=color.new(color.blue, 50), width=1)
+        line_0_0 := line.new(selectedBarIndex, short_fib_0_0, bar_index + 10, short_fib_0_0,
+                            color=color.new(color.red, 0), width=2)
+        line_n0_618 := line.new(selectedBarIndex, short_fib_n0_618, bar_index + 10, short_fib_n0_618,
+                               color=color.new(color.yellow, 0), width=2)
+        line_n1_618 := line.new(selectedBarIndex, short_fib_n1_618, bar_index + 10, short_fib_n1_618,
+                               color=color.new(color.orange, 0), width=2)
+        line_n2_618 := line.new(selectedBarIndex, short_fib_n2_618, bar_index + 10, short_fib_n2_618,
+                               color=color.new(color.lime, 0), width=2)
+
+        // Метки
+        label_1_0 := label.new(bar_index + 2, short_fib_1_0, "1.0 Основание",
+                              style=label.style_label_left, color=color.new(color.gray, 70),
+                              textcolor=color.white, size=size.tiny)
+        label_0_820 := label.new(bar_index + 2, short_fib_0_820, "0.820 STOP",
+                                style=label.style_label_left, color=color.new(color.red, 0),
+                                textcolor=color.white, size=size.small)
+        label_0_618 := label.new(bar_index + 2, short_fib_0_618, "0.618 Entry #3",
+                                style=label.style_label_left, color=color.new(color.blue, 50),
+                                textcolor=color.white, size=size.tiny)
+        label_0_5 := label.new(bar_index + 2, short_fib_0_5, "0.5 Entry #2",
+                              style=label.style_label_left, color=color.new(color.blue, 50),
+                              textcolor=color.white, size=size.tiny)
+        label_0_0 := label.new(bar_index + 2, short_fib_0_0, "0.0 Entry #1",
+                              style=label.style_label_left, color=color.new(color.red, 0),
+                              textcolor=color.white, size=size.small)
+        label_n0_618 := label.new(bar_index + 2, short_fib_n0_618, "-0.618 TP1",
+                                 style=label.style_label_left, color=color.new(color.yellow, 0),
+                                 textcolor=color.black, size=size.small)
+        label_n1_618 := label.new(bar_index + 2, short_fib_n1_618, "-1.618 TP2",
+                                 style=label.style_label_left, color=color.new(color.orange, 0),
+                                 textcolor=color.white, size=size.small)
+        label_n2_618 := label.new(bar_index + 2, short_fib_n2_618, "-2.618 TP3",
+                                 style=label.style_label_left, color=color.new(color.lime, 0),
+                                 textcolor=color.black, size=size.small)
+
+// ============================================================================
+// ИНФОРМАЦИОННАЯ ТАБЛИЦА / INFORMATION TABLE
+// ============================================================================
+
+if showTable and barstate.islast
+    // Определяем позицию таблицы
+    var string pos = tablePosition
+    var table_position = position.top_right
+
+    if pos == "top_left"
+        table_position := position.top_left
+    else if pos == "top_center"
+        table_position := position.top_center
+    else if pos == "top_right"
+        table_position := position.top_right
+    else if pos == "middle_left"
+        table_position := position.middle_left
+    else if pos == "middle_center"
+        table_position := position.middle_center
+    else if pos == "middle_right"
+        table_position := position.middle_right
+    else if pos == "bottom_left"
+        table_position := position.bottom_left
+    else if pos == "bottom_center"
+        table_position := position.bottom_center
+    else if pos == "bottom_right"
+        table_position := position.bottom_right
+
+    // Создаем таблицу
+    var table infoTable = table.new(table_position, 3, 16,
+                                    bgcolor=color.new(color.black, 10),
+                                    border_color=color.new(color.gray, 50),
+                                    border_width=1,
+                                    frame_color=color.new(color.gray, 50),
+                                    frame_width=1)
+
+    // Очищаем таблицу
+    table.clear(infoTable, 0, 0, 2, 15)
+
+    // Заголовок
+    table.cell(infoTable, 0, 0, "📊 FIBONACCI CALCULATOR", text_color=color.white,
+              bgcolor=color.new(color.blue, 30), text_size=size.normal)
+    table.merge_cells(infoTable, 0, 0, 2, 0)
+
+    // Информация о свече
+    table.cell(infoTable, 0, 1, "Тип свечи:", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 1, candleColor,
+              text_color=isGreenCandle ? color.green : color.red, text_size=size.small)
+    table.merge_cells(infoTable, 1, 1, 2, 1)
+
+    table.cell(infoTable, 0, 2, "High:", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 2, str.tostring(selectedHigh, format.mintick),
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 2, 2, 2)
+
+    table.cell(infoTable, 0, 3, "Low:", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 3, str.tostring(selectedLow, format.mintick),
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 3, 2, 3)
+
+    table.cell(infoTable, 0, 4, "Диапазон:", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 4, str.tostring(fibRange, format.mintick),
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 4, 2, 4)
+
+    // Разделитель
+    table.cell(infoTable, 0, 5, "─────────────────", text_color=color.gray, text_size=size.small)
+    table.merge_cells(infoTable, 0, 5, 2, 5)
+
+    // Торговые уровни
+    table.cell(infoTable, 0, 6, "📍 ТОРГОВЫЕ УРОВНИ", text_color=color.white,
+              bgcolor=color.new(isGreenCandle ? color.green : color.red, 70), text_size=size.small)
+    table.merge_cells(infoTable, 0, 6, 2, 6)
+
+    // Entry #1
+    float entry1Price = isGreenCandle ? long_fib_0_0 : short_fib_0_0
+    table.cell(infoTable, 0, 7, "Entry #1 (0.0):", text_color=color.lime, text_size=size.small)
+    table.cell(infoTable, 1, 7, str.tostring(entry1Price, format.mintick) + " (" + str.tostring(depositPercent1) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 7, 2, 7)
+
+    // Entry #2
+    float entry2Price = isGreenCandle ? long_fib_0_5 : short_fib_0_5
+    table.cell(infoTable, 0, 8, "Entry #2 (0.5):", text_color=color.aqua, text_size=size.small)
+    table.cell(infoTable, 1, 8, str.tostring(entry2Price, format.mintick) + " (" + str.tostring(depositPercent2) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 8, 2, 8)
+
+    // Entry #3
+    float entry3Price = isGreenCandle ? long_fib_0_618 : short_fib_0_618
+    table.cell(infoTable, 0, 9, "Entry #3 (0.618):", text_color=color.aqua, text_size=size.small)
+    table.cell(infoTable, 1, 9, str.tostring(entry3Price, format.mintick) + " (" + str.tostring(depositPercent3) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 9, 2, 9)
+
+    // Stop Loss
+    float stopPrice = isGreenCandle ? long_fib_0_820 : short_fib_0_820
+    table.cell(infoTable, 0, 10, "🛑 STOP (0.820):", text_color=color.red, text_size=size.small)
+    table.cell(infoTable, 1, 10, str.tostring(stopPrice, format.mintick),
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 10, 2, 10)
+
+    // Разделитель
+    table.cell(infoTable, 0, 11, "─────────────────", text_color=color.gray, text_size=size.small)
+    table.merge_cells(infoTable, 0, 11, 2, 11)
+
+    // Take Profit уровни
+    table.cell(infoTable, 0, 12, "🎯 TAKE PROFIT", text_color=color.white,
+              bgcolor=color.new(color.orange, 70), text_size=size.small)
+    table.merge_cells(infoTable, 0, 12, 2, 12)
+
+    // TP1
+    float tp1Price = isGreenCandle ? long_fib_n0_618 : short_fib_n0_618
+    table.cell(infoTable, 0, 13, "TP1 (-0.618):", text_color=color.yellow, text_size=size.small)
+    table.cell(infoTable, 1, 13, str.tostring(tp1Price, format.mintick) + " (" + str.tostring(tp1ClosePercent) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 13, 2, 13)
+
+    // TP2
+    float tp2Price = isGreenCandle ? long_fib_n1_618 : short_fib_n1_618
+    table.cell(infoTable, 0, 14, "TP2 (-1.618):", text_color=color.orange, text_size=size.small)
+    table.cell(infoTable, 1, 14, str.tostring(tp2Price, format.mintick) + " (" + str.tostring(tp2ClosePercent) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 14, 2, 14)
+
+    // TP3
+    float tp3Price = isGreenCandle ? long_fib_n2_618 : short_fib_n2_618
+    table.cell(infoTable, 0, 15, "TP3 (-2.618):", text_color=color.lime, text_size=size.small)
+    table.cell(infoTable, 1, 15, str.tostring(tp3Price, format.mintick) + " (" + str.tostring(tp3ClosePercent) + "%)",
+              text_color=color.white, text_size=size.small)
+    table.merge_cells(infoTable, 1, 15, 2, 15)
+
+// ============================================================================
+// PLOTS ДЛЯ АЛЕРТОВ / PLOTS FOR ALERTS
+// ============================================================================
+
+// Экспортируем значения для использования в алертах
+plot(isGreenCandle ? long_fib_0_0 : short_fib_0_0, title="Entry #1", display=display.none)
+plot(isGreenCandle ? long_fib_0_5 : short_fib_0_5, title="Entry #2", display=display.none)
+plot(isGreenCandle ? long_fib_0_618 : short_fib_0_618, title="Entry #3", display=display.none)
+plot(isGreenCandle ? long_fib_0_820 : short_fib_0_820, title="Stop Loss", display=display.none)
+plot(isGreenCandle ? long_fib_n0_618 : short_fib_n0_618, title="TP1", display=display.none)
+plot(isGreenCandle ? long_fib_n1_618 : short_fib_n1_618, title="TP2", display=display.none)
+plot(isGreenCandle ? long_fib_n2_618 : short_fib_n2_618, title="TP3", display=display.none)
