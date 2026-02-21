@@ -24,6 +24,7 @@ from bot.strategies.base import (
 )
 from bot.strategies.trend_follower.config import TrendFollowerConfig
 from bot.strategies.trend_follower.entry_logic import SignalType
+from bot.strategies.trend_follower.position_manager import ExitReason as TFExitReason
 from bot.strategies.trend_follower.trend_follower_strategy import TrendFollowerStrategy
 from bot.utils.logger import get_logger
 
@@ -238,7 +239,7 @@ class TrendFollowerAdapter(BaseStrategy):
         self, position_id: str, exit_reason: BaseExitReason, exit_price: Decimal
     ) -> None:
         """Close position via underlying strategy."""
-        self._strategy.close_position(position_id, exit_reason.value, exit_price)
+        self._strategy.close_position(position_id, TFExitReason(exit_reason.value), exit_price)
 
     def get_active_positions(self) -> list[PositionInfo]:
         """Get active positions from underlying strategy."""

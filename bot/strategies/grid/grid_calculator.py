@@ -239,7 +239,7 @@ class GridCalculator:
         # Use the last `period` true ranges (or all if less)
         use_count = min(period, len(true_ranges))
         recent_tr = true_ranges[-use_count:]
-        atr = sum(recent_tr) / use_count
+        atr = sum(recent_tr, Decimal(0)) / Decimal(use_count)
 
         return atr.quantize(GridCalculator.PRICE_PRECISION, rounding=ROUND_HALF_UP)
 
