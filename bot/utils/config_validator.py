@@ -297,7 +297,7 @@ class ConfigValidator:
 
         return results
 
-    def run_full_validation(self, **kwargs) -> ConfigValidationReport:
+    def run_full_validation(self, **kwargs: Any) -> ConfigValidationReport:
         """Run all validation checks."""
         report = ConfigValidationReport()
         report.results.extend(self.validate_risk_params(**kwargs.get("risk", {})))

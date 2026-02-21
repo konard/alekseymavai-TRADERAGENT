@@ -32,6 +32,7 @@ from decimal import Decimal
 from typing import Any
 
 from bot.strategies.dca.dca_position_manager import (
+    CloseResult,
     DCADeal,
     DCAOrderConfig,
     DCAPositionManager,
@@ -246,7 +247,7 @@ class DCAEngine:
 
         # Step 3: Risk pre-check
         active_deals = self._position_mgr.get_active_deals()
-        current_exposure = sum(d.total_cost for d in active_deals)
+        current_exposure = sum((d.total_cost for d in active_deals), Decimal(0))
         base_cost = self._position_mgr.config.base_order_volume
 
         risk_check = self._risk_mgr.can_open_new_deal(
@@ -389,7 +390,7 @@ class DCAEngine:
         """Record safety order fill (called after exchange order succeeds)."""
         return self._position_mgr.fill_safety_order(deal_id, level, fill_price)
 
-    def close_deal(self, deal_id: str, exit_price: Decimal, reason: str):
+    def close_deal(self, deal_id: str, exit_price: Decimal, reason: str) -> CloseResult:
         """Close a deal (called after exchange sell order succeeds)."""
         result = self._position_mgr.close_deal(deal_id, exit_price, reason)
         self._risk_mgr.record_trade_result(result.realized_profit)

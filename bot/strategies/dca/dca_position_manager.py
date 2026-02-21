@@ -607,7 +607,10 @@ class DCAPositionManager:
     @property
     def total_realized_pnl(self) -> Decimal:
         """Total realized profit across all closed deals."""
-        return sum(d.realized_profit for d in self._deals.values() if d.status == DealStatus.CLOSED)
+        return sum(
+            (d.realized_profit for d in self._deals.values() if d.status == DealStatus.CLOSED),
+            Decimal(0),
+        )
 
     # -----------------------------------------------------------------
     # Statistics

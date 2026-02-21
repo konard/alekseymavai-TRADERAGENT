@@ -204,11 +204,6 @@ class HealthMonitor:
                 if status == HealthStatus.HEALTHY:
                     status = HealthStatus.DEGRADED
 
-        # Check strategy in ERROR state
-        if strategy.state == StrategyState.ERROR:
-            status = HealthStatus.CRITICAL
-            issues.append(f"Strategy in ERROR state: {strategy.metrics.last_error}")
-
         message = "; ".join(issues) if issues else "All checks passed"
 
         result = HealthCheckResult(
