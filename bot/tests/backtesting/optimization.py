@@ -113,7 +113,7 @@ class OptimizationResult:
 
             val_mean = sum(values) / len(values)
             cov = sum(
-                (v - val_mean) * (o - obj_mean) for v, o in zip(values, objectives)
+                (v - val_mean) * (o - obj_mean) for v, o in zip(values, objectives, strict=False)
             ) / len(values)
             std_v = (sum((v - val_mean) ** 2 for v in values) / len(values)) ** 0.5
             std_o = (sum((o - obj_mean) ** 2 for o in objectives) / len(objectives)) ** 0.5
@@ -172,13 +172,20 @@ class ParameterOptimizer:
 
         if max_workers and max_workers > 1:
             trials = await self._run_trials_parallel(
-                combinations, strategy_factory, data, max_workers,
-                run_id=run_id, completed=completed,
+                combinations,
+                strategy_factory,
+                data,
+                max_workers,
+                run_id=run_id,
+                completed=completed,
             )
         else:
             trials = await self._run_trials_sequential(
-                combinations, strategy_factory, data,
-                run_id=run_id, completed=completed,
+                combinations,
+                strategy_factory,
+                data,
+                run_id=run_id,
+                completed=completed,
             )
 
         # Sort by objective
@@ -229,9 +236,7 @@ class ParameterOptimizer:
             OptimizationResult with combined trials from both phases.
         """
         # Phase 1: Coarse search
-        coarse_grid = {
-            k: self._sample_evenly(v, coarse_steps) for k, v in param_grid.items()
-        }
+        coarse_grid = {k: self._sample_evenly(v, coarse_steps) for k, v in param_grid.items()}
         coarse_result = await self.optimize(
             strategy_factory, coarse_grid, data, max_workers=max_workers
         )
@@ -347,8 +352,7 @@ class ParameterOptimizer:
             from bot.tests.backtesting.checkpoint import OptimizationCheckpoint
 
             combos_to_run = [
-                p for p in combinations
-                if OptimizationCheckpoint.config_hash(p) not in completed
+                p for p in combinations if OptimizationCheckpoint.config_hash(p) not in completed
             ]
 
         loop = asyncio.get_event_loop()

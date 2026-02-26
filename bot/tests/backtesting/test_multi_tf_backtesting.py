@@ -544,7 +544,7 @@ class TestSMCAdapterIntegration:
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=100,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = SMCStrategyAdapter(
@@ -574,7 +574,7 @@ class TestTrendFollowerAdapterIntegration:
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=100,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = TrendFollowerAdapter(
@@ -687,9 +687,7 @@ class TestIntraCandleSweep:
             taker_fee=Decimal("0"),
             slippage=Decimal("0"),
         )
-        await sim.set_candle(
-            Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105")
-        )
+        await sim.set_candle(Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"))
         assert sim.current_price == Decimal("105")
 
     async def test_limit_buy_fills_on_low(self):
@@ -707,9 +705,7 @@ class TestIntraCandleSweep:
         assert len(sim.get_open_orders()) == 1
 
         # Candle sweeps O=100, L=90, H=110, C=105 — low touches 90 < 95
-        await sim.set_candle(
-            Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105")
-        )
+        await sim.set_candle(Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"))
         assert len(sim.get_open_orders()) == 0
         assert sim.balance.base == Decimal("1")
 
@@ -729,9 +725,7 @@ class TestIntraCandleSweep:
         assert len(sim.get_open_orders()) == 1
 
         # Candle sweeps O=100, L=90, H=110, C=105 — high 110 >= 108
-        await sim.set_candle(
-            Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105")
-        )
+        await sim.set_candle(Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"))
         assert len(sim.get_open_orders()) == 0
         assert sim.balance.base == Decimal("0")
 
@@ -744,9 +738,7 @@ class TestIntraCandleSweep:
             taker_fee=Decimal("0"),
             slippage=Decimal("0"),
         )
-        await sim.set_candle(
-            Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105")
-        )
+        await sim.set_candle(Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"))
         await sim.create_order("BTC/USDT", "market", "buy", Decimal("1"))
         # Market order executes at current_price = 105 (close)
         assert sim.balance.base == Decimal("1")

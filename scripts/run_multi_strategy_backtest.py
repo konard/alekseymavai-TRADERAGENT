@@ -60,6 +60,7 @@ def _setup_logging(timestamp: str, symbol: str) -> Path:
 
     return log_path
 
+
 from bot.tests.backtesting.multi_tf_data_loader import (  # noqa: E402
     MultiTimeframeDataLoader,
 )
@@ -126,11 +127,10 @@ def _build_strategies(names: list[str], balance: Decimal) -> list:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-Strategy Backtester")
+    parser.add_argument("--symbol", default="BTC_USDT", help="Trading pair (e.g. ETH_USDT)")
     parser.add_argument(
-        "--symbol", default="BTC_USDT", help="Trading pair (e.g. ETH_USDT)"
-    )
-    parser.add_argument(
-        "--no-log-file", action="store_true",
+        "--no-log-file",
+        action="store_true",
         help="Disable saving logs to file (print to console only)",
     )
     parser.add_argument("--csv", default=None, help="Path to CSV file with OHLCV data")
@@ -139,23 +139,21 @@ async def main() -> None:
         default="5m",
         help="Base timeframe of CSV data (5m, 15m, 1h)",
     )
+    parser.add_argument("--days", type=int, default=14, help="Days of synthetic data to generate")
     parser.add_argument(
-        "--days", type=int, default=14, help="Days of synthetic data to generate"
-    )
-    parser.add_argument(
-        "--trend", default="up", choices=["up", "down", "sideways"],
+        "--trend",
+        default="up",
+        choices=["up", "down", "sideways"],
         help="Trend for synthetic data",
     )
+    parser.add_argument("--balance", type=float, default=10000, help="Initial balance (USDT)")
+    parser.add_argument("--warmup", type=int, default=60, help="Warmup bars before trading")
     parser.add_argument(
-        "--balance", type=float, default=10000, help="Initial balance (USDT)"
-    )
-    parser.add_argument(
-        "--warmup", type=int, default=60, help="Warmup bars before trading"
-    )
-    parser.add_argument(
-        "--lookback", type=int, default=200,
+        "--lookback",
+        type=int,
+        default=200,
         help="Rolling context window (bars per timeframe). "
-             "SMC strategy requires at least 200 for proper swing detection.",
+        "SMC strategy requires at least 200 for proper swing detection.",
     )
     parser.add_argument(
         "--strategy",
@@ -186,10 +184,7 @@ async def main() -> None:
     else:
         end_date = datetime(2024, 6, 1)
         start_date = end_date - timedelta(days=args.days)
-        print(
-            f"Generating {args.days} days of {args.trend} synthetic data "
-            f"for {symbol}..."
-        )
+        print(f"Generating {args.days} days of {args.trend} synthetic data " f"for {symbol}...")
         data = loader.load(
             symbol=symbol,
             start_date=start_date,
@@ -265,7 +260,5 @@ if __name__ == "__main__":
         logging.getLogger(__name__).warning("Interrupted by user (Ctrl+C)")
         sys.exit(0)
     except Exception:
-        logging.getLogger(__name__).critical(
-            "Unhandled exception:\n%s", traceback.format_exc()
-        )
+        logging.getLogger(__name__).critical("Unhandled exception:\n%s", traceback.format_exc())
         sys.exit(1)

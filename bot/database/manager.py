@@ -19,13 +19,13 @@ from bot.database.models import (
     Base,
     Bot,
     BotLog,
+    BotStateSnapshot,
     DCAHistory,
     ExchangeCredential,
     GridLevel,
     Order,
     Trade,
 )
-from bot.database.models import BotStateSnapshot
 from bot.utils.logger import LoggerMixin
 
 T = TypeVar("T", bound=Base)

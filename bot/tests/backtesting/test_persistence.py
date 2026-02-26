@@ -8,15 +8,11 @@ import json
 import tempfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
-
-import pytest
 
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.checkpoint import OptimizationCheckpoint
 from bot.tests.backtesting.job_store import JobStore
 from bot.tests.backtesting.preset_export import PresetExporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,30 +22,30 @@ from bot.tests.backtesting.preset_export import PresetExporter
 def _make_result(**overrides) -> BacktestResult:
     """Create a minimal BacktestResult for testing."""
     now = datetime.now(timezone.utc)
-    defaults = dict(
-        strategy_name="test",
-        symbol="BTC/USDT",
-        start_time=now - timedelta(days=1),
-        end_time=now,
-        duration=timedelta(days=1),
-        initial_balance=Decimal("10000"),
-        final_balance=Decimal("10500"),
-        total_return=Decimal("500"),
-        total_return_pct=Decimal("5.0"),
-        max_drawdown=Decimal("200"),
-        max_drawdown_pct=Decimal("2.0"),
-        total_trades=10,
-        winning_trades=7,
-        losing_trades=3,
-        win_rate=Decimal("70"),
-        total_buy_orders=10,
-        total_sell_orders=10,
-        avg_profit_per_trade=Decimal("50"),
-        sharpe_ratio=Decimal("1.5"),
-        sortino_ratio=Decimal("2.0"),
-        calmar_ratio=Decimal("2.5"),
-        profit_factor=Decimal("2.33"),
-    )
+    defaults = {
+        "strategy_name": "test",
+        "symbol": "BTC/USDT",
+        "start_time": now - timedelta(days=1),
+        "end_time": now,
+        "duration": timedelta(days=1),
+        "initial_balance": Decimal("10000"),
+        "final_balance": Decimal("10500"),
+        "total_return": Decimal("500"),
+        "total_return_pct": Decimal("5.0"),
+        "max_drawdown": Decimal("200"),
+        "max_drawdown_pct": Decimal("2.0"),
+        "total_trades": 10,
+        "winning_trades": 7,
+        "losing_trades": 3,
+        "win_rate": Decimal("70"),
+        "total_buy_orders": 10,
+        "total_sell_orders": 10,
+        "avg_profit_per_trade": Decimal("50"),
+        "sharpe_ratio": Decimal("1.5"),
+        "sortino_ratio": Decimal("2.0"),
+        "calmar_ratio": Decimal("2.5"),
+        "profit_factor": Decimal("2.33"),
+    }
     defaults.update(overrides)
     return BacktestResult(**defaults)
 

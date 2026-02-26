@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import ValidationError
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -219,8 +219,8 @@ class ConfigManager(LoggerMixin):
             return
 
         if self._observer:
-            self._observer.stop()
-            self._observer.join()
+            self._observer.stop()  # type: ignore[attr-defined]
+            self._observer.join()  # type: ignore[attr-defined]
             self._observer = None
 
         self._watch_enabled = False
