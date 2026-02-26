@@ -311,7 +311,10 @@ class MultiTimeframeBacktestEngine:
             if self._risk_manager:
                 self._risk_manager.update_balance(portfolio_value)
                 # Daily reset every N bars (simulates UTC midnight)
-                if bars_since_warmup > 0 and bars_since_warmup % self.config.rm_daily_loss_reset_bars == 0:
+                if (
+                    bars_since_warmup > 0
+                    and bars_since_warmup % self.config.rm_daily_loss_reset_bars == 0
+                ):
                     self._risk_manager.reset_daily_loss()
                 if self._risk_manager.is_halted:
                     break
@@ -338,9 +341,7 @@ class MultiTimeframeBacktestEngine:
                 self._regime_filter_blocks += 1
                 return
             strategy_type = strategy.get_strategy_type()
-            allowed_types = REGIME_ALLOWED_STRATEGY_TYPES.get(
-                self._current_regime.regime, set()
-            )
+            allowed_types = REGIME_ALLOWED_STRATEGY_TYPES.get(self._current_regime.regime, set())
             if allowed_types and strategy_type not in allowed_types:
                 self._regime_filter_blocks += 1
                 return
@@ -531,9 +532,7 @@ class MultiTimeframeBacktestEngine:
         # Calmar ratio
         calmar_ratio = None
         if max_drawdown_pct > 0:
-            calmar_ratio = (total_return_pct / Decimal("100")) / (
-                max_drawdown_pct / Decimal("100")
-            )
+            calmar_ratio = (total_return_pct / Decimal("100")) / (max_drawdown_pct / Decimal("100"))
 
         # Profit factor
         profit_factor = None

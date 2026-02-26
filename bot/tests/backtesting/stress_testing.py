@@ -66,9 +66,7 @@ class StressTestResult:
         """Average return across stress periods."""
         if not self.periods:
             return 0.0
-        return sum(float(p.result.total_return_pct) for p in self.periods) / len(
-            self.periods
-        )
+        return sum(float(p.result.total_return_pct) for p in self.periods) / len(self.periods)
 
 
 class StressTester:
@@ -124,9 +122,7 @@ class StressTester:
         # Select top N non-overlapping windows
         selected: list[tuple[int, int, float]] = []
         for start, end, vol in windows:
-            overlaps = any(
-                not (end <= s or start >= e) for s, e, _ in selected
-            )
+            overlaps = any(not (end <= s or start >= e) for s, e, _ in selected)
             if not overlaps:
                 selected.append((start, end, vol))
             if len(selected) >= config.num_periods:

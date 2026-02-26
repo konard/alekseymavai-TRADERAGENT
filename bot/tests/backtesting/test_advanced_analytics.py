@@ -991,9 +991,7 @@ class TestRankingsNewMetrics:
         from bot.tests.backtesting.strategy_comparison import StrategyComparison
 
         data = _load_test_data(days=4)
-        comparison = StrategyComparison(
-            config=MultiTFBacktestConfig(warmup_bars=20)
-        )
+        comparison = StrategyComparison(config=MultiTFBacktestConfig(warmup_bars=20))
         s1 = SimpleTestStrategy(buy_every_n=5, name="s1")
         s2 = SimpleTestStrategy(buy_every_n=10, name="s2")
         result = await comparison.run([s1, s2], data)
@@ -1006,9 +1004,7 @@ class TestRankingsNewMetrics:
         from bot.tests.backtesting.strategy_comparison import StrategyComparison
 
         data = _load_test_data(days=4)
-        comparison = StrategyComparison(
-            config=MultiTFBacktestConfig(warmup_bars=20)
-        )
+        comparison = StrategyComparison(config=MultiTFBacktestConfig(warmup_bars=20))
         s1 = SimpleTestStrategy(buy_every_n=5, name="s1")
         result = await comparison.run([s1], data)
 

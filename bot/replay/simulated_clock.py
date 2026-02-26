@@ -74,9 +74,7 @@ def _make_fake_datetime_class(clock: SimulatedClock):
 
         @classmethod
         def utcnow(cls):
-            return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(
-                tzinfo=None
-            )
+            return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(tzinfo=None)
 
     return FakeDatetime
 

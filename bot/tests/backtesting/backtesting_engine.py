@@ -91,7 +91,9 @@ class BacktestResult:
                 "sortino_ratio": float(self.sortino_ratio) if self.sortino_ratio else None,
                 "calmar_ratio": float(self.calmar_ratio) if self.calmar_ratio else None,
                 "profit_factor": float(self.profit_factor) if self.profit_factor else None,
-                "capital_efficiency": float(self.capital_efficiency) if self.capital_efficiency else None,
+                "capital_efficiency": (
+                    float(self.capital_efficiency) if self.capital_efficiency else None
+                ),
                 "max_position_value": float(self.max_position_value),
             },
             "trade_count": len(self.trade_history),

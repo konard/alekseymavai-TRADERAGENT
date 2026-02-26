@@ -32,8 +32,7 @@ class JobStore:
         """Create the jobs table if it doesn't exist."""
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute(
-            """
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 job_id TEXT PRIMARY KEY,
                 job_type TEXT NOT NULL,
@@ -44,8 +43,7 @@ class JobStore:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         self._conn.commit()
 
     def create(self, job_type: str, config: dict[str, Any] | None = None) -> str:
@@ -84,9 +82,7 @@ class JobStore:
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         """Get a job by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         if row is None:
             return None
         return self._row_to_dict(row)
@@ -118,9 +114,7 @@ class JobStore:
     def cleanup_old(self, days: int = 30) -> int:
         """Delete jobs older than N days. Returns count deleted."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = self._conn.execute(
-            "DELETE FROM jobs WHERE created_at < ?", (cutoff,)
-        )
+        cursor = self._conn.execute("DELETE FROM jobs WHERE created_at < ?", (cutoff,))
         self._conn.commit()
         return cursor.rowcount
 

@@ -42,14 +42,12 @@ class TestConfigManager:
     def test_load_invalid_schema(self, test_config_dir: Path):
         """Test loading YAML with invalid schema"""
         invalid_file = test_config_dir / "invalid_schema.yaml"
-        invalid_file.write_text(
-            """
+        invalid_file.write_text("""
 database_url: postgresql://test
 log_level: INVALID_LEVEL
 encryption_key: test
 bots: []
-"""
-        )
+""")
 
         manager = ConfigManager(invalid_file)
 

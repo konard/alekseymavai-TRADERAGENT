@@ -603,9 +603,7 @@ class BotOrchestrator:
             self._last_strategy_switch_at = time.monotonic()
         self._active_strategies = strategies
 
-    async def _graceful_transition(
-        self, deactivated: set[str], new_strategies: set[str]
-    ) -> None:
+    async def _graceful_transition(self, deactivated: set[str], new_strategies: set[str]) -> None:
         """Handle graceful cleanup when strategies are deactivated.
 
         1. Cancel open orders for deactivated strategies
@@ -683,9 +681,7 @@ class BotOrchestrator:
                                 base_amount = float(
                                     Decimal(str(pos.get("size", 0))) / self.current_price
                                 )
-                                side = (
-                                    "sell" if pos.get("direction") == "long" else "buy"
-                                )
+                                side = "sell" if pos.get("direction") == "long" else "buy"
                                 await self.exchange.create_order(
                                     symbol=self.config.symbol,
                                     order_type="market",

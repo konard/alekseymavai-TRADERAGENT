@@ -150,14 +150,16 @@ class ReplayExchangeClient:
         order["remaining"] = 0.0
         order["status"] = "closed"
 
-        self._fill_log.append({
-            "order_id": order_id,
-            "side": order["side"],
-            "price": float(fill_price),
-            "amount": float(fill_amount),
-            "fee": float(fee),
-            "timestamp": self._clock.current_time,
-        })
+        self._fill_log.append(
+            {
+                "order_id": order_id,
+                "side": order["side"],
+                "price": float(fill_price),
+                "amount": float(fill_amount),
+                "fee": float(fee),
+                "timestamp": self._clock.current_time,
+            }
+        )
 
         logger.debug(
             "replay_order_filled",
@@ -257,7 +259,7 @@ class ReplayExchangeClient:
                     raise Exception(
                         f"InsufficientFunds: need {cost + fee} USDT, have {self._free_balance}"
                     )
-                self._free_balance -= (cost + fee)
+                self._free_balance -= cost + fee
                 self._base_balance += amount_d
             else:
                 if self._base_balance < amount_d:
@@ -265,7 +267,7 @@ class ReplayExchangeClient:
                         f"InsufficientFunds: need {amount_d} base, have {self._base_balance}"
                     )
                 self._base_balance -= amount_d
-                self._free_balance += (cost - fee)
+                self._free_balance += cost - fee
 
             order = {
                 "id": order_id,
@@ -281,16 +283,24 @@ class ReplayExchangeClient:
             }
             self._order_history[order_id] = order
 
-            self._fill_log.append({
-                "order_id": order_id,
-                "side": side.lower(),
-                "price": float(fill_price),
-                "amount": amount,
-                "fee": float(fee),
-                "timestamp": self._clock.current_time,
-            })
+            self._fill_log.append(
+                {
+                    "order_id": order_id,
+                    "side": side.lower(),
+                    "price": float(fill_price),
+                    "amount": amount,
+                    "fee": float(fee),
+                    "timestamp": self._clock.current_time,
+                }
+            )
 
-            return {"id": order_id, "symbol": symbol, "type": "market", "side": side.lower(), "amount": amount}
+            return {
+                "id": order_id,
+                "symbol": symbol,
+                "type": "market",
+                "side": side.lower(),
+                "amount": amount,
+            }
 
         elif order_type.lower() == "limit":
             if price is None:
@@ -331,7 +341,14 @@ class ReplayExchangeClient:
             # Check if it fills immediately against current candle
             self._match_limit_orders()
 
-            return {"id": order_id, "symbol": symbol, "type": "limit", "side": side.lower(), "amount": amount, "price": price}
+            return {
+                "id": order_id,
+                "symbol": symbol,
+                "type": "limit",
+                "side": side.lower(),
+                "amount": amount,
+                "price": price,
+            }
 
         else:
             raise ValueError(f"Unknown order type: {order_type}")
@@ -433,7 +450,7 @@ class ReplayExchangeClient:
         # Work backwards from end, group into chunks of raw_per_bar
         start = len(raw) - (len(raw) % raw_per_bar) if len(raw) % raw_per_bar != 0 else len(raw)
         for i in range(0, len(raw), raw_per_bar):
-            chunk = raw[i: i + raw_per_bar]
+            chunk = raw[i : i + raw_per_bar]
             if not chunk:
                 continue
             bar = [
@@ -491,8 +508,17 @@ class ReplayExchangeClient:
 def _timeframe_to_minutes(tf: str) -> int:
     """Convert a timeframe string like '1h', '15m', '1d' to minutes."""
     mapping = {
-        "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
-        "1h": 60, "2h": 120, "4h": 240, "6h": 360, "12h": 720,
-        "1d": 1440, "1w": 10080,
+        "1m": 1,
+        "3m": 3,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "2h": 120,
+        "4h": 240,
+        "6h": 360,
+        "12h": 720,
+        "1d": 1440,
+        "1w": 10080,
     }
     return mapping.get(tf, 60)
