@@ -379,3 +379,129 @@ class TestRegimeStaleness:
         after = time.monotonic()
 
         assert before <= orch._last_regime_update_at <= after
+
+
+# ---------------------------------------------------------------------------
+# Confidence and duration gates (#regime-confidence-gate)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceGate:
+    """Verify that low-confidence regimes do not trigger strategy switches."""
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_blocks_switch(self) -> None:
+        """Switch is blocked when regime confidence is below threshold."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        # Establish initial strategy set
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+
+        # Low-confidence regime → switch must NOT happen
+        orch._current_regime = _make_regime(
+            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.2
+        )
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+        assert "dca" not in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_confidence_at_threshold_allows_switch(self) -> None:
+        """Switch is allowed when confidence equals the minimum threshold."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+
+        # Exactly at threshold (0.3) → allowed
+        orch._current_regime = _make_regime(
+            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.3
+        )
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_high_confidence_allows_switch(self) -> None:
+        """Switch proceeds normally when confidence is comfortably above threshold."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+
+        orch._current_regime = _make_regime(
+            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.9
+        )
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
+        assert "grid" not in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_first_set_not_blocked_by_confidence(self) -> None:
+        """Initial strategy set (from empty) is never blocked by confidence gate."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        assert orch._active_strategies == set()
+
+        # Low confidence on first call — still sets strategies (no prev to guard)
+        orch._current_regime = _make_regime(
+            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.1
+        )
+        await orch._update_active_strategies()
+        # Gate only fires when `prev` is non-empty
+        assert "dca" in orch._active_strategies
+
+
+class TestDurationGate:
+    """Verify that freshly-detected regimes do not trigger strategy switches."""
+
+    @pytest.mark.asyncio
+    async def test_young_regime_blocks_switch(self) -> None:
+        """Switch is blocked when the new regime has been active for too short a time."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+
+        young = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        young.regime_duration_seconds = 30  # below 120 s minimum
+        orch._current_regime = young
+        await orch._update_active_strategies()
+        # Still on original strategies
+        assert "grid" in orch._active_strategies
+        assert "dca" not in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_regime_at_min_duration_allows_switch(self) -> None:
+        """Switch is allowed when regime duration equals the minimum."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+
+        mature = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        mature.regime_duration_seconds = 120  # exactly at threshold → allowed
+        orch._current_regime = mature
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_old_regime_allows_switch(self) -> None:
+        """Switch proceeds when regime is well past the minimum duration."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+
+        old = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        old.regime_duration_seconds = 3600
+        orch._current_regime = old
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_first_set_not_blocked_by_duration(self) -> None:
+        """Initial strategy set (from empty) is never blocked by duration gate."""
+        orch = _make_orchestrator_stub(cooldown=0.0)
+        assert orch._active_strategies == set()
+
+        young = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        young.regime_duration_seconds = 5
+        orch._current_regime = young
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies

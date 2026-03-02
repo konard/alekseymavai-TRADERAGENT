@@ -587,6 +587,16 @@ class BotOrchestrator:
         RecommendedStrategy.REDUCE_EXPOSURE: set(),
     }
 
+    # Minimum confidence score [0.0–1.0] required before a strategy switch is
+    # allowed.  Below this threshold the regime classification is too uncertain
+    # to warrant disrupting running strategies.
+    _MIN_REGIME_CONFIDENCE: float = 0.3
+
+    # Minimum age of the current regime (seconds) before a switch is allowed.
+    # A freshly-detected regime may still be noisy; waiting 120 s lets it
+    # stabilise before we act on it.
+    _MIN_REGIME_DURATION_SECONDS: int = 120
+
     async def _update_active_strategies(self) -> None:
         """Update which strategies should run based on current regime.
 
@@ -652,6 +662,33 @@ class BotOrchestrator:
                         "strategy_switch_cooldown_active",
                         remaining_seconds=int(self._strategy_switch_cooldown - elapsed),
                         blocked_strategies=sorted(strategies),
+                        current_strategies=sorted(prev),
+                    )
+                    return
+
+                # Confidence gate: block switch if regime detection is too uncertain.
+                if (
+                    self._current_regime is not None
+                    and self._current_regime.confidence < self._MIN_REGIME_CONFIDENCE
+                ):
+                    logger.info(
+                        "strategy_switch_blocked_low_confidence",
+                        confidence=round(self._current_regime.confidence, 3),
+                        threshold=self._MIN_REGIME_CONFIDENCE,
+                        current_strategies=sorted(prev),
+                    )
+                    return
+
+                # Duration gate: block switch if regime is too young to be trusted.
+                if (
+                    self._current_regime is not None
+                    and self._current_regime.regime_duration_seconds
+                    < self._MIN_REGIME_DURATION_SECONDS
+                ):
+                    logger.info(
+                        "strategy_switch_blocked_regime_too_young",
+                        duration_seconds=self._current_regime.regime_duration_seconds,
+                        min_seconds=self._MIN_REGIME_DURATION_SECONDS,
                         current_strategies=sorted(prev),
                     )
                     return
