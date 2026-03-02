@@ -85,17 +85,17 @@ bots:
 
     grid:
       enabled: true
-      upper_price: "2150"     # +7% from ~$2,013
-      lower_price: "1870"     # -7% from ~$2,013
+      upper_price: "2150"     # +7% from ~$1,940
+      lower_price: "1870"     # -7% from ~$1,940
       grid_levels: 8
-      amount_per_grid: "15"   # $15 per grid level
+      amount_per_grid: "20"   # $20 per grid level → ~0.010 ETH @ $1940 (Bybit min 0.01)
       profit_per_grid: "0.015" # 1.5% profit per grid
 
     risk_management:
       max_position_size: "400"
       stop_loss_percentage: "0.15"
       max_daily_loss: "80"
-      min_order_size: "5"
+      min_order_size: "20"    # must be >= amount_per_grid
 
     notifications:
       enabled: false
