@@ -129,12 +129,13 @@ class BotApplication:
                 )
             await exchange_client.initialize()
 
-            # Create orchestrator
+            # Create orchestrator — share portfolio RM if available (multi-pair)
             orchestrator = BotOrchestrator(
                 bot_config=bot_config,
                 exchange_client=exchange_client,
                 db_manager=self.db_manager,
                 redis_url=redis_url,
+                portfolio_risk_manager=self._portfolio_risk_manager,
             )
             await orchestrator.initialize()
 
@@ -282,6 +283,7 @@ class BotApplication:
                 exchange_client=exchange_client,
                 db_manager=self.db_manager,
                 redis_url=self._redis_url,
+                portfolio_risk_manager=self._portfolio_risk_manager,
             )
             await orchestrator.initialize()
             await orchestrator.start()

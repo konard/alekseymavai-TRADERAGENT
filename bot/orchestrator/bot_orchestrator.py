@@ -36,6 +36,7 @@ from bot.orchestrator.strategy_registry import (
 from bot.strategies.base import SignalDirection as BaseSignalDirection
 from bot.strategies.dca.dca_signal_generator import MarketState
 from bot.strategies.grid.grid_risk_manager import GridRiskManager
+from bot.core.portfolio_risk_manager import PortfolioRiskManager
 from bot.core.trading_core import HybridCoordinator, TradingCore, TradingCoreConfig
 from bot.strategies.hybrid.hybrid_config import HybridConfig, HybridMode
 from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
@@ -81,6 +82,7 @@ class BotOrchestrator:
         exchange_client: Any,
         db_manager: DatabaseManager,
         redis_url: str = "redis://localhost:6379",
+        portfolio_risk_manager: PortfolioRiskManager | None = None,
     ):
         """
         Initialize Bot Orchestrator.
@@ -111,6 +113,8 @@ class BotOrchestrator:
         self.smc_strategy: SMCStrategyAdapter | None = None
         self.hybrid_strategy: HybridStrategy | None = None
         self.risk_manager: RiskManager | None = None
+        # Cross-pair portfolio risk (None for single-bot deployments → no overhead)
+        self._portfolio_rm: PortfolioRiskManager | None = portfolio_risk_manager
 
         # Runtime state
         self._running = False
@@ -1027,18 +1031,25 @@ class BotOrchestrator:
 
         # Handle DCA trigger
         if dca_actions["dca_triggered"] and self.state == BotState.RUNNING:
-            # Check risk limits
+            dca_step_amount = self.dca_engine.amount_per_step
+
+            # Check per-bot risk limits
             if self.risk_manager:
-                order_value = self.dca_engine.amount_per_step
                 current_position = (
                     self.dca_engine.position.amount if self.dca_engine.position else Decimal("0")
                 )
                 balance = self._cached_balance or await self._get_available_balance()
 
-                risk_check = self.risk_manager.check_trade(order_value, current_position, balance)
+                risk_check = self.risk_manager.check_trade(
+                    dca_step_amount, current_position, balance
+                )
                 if not risk_check:
                     logger.warning("dca_blocked_by_risk", reason=risk_check.reason)
                     return
+
+            # Check cross-pair portfolio limits (multi-bot deployments)
+            if not self._portfolio_rm_check(dca_step_amount):
+                return
 
             # Place order on exchange first, then advance state (#231)
             if not self.config.dry_run:
@@ -1047,6 +1058,13 @@ class BotOrchestrator:
                 except Exception as e:
                     logger.error("dca_order_failed_skipping_state", error=str(e))
                     return
+                # Commit allocation in portfolio pool after confirmed order
+                if self._portfolio_rm is not None:
+                    self._portfolio_rm.confirm_allocation(
+                        self.config.name,
+                        dca_step_amount,
+                        symbol=str(self.config.symbol),
+                    )
 
             # Only advance DCA state after order confirmed
             success = self.dca_engine.execute_dca_step(self.current_price)
@@ -1068,6 +1086,10 @@ class BotOrchestrator:
 
         # Handle take profit
         if dca_actions["tp_triggered"] and self.state == BotState.RUNNING:
+            # Capture position size before closing (used for portfolio release below)
+            closed_amount = (
+                self.dca_engine.position.amount if self.dca_engine.position else Decimal("0")
+            )
             pnl = self.dca_engine.close_position(self.current_price)
             await self._publish_event(
                 EventType.TAKE_PROFIT_HIT,
@@ -1080,6 +1102,14 @@ class BotOrchestrator:
             # Close position on exchange
             if not self.config.dry_run:
                 await self._close_dca_position()
+
+            # Release allocated capital back to portfolio pool
+            if self._portfolio_rm is not None and closed_amount > 0:
+                self._portfolio_rm.release_allocation(
+                    self.config.name,
+                    closed_amount,
+                    symbol=str(self.config.symbol),
+                )
 
     async def _update_risk_manager(self) -> None:
         """Update risk manager with current balance and position."""
@@ -1099,8 +1129,49 @@ class BotOrchestrator:
             )
             await self.emergency_stop()
 
+    def _portfolio_rm_check(self, amount: Decimal) -> bool:
+        """Check portfolio-level risk before committing capital.
+
+        Returns True when no PortfolioRiskManager is configured (single-bot
+        deployments) so existing behaviour is fully preserved.
+        """
+        if self._portfolio_rm is None:
+            return True
+        balance = self._cached_balance  # snapshot from current loop iteration
+        result = self._portfolio_rm.check_allocation(
+            bot_name=self.config.name,
+            amount=amount,
+            balance=balance,
+            symbol=str(self.config.symbol),
+        )
+        if not result.approved:
+            logger.warning(
+                "portfolio_rm_blocked_order",
+                bot_name=self.config.name,
+                amount=float(amount),
+                reason=result.reason,
+                status=result.status,
+            )
+        return result.approved
+
     async def _place_grid_orders(self, orders: list) -> None:
-        """Place grid orders on exchange."""
+        """Place grid orders on exchange.
+
+        Checks portfolio-level halt before placing.  Buy-side notional is
+        checked against the shared capital pool so a halted portfolio
+        (e.g. global drawdown > stop-loss) prevents new grid deployments.
+        """
+        if self._portfolio_rm is not None:
+            buy_notional = sum(
+                o.amount * o.price for o in orders if getattr(o, "side", "") == "buy"
+            )
+            if buy_notional > 0 and not self._portfolio_rm_check(buy_notional):
+                logger.warning(
+                    "grid_orders_blocked_by_portfolio_rm",
+                    buy_notional=float(buy_notional),
+                    order_count=len(orders),
+                )
+                return
         for order in orders:
             await self._place_single_order(order)
 
