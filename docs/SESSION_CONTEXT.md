@@ -1,13 +1,13 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-02-28)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-02)
 
 ## Текущий статус проекта
 
-**Дата:** 28 февраля 2026
-**Статус:** v2.0.0 + Roadmap COMPLETE + **SMC fix + HybridStrategy integration (Session 38)**
+**Дата:** 2 марта 2026
+**Статус:** v2.0.0 + Roadmap COMPLETE + **ETH grid lot-size fix (Session 41)**
 **Pass Rate:** 100% (1537/1537 tests passing, 25 skipped)
 **Code Quality:** ruff PASS + black PASS + mypy PASS
-**Последний коммит:** `a533d8f` (fix: align SMC swing_length default with intraday trading + integrate HybridStrategy)
-**Bot Status:** RUNNING — 4 бота на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_smc. Баланс: 100,022.73 USDT
+**Последний коммит:** `2551822` (fix(config): increase ETH/USDT grid amount to meet Bybit minimum lot size)
+**Bot Status:** RUNNING — 4 бота на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_smc. Ошибка 10001 устранена.
 **Pipeline Status:** Phase 1 DONE (135/135 OK). Phase 2 остановлена (5/135) — алгоритм требует оптимизации.
 **Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`). Запустить через панель Yandex Cloud.
 
@@ -23,7 +23,50 @@
 
 ---
 
-## Последняя сессия (2026-02-28) — Session 38: SMC Parameter Fix + HybridStrategy Integration
+## Последняя сессия (2026-03-02) — Session 41: ETH/USDT Grid Lot-Size Fix + Deploy
+
+### Задача
+
+Устранить ошибку Bybit `10001: The number of contracts exceeds minimum limit allowed` для бота `demo_eth_grid`.
+
+### Сделано в сессии 41
+
+#### 1. Диагностика
+
+Из логов продакшн-сервера обнаружена повторяющаяся ошибка при выставлении ордеров по ETHUSDT:
+
+```
+bybit_api_error  code=10001  msg='The number of contracts exceeds minimum limit allowed'
+```
+
+**Причина:** `amount_per_grid: "15"` USDT при цене ETH ~$1940 давал ~0.0077 ETH, что ниже минимального лота Bybit (0.01 ETH).
+
+#### 2. Исправление `configs/phase7_demo.yaml`
+
+| Параметр | Было | Стало |
+|----------|------|-------|
+| `amount_per_grid` | `"15"` | `"20"` |
+| `min_order_size` | `"5"` | `"20"` |
+
+`amount_per_grid: "20"` при $1940 → ~0.0103 ETH (выше минимума 0.01 ETH с запасом).
+
+#### 3. Деплой на продакшн
+
+```bash
+scp configs/phase7_demo.yaml ai-agent@185.233.200.13:/home/ai-agent/TRADERAGENT/configs/phase7_demo.yaml
+ssh ai-agent@185.233.200.13 "cd ~/TRADERAGENT && docker compose restart bot"
+```
+
+Бот перезапущен, ошибки 10001 исчезли из логов. ETHUSDT торгуется нормально.
+
+#### 4. Git
+
+- Коммит локальный: `8018283` → после fetch+rebase → `2551822` на `alekseymavai/TRADERAGENT` main
+- 1 файл изменён, 4 insertions, 4 deletions
+
+---
+
+## Предыдущая сессия (2026-02-28) — Session 38: SMC Parameter Fix + HybridStrategy Integration
 
 ### Задача
 
