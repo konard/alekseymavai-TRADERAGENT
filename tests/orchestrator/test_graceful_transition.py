@@ -64,6 +64,10 @@ def _make_orchestrator_with_exchange(
     orch._strategy_switch_cooldown = cooldown
     orch._strategy_locked = False
     orch._locked_strategies = None
+    # Phase-0 additions
+    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._regime_stale_threshold = 120.0
+    orch.detect_market_regime = AsyncMock(return_value=None)
 
     # Config mock
     orch.config = SimpleNamespace(

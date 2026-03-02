@@ -591,6 +591,10 @@ class ParameterOptimizer:
             portfolio_stop_loss_pct=template.portfolio_stop_loss_pct,
             risk_per_trade=template.risk_per_trade,
             max_position_pct=template.max_position_pct,
+            # Fees — ensure they carry over from template (Bybit VIP0 by default)
+            maker_fee=template.maker_fee,
+            taker_fee=template.taker_fee,
+            slippage=template.slippage,
         )
 
         _prefix_map = {
@@ -620,3 +624,99 @@ class ParameterOptimizer:
                         object.__setattr__(cfg, key, val)
 
         return cfg
+
+    async def optimize_with_core(
+        self,
+        param_grid: dict[str, list[Any]],
+        data: "MultiTimeframeData",
+        core: "TradingCore",
+        *,
+        bar_duration_seconds: int = 300,
+        lookback: int = 100,
+        warmup_bars: int = 14400,
+        max_workers: int | None = None,
+    ) -> "OptimizationResult":
+        """
+        Grid-search optimization using TradingCore as configuration source.
+
+        This is the parity-safe entry point for optimization — all base
+        parameters (cooldown_bars, fees, risk limits) are derived from
+        TradingCore, preventing divergence with the live bot.
+
+        The ``param_grid`` may override any OrchestratorBacktestConfig field,
+        using the same prefix routing as ``optimize_orchestrator()``::
+
+            {
+                # Routing params (override derived values for search)
+                "router_cooldown_bars": [1, 2, 4],       # bars (M5)
+                "regime_check_every_n": [6, 12, 24],
+                # DCA params
+                "dca_trigger_pct": [0.03, 0.05, 0.07],
+                # TF params
+                "tf_ema_fast": [10, 15, 20],
+            }
+
+        Args:
+            param_grid:           Parameter grid (name → list of values).
+            data:                 Pre-loaded multi-timeframe OHLCV data.
+            core:                 TradingCore instance (base config source).
+            bar_duration_seconds: Bar length in seconds. Default 300 = M5.
+            lookback:             OHLCV lookback window.
+            warmup_bars:          Warmup bars before strategy execution.
+            max_workers:          Parallel workers (None = sequential).
+
+        Returns:
+            OptimizationResult with best params and all trials.
+        """
+        from bot.tests.backtesting.unified_engine import (
+            UnifiedBacktestEngine,
+            trading_core_to_backtest_config,
+        )
+
+        # Derive base config from TradingCore — guaranteed parity
+        base_config = trading_core_to_backtest_config(
+            core,
+            lookback=lookback,
+            warmup_bars=warmup_bars,
+            bar_duration_seconds=bar_duration_seconds,
+        )
+
+        combinations = self._generate_combinations(param_grid)
+        trials: list[OptimizationTrial] = []
+
+        async def _run_trial(params: dict[str, Any]) -> OptimizationTrial:
+            cfg = self._apply_orchestrator_params(base_config, params)
+            engine = UnifiedBacktestEngine()
+            if hasattr(self, "_strategy_factories"):
+                for name, factory in self._strategy_factories.items():
+                    engine.register_strategy_factory(name, factory)
+            result = await engine.run(data, cfg)
+            obj_val = self._get_objective_value(result)
+            return OptimizationTrial(params=params, result=result, objective_value=obj_val)
+
+        if max_workers and max_workers > 1:
+            loop = asyncio.get_event_loop()
+
+            def _run_sync(p: dict[str, Any]) -> OptimizationTrial:
+                return asyncio.run(_run_trial(p))
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = [loop.run_in_executor(pool, _run_sync, p) for p in combinations]
+                trials = list(await asyncio.gather(*futures))
+        else:
+            for params in combinations:
+                trial = await _run_trial(params)
+                trials.append(trial)
+
+        trials.sort(key=lambda t: t.objective_value, reverse=self.config.higher_is_better)
+        best = trials[0] if trials else None
+
+        return OptimizationResult(
+            best_params=best.params if best else {},
+            best_result=best.result if best else self._empty_result(),
+            best_objective=best.objective_value if best else 0.0,
+            all_trials=trials,
+            objective_metric=self.config.objective,
+            param_grid=param_grid,
+        )

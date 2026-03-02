@@ -1,0 +1,111 @@
+name: Weekly Backtest Optimization
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC — runs weekly optimization pipeline
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+    inputs:
+      symbol:
+        description: "Trading pair to optimize (e.g. BTC/USDT)"
+        required: false
+        default: "BTC/USDT"
+      mode:
+        description: "Optimization mode (single / multi)"
+        required: false
+        default: "single"
+        type: choice
+        options:
+          - single
+          - multi
+
+jobs:
+  backtest-optimization:
+    name: Run Backtest V2.0 Optimization
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      # Read-only API key for fetching market data — NO trading permissions
+      BYBIT_READONLY_API_KEY: ${{ secrets.BYBIT_READONLY_API_KEY }}
+      BYBIT_READONLY_SECRET: ${{ secrets.BYBIT_READONLY_SECRET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify TradingCore parity (unit tests)
+        run: |
+          python -m pytest tests/core/test_trading_core.py \
+                           tests/core/test_time_provider.py \
+                           tests/core/test_execution_layer.py \
+                           tests/backtesting/test_unified_engine.py \
+                           tests/backtesting/test_optimize_with_core.py \
+                           -v --tb=short -q
+        # If parity tests fail, abort optimization — don't run with diverged params
+
+      - name: Run Backtest V2.0 — Baseline (no optimization)
+        env:
+          SYMBOL: ${{ github.event.inputs.symbol || 'BTC/USDT' }}
+        run: |
+          python scripts/run_backtest_v2.py \
+            --mode single \
+            --symbol "$SYMBOL" \
+            --phase baseline \
+            --output results/baseline_$(date +%Y%m%d).json
+        continue-on-error: true  # Don't fail if data fetch is rate-limited
+
+      - name: Run Backtest V2.0 — Grid Optimization
+        env:
+          SYMBOL: ${{ github.event.inputs.symbol || 'BTC/USDT' }}
+        run: |
+          python scripts/run_backtest_v2.py \
+            --mode single \
+            --symbol "$SYMBOL" \
+            --phase optimize \
+            --workers 4 \
+            --output results/optimized_$(date +%Y%m%d).json
+        continue-on-error: true
+
+      - name: Upload optimization results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optimization-results-${{ github.run_id }}
+          path: results/
+          retention-days: 90
+
+      - name: Post summary to job
+        if: always()
+        run: |
+          echo "## Optimization Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if ls results/*.json 1>/dev/null 2>&1; then
+            for f in results/*.json; do
+              echo "### $(basename $f)" >> $GITHUB_STEP_SUMMARY
+              python3 -c "
+          import json, sys
+          with open('$f') as fp:
+            data = json.load(fp)
+          print('| Metric | Value |')
+          print('|--------|-------|')
+          for k in ['total_return_pct', 'sharpe_ratio', 'max_drawdown_pct', 'total_trades']:
+            if k in data:
+              print(f'| {k} | {data[k]:.4f} |')
+          " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Could not parse $f" >> $GITHUB_STEP_SUMMARY
+            done
+          else
+            echo "No result files generated." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -68,18 +68,20 @@ class OrchestratorBacktestConfig:
     tf_params: dict[str, Any] = field(default_factory=dict)
     smc_params: dict[str, Any] = field(default_factory=dict)
 
-    # Risk management
-    # Note: max_daily_loss_pct uses *cumulative* downward movement tracking in
-    # RiskManager.update_balance(), so set generously (0.25 = 25%) to avoid
-    # false halts from normal intraday price oscillations.
+    # Risk management — aligned with TradingCoreConfig defaults
     enable_risk_manager: bool = True
-    max_position_size_pct: float = 0.25
-    max_daily_loss_pct: float = 0.25
+    max_position_size_pct: float = 0.25   # 25% per trade (TradingCoreConfig default)
+    max_daily_loss_pct: float = 0.05      # 5% daily loss cap (was 25% — now matches bot)
     portfolio_stop_loss_pct: float = 0.15
 
     # Position sizing (fraction of balance per signal)
     risk_per_trade: Decimal = Decimal("0.02")
     max_position_pct: Decimal = Decimal("0.25")
+
+    # Exchange fee simulation — aligned with TradingCoreConfig defaults (Bybit VIP0)
+    maker_fee: Decimal = Decimal("0.0002")    # 0.02 % (was 0.1 % in old MarketSimulator default)
+    taker_fee: Decimal = Decimal("0.00055")   # 0.055 %
+    slippage: Decimal = Decimal("0.0003")     # 0.03 % average slippage
 
 
 @dataclass
@@ -159,10 +161,12 @@ class BacktestOrchestratorEngine:
                 "register_strategy_factory() or pass strategies via config."
             )
 
-        # Simulator
+        # Simulator — use fees from config (Bybit VIP0 by default)
         simulator = MarketSimulator(
             symbol=config.symbol,
             initial_balance_quote=config.initial_balance,
+            maker_fee=config.maker_fee,
+            taker_fee=config.taker_fee,
         )
 
         # Regime detector

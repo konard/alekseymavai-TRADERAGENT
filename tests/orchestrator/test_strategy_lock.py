@@ -54,6 +54,10 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     # For _publish_event_sync
     orch.redis_client = None
     orch.config = type("C", (), {"name": "test_bot"})()
+    # Phase-0 additions
+    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._regime_stale_threshold = 120.0
+    orch.detect_market_regime = AsyncMock(return_value=None)
     return orch
 
 

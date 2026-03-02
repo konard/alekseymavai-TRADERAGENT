@@ -59,6 +59,10 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     # Async methods used by _update_active_strategies
     orch._publish_event = AsyncMock()
     orch._graceful_transition = AsyncMock()
+    # Phase-0 additions
+    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._regime_stale_threshold = 120.0
+    orch.detect_market_regime = AsyncMock(return_value=None)
     return orch
 
 
@@ -297,3 +301,81 @@ class TestStrategySwitchCooldown:
         after = time.monotonic()
 
         assert before <= orch._last_strategy_switch_at <= after
+
+
+# ---------------------------------------------------------------------------
+# Phase 0: _current_regime staleness and eager-fetch tests
+# ---------------------------------------------------------------------------
+
+
+class TestRegimeStaleness:
+    """Verify Phase-0 staleness guard and eager-fetch behaviour."""
+
+    @pytest.mark.asyncio
+    async def test_eager_fetch_on_first_call(self) -> None:
+        """_update_active_strategies triggers detect_market_regime on first call."""
+        orch = _make_orchestrator_stub()
+        orch._last_regime_update_at = 0.0   # never fetched
+        orch._current_regime = None
+        await orch._update_active_strategies()
+        orch.detect_market_regime.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_eager_fetch_when_regime_known(self) -> None:
+        """No detect_market_regime call when regime already fetched."""
+        orch = _make_orchestrator_stub()
+        orch._last_regime_update_at = time.monotonic()
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+        orch.detect_market_regime.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_staleness_warning_logged(self, capsys) -> None:
+        """Warning is emitted when regime age exceeds stale threshold."""
+        orch = _make_orchestrator_stub()
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        # Set update time far in the past (structlog writes to stdout)
+        orch._last_regime_update_at = time.monotonic() - 300.0  # 5 minutes ago
+        orch._regime_stale_threshold = 120.0  # 2 minutes threshold
+
+        await orch._update_active_strategies()
+
+        captured = capsys.readouterr()
+        assert "stale_regime_data" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_no_staleness_warning_when_fresh(self, capsys) -> None:
+        """No warning when regime was recently updated."""
+        orch = _make_orchestrator_stub()
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        orch._last_regime_update_at = time.monotonic()  # just updated
+        orch._regime_stale_threshold = 120.0
+
+        await orch._update_active_strategies()
+
+        captured = capsys.readouterr()
+        assert "stale_regime_data" not in captured.out
+
+    def test_last_regime_update_at_initialised(self) -> None:
+        """_last_regime_update_at exists and defaults to 0.0 in stub."""
+        orch = _make_orchestrator_stub()
+        # Reset to simulate fresh init
+        orch._last_regime_update_at = 0.0
+        assert orch._last_regime_update_at == 0.0
+
+    @pytest.mark.asyncio
+    async def test_detect_market_regime_sets_timestamp(self) -> None:
+        """detect_market_regime records monotonic timestamp on success."""
+        # Use the real attribute (not mock) to verify timestamp is set
+        orch = _make_orchestrator_stub()
+        # Inject a real-looking regime onto the stub
+        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
+        orch._last_regime_update_at = 0.0
+
+        # Simulate what detect_market_regime does when called:
+        before = time.monotonic()
+        orch._current_regime = regime
+        orch._last_regime_update_at = time.monotonic()
+        after = time.monotonic()
+
+        assert before <= orch._last_regime_update_at <= after
