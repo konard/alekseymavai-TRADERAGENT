@@ -131,6 +131,18 @@ class BotOrchestrator:
         self._smc_analysis_interval: float = 300.0  # 5 minutes
         self._smc_stale_count: int = 0  # count consecutive stale rejections
 
+        # Unified TradingCore kernel — shared config/coordinator with backtest engine.
+        # Created here (before derived attributes) so _regime_check_interval and
+        # _strategy_switch_cooldown can read from it instead of duplicating defaults.
+        self._trading_core: TradingCore = TradingCore.from_config(
+            TradingCoreConfig(
+                symbol=str(getattr(bot_config, "symbol", "BTC/USDT")),
+                cooldown_seconds=int(
+                    getattr(bot_config, "strategy_switch_cooldown_seconds", 600)
+                ),
+            )
+        )
+
         # v2.0: Multi-strategy components
         self.strategy_registry = StrategyRegistry(max_strategies=10)
         self.market_regime_detector = MarketRegimeDetector()
@@ -140,28 +152,23 @@ class BotOrchestrator:
             check_interval=30.0,
         )
         self._current_regime: RegimeAnalysis | None = None
-        self._regime_check_interval: float = 60.0  # seconds
+        # Read interval from TradingCore so bot and backtest share the same value.
+        self._regime_check_interval: float = float(
+            self._trading_core.config.regime_check_interval_seconds
+        )
         self._last_regime_update_at: float = 0.0   # monotonic ts of last successful regime update
-        self._regime_stale_threshold: float = 120.0  # warn after 2× check interval
+        self._regime_stale_threshold: float = 2.0 * self._regime_check_interval
         self._active_strategies: set[str] = set()  # strategies active for current regime
         self._last_strategy_switch_at: float = 0.0  # monotonic timestamp of last switch
+        self._last_active_strategies_update_at: float = 0.0  # throttle _update_active_strategies
+        # Cooldown also sourced from TradingCore (single source of truth with backtest).
         self._strategy_switch_cooldown: float = float(
-            getattr(self.config, "strategy_switch_cooldown_seconds", 600)
+            self._trading_core.config.cooldown_seconds
         )
 
         # Manual strategy lock (prevents auto-switching when locked)
         self._strategy_locked: bool = False
         self._locked_strategies: set[str] | None = None
-
-        # Unified TradingCore kernel — shared config/coordinator with backtest engine
-        self._trading_core: TradingCore = TradingCore.from_config(
-            TradingCoreConfig(
-                symbol=str(getattr(bot_config, "symbol", "BTC/USDT")),
-                cooldown_seconds=int(
-                    getattr(bot_config, "strategy_switch_cooldown_seconds", 600)
-                ),
-            )
-        )
 
         # Set health callbacks
         self.health_monitor.set_unhealthy_callback(self._on_strategy_unhealthy)
@@ -809,8 +816,14 @@ class BotOrchestrator:
                 # Cache balance once per iteration (#233)
                 self._cached_balance = await self._get_available_balance()
 
-                # Update which strategies should run based on regime (#283, #292)
-                await self._update_active_strategies()
+                # Update which strategies should run based on regime (#283, #292).
+                # Throttled to _regime_check_interval so we don't re-evaluate every tick —
+                # regime data itself only refreshes that often.  The first iteration always
+                # runs (monotonic() ≫ 0, so now - 0.0 is always ≥ interval).
+                _now = time.monotonic()
+                if _now - self._last_active_strategies_update_at >= self._regime_check_interval:
+                    await self._update_active_strategies()
+                    self._last_active_strategies_update_at = _now
 
                 # Process Grid + DCA (hybrid coordination or independent)
                 grid_active = self.grid_engine and self._is_strategy_active("grid")
