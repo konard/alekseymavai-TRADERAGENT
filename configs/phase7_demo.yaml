@@ -126,6 +126,7 @@ bots:
       amount_per_step: "20"           # $20 per step
       max_steps: 5                    # Max 5 steps
       take_profit_percentage: "0.10"  # Take profit at 10%
+      catch_up_enabled: false          # Set to true to place missing levels on startup
 
     risk_management:
       max_position_size: "300"
@@ -224,3 +225,40 @@ bots:
     auto_start: true
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
+
+  # =========================================================================
+  # 6. BTC/USDT SMC M5 Strategy (H1 structure → M5 precision entry)
+  # dry_run=true, auto_start=false until verified via backtest
+  # Sharpe acceptance gate: must beat M15 approach in backtest
+  # =========================================================================
+  - version: 1
+    name: demo_btc_smc_m5
+    symbol: BTC/USDT
+    strategy: smc
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_demo
+      sandbox: true
+      rate_limit: true
+
+    smc:
+      enabled: true
+      swing_length_h1: 10       # H1 structure: 10 bars (unchanged default)
+      swing_length_m5: 20       # M5 entry: 20 bars = 100-min noise filter
+      m5_limit: 1000            # ~3.5 days of M5 data
+      h1_limit: 200             # H1 history (structure)
+      risk_per_trade: "0.01"    # 1% (cautious: M5 generates more signals)
+      min_risk_reward: "2.0"    # Reduced from 2.5 (M5 levels less clean)
+      max_positions: 2
+
+    risk_management:
+      max_position_size: "5000"
+      stop_loss_percentage: "0.15"
+      min_order_size: "10"
+
+    notifications:
+      enabled: false
+
+    dry_run: true        # Start in dry_run; switch to false after backtest Sharpe >= M15
+    auto_start: false    # Enable manually after verification

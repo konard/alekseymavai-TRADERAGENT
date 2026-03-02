@@ -85,6 +85,7 @@ class SMCStrategyAdapter(BaseStrategy):
         """
         # Pad DataFrames if fewer than 5 provided
         df_list = list(dfs)
+        m5_explicitly_provided = len(df_list) >= 5
         while len(df_list) < 5:
             df_list.append(df_list[-1])
 
@@ -96,13 +97,15 @@ class SMCStrategyAdapter(BaseStrategy):
             df_list[4],
         )
 
-        # Cache for signal generation
+        # Cache for signal generation.
+        # Only store real M5 data when it was explicitly passed (5th argument).
+        # Padded copies must NOT trigger the M5 entry path in generate_signal().
         self._cached_dfs = {
             "d1": df_d1,
             "h4": df_h4,
             "h1": df_h1,
             "m15": df_m15,
-            "m5": df_m5,
+            "m5": df_m5 if m5_explicitly_provided else pd.DataFrame(),
         }
 
         # SMCStrategy.analyze_market expects 4 DFs (d1, h4, h1, m15)
@@ -132,11 +135,20 @@ class SMCStrategyAdapter(BaseStrategy):
 
         Uses cached multi-timeframe data from analyze_market() if available,
         otherwise uses the provided df as both h1 and m15.
+
+        When M5 data is cached (df_m5 non-empty), uses the two-level H1→M5
+        entry logic (generate_signals_m5).  Falls back to the legacy
+        H1/M15 approach when M5 data is absent.
         """
         df_h1 = self._cached_dfs.get("h1", df)
-        df_m15 = self._cached_dfs.get("m15", df)
+        df_m5 = self._cached_dfs.get("m5", pd.DataFrame())
 
-        signals = self._strategy.generate_signals(df_h1, df_m15)
+        # Two-level M5 entry: H1 context + M5 precision
+        if not df_m5.empty and hasattr(self._strategy, "generate_signals_m5"):
+            signals = self._strategy.generate_signals_m5(df_h1, df_m5)
+        else:
+            df_m15 = self._cached_dfs.get("m15", df)
+            signals = self._strategy.generate_signals(df_h1, df_m15)
 
         if not signals:
             return None

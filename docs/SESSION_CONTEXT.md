@@ -3,9 +3,9 @@
 ## Текущий статус проекта
 
 **Дата:** 2 марта 2026
-**Статус:** v2.0.0 + Roadmap COMPLETE + **ETH grid lot-size fix (Session 41)**
-**Pass Rate:** 100% (1537/1537 tests passing, 25 skipped)
-**Code Quality:** ruff PASS + black PASS + mypy PASS
+**Статус:** v2.0.0 + **DCA Catch-up + TimescaleDB + SMC M5 (Session 42)**
+**Pass Rate:** 1352+ tests passing (35 новых тестов добавлено; 1 pre-existing failure в test_smc_adapter_backtest)
+**Code Quality:** ruff PASS + black PASS
 **Последний коммит:** `2551822` (fix(config): increase ETH/USDT grid amount to meet Bybit minimum lot size)
 **Bot Status:** RUNNING — 4 бота на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_smc. Ошибка 10001 устранена.
 **Pipeline Status:** Phase 1 DONE (135/135 OK). Phase 2 остановлена (5/135) — алгоритм требует оптимизации.
@@ -23,7 +23,143 @@
 
 ---
 
-## Последняя сессия (2026-03-02) — Session 41: ETH/USDT Grid Lot-Size Fix + Deploy
+## Последняя сессия (2026-03-02) — Session 42: DCA Catch-up + TimescaleDB + SMC M5
+
+### Задача
+
+Реализовать 3 блока новой функциональности: умный старт DCA, персистентное OHLCV-хранилище и SMC на M5.
+
+### Сделано в сессии 42
+
+#### БЛОК 2 (P0): DCA Catch-up Mode
+
+**`bot/config/schemas.py`** — добавлено 4 поля в `DCAConfig`:
+```python
+catch_up_enabled: bool = Field(default=False, ...)
+catch_up_max_orders: int = Field(default=3, ge=1, le=10, ...)
+catch_up_reference: Literal["current_price", "last_high"] = Field(default="current_price", ...)
+catch_up_lookback_bars: int = Field(default=500, ge=50, le=2000, ...)
+```
+
+**`bot/strategies/dca/startup_analyzer.py`** (НОВЫЙ) — `DCAStartupAnalyzer`:
+- Алгоритм: вычислить уровни `price_n = base * (1 - trigger_pct * n)`, отобрать те, что ниже текущей цены без open ордера, обрезать до `catch_up_max_orders`.
+- Два режима `catch_up_reference`: `"current_price"` (быстрый старт) и `"last_high"` (rolling max с подтверждённым откатом ≥ trigger_pct).
+- Фильтр лот-сайза: `amount_usd / level_price >= min_lot_size`.
+- Сортировка кандидатов: от ближайшего к дальнему.
+
+**`bot/orchestrator/bot_orchestrator.py`** — добавлен `_run_dca_catchup()`:
+- Вызывается в `start()` после `reconcile_with_exchange()`, до main loop.
+- Fetch OHLCV + open orders → `DCAStartupAnalyzer.analyze()` → place orders.
+- `dry_run=True` → план строится, ордера НЕ выставляются.
+
+**`configs/phase7_demo.yaml`** — `demo_sol_dca`: добавлено `catch_up_enabled: false` явно.
+
+**Тесты:** 15 тестов в `tests/strategies/dca/test_catch_up.py` и `tests/orchestrator/test_dca_catchup_integration.py` — все зелёные.
+
+---
+
+#### БЛОК 3 (P1): TimescaleDB + HistoryManager + WebSocket
+
+**`docker-compose.yml`** — postgres image заменён:
+```yaml
+# Было:
+image: postgres:15-alpine
+# Стало:
+image: timescale/timescaledb:latest-pg15
+```
+Обратно совместимо: TimescaleDB = PostgreSQL расширение, все таблицы сохраняются.
+
+**`alembic/versions/20260302_ohlcv_hypertable.py`** (НОВЫЙ) — Alembic миграция:
+- Таблица `candles` (time, exchange, symbol, interval, OHLCV), PK = (time, exchange, symbol, interval)
+- `create_hypertable('candles', 'time', chunk_time_interval => INTERVAL '7 days')`
+- Индекс `idx_candles_sym_int_time ON candles (symbol, interval, time DESC)`
+- Идемпотентна (`if_not_exists => TRUE`), работает на plain PostgreSQL если расширение недоступно.
+
+**`bot/data/history_manager.py`** (НОВЫЙ) — `HistoryManager`:
+- `get_candles(symbol, interval, limit, since)` — DB-first, backfill при нехватке данных.
+- `backfill(symbol, interval, target_bars)` — пагинированная загрузка батчами по 200 баров.
+- `upsert_candles(candles)` — `INSERT ON CONFLICT (time, exchange, symbol, interval) DO UPDATE`.
+- `get_latest_ts(symbol, interval)` — `SELECT MAX(time) FROM candles WHERE ...`.
+
+**`bot/data/candle_ws_feed.py`** (НОВЫЙ) — `CandleWSFeed`:
+- Bybit WebSocket `kline.{interval}.{symbol}`.
+- Сохраняет только подтверждённые свечи (`confirm=True`).
+- Методы: `run()`, `stop()`, `_on_message()`.
+
+**`bot/orchestrator/bot_orchestrator.py`** — интеграция:
+- `history_manager: HistoryManager | None` параметр в `__init__`.
+- `_start_history_feed()`: backfill истории + запуск WebSocket задачи для SMC/TrendFollower.
+- `_process_smc_logic()`: когда `history_manager` доступен, использует M5 (1000 баров) вместо M15 (200 баров).
+- `_process_trend_follower_logic()`: использует `history_manager.get_candles()` вместо прямого `fetch_ohlcv`.
+- Cleanup WebSocket задачи при `stop()`.
+
+**`scripts/backfill_history.py`** (НОВЫЙ) — CLI скрипт:
+```bash
+python scripts/backfill_history.py --days 90 --symbols BTC/USDT ETH/USDT SOL/USDT \
+    --intervals 5m 15m 1h 4h 1d
+```
+
+**Тесты:** 11 тестов в `tests/data/test_history_manager.py` и `tests/data/test_candle_ws_feed.py` — все зелёные.
+
+---
+
+#### БЛОК 4 (P2): SMC M5 Entry Timeframe
+
+**`bot/strategies/smc/config.py`** — добавлены per-TF параметры:
+```python
+swing_length_m5: int = 20   # M5: 20 баров = 100 мин окно (фильтрация шума)
+swing_length_h1: int = 10   # H1: 10 баров (текущее поведение)
+m5_limit: int = 1000        # M5 свечей ≈ 3.5 дня
+h1_limit: int = 200         # H1 для структуры (без изменений)
+```
+
+**`bot/strategies/smc/smc_strategy.py`** — добавлен `generate_signals_m5(df_h1, df_m5)`:
+- Анализирует H1 на BOS/CHoCH → определяет направление.
+- Создаёт отдельный M5-анализатор с `swing_length_m5`.
+- Фильтрует M5-сигналы по выравниванию с H1 трендом.
+- Валидирует риск/position sizing.
+
+**`bot/strategies/smc_adapter.py`** — два изменения:
+1. `analyze_market()`: флаг `m5_explicitly_provided = len(df_list) >= 5`; при padding сохраняет пустой DataFrame в `_cached_dfs["m5"]` (предотвращает ложное срабатывание M5-пути в бэктесте).
+2. `generate_signal()`: роутинг по наличию M5 данных:
+```python
+if not df_m5.empty and hasattr(self._strategy, "generate_signals_m5"):
+    signals = self._strategy.generate_signals_m5(df_h1, df_m5)
+else:
+    signals = self._strategy.generate_signals(df_h1, df_m15)  # legacy
+```
+
+**`configs/phase7_demo.yaml`** — добавлен 6-й бот `demo_btc_smc_m5`:
+```yaml
+strategy: smc
+smc:
+  swing_length_h1: 10; swing_length_m5: 20; m5_limit: 1000; h1_limit: 200
+  risk_per_trade: "0.01"; min_risk_reward: "2.0"; max_positions: 2
+dry_run: true; auto_start: false  # включить вручную после верификации Sharpe
+```
+
+**Тесты:** 9 тестов в `tests/strategies/smc/test_m5_signal_generation.py` — все зелёные.
+
+---
+
+#### Известные проблемы
+
+- **`test_smc_adapter_backtest` (pre-existing):** тест падал ДО наших изменений (подтверждено `git stash`). Причина: 4-дневных синтетических данных недостаточно для warmup=100. Не регрессия.
+
+---
+
+#### Итог сессии 42
+
+| Блок | Файлов | Тестов | Статус |
+|------|--------|--------|--------|
+| DCA Catch-up | 3 изменено + 1 создан | 15 | ✅ зелёные |
+| TimescaleDB | 2 изменено + 5 создано | 11 | ✅ зелёные |
+| SMC M5 | 4 изменено | 9 | ✅ зелёные |
+| **Итого** | **9 изм. + 6 созд.** | **35** | **✅ все зелёные** |
+
+---
+
+## Предыдущая сессия (2026-03-02) — Session 41: ETH/USDT Grid Lot-Size Fix + Deploy
 
 ### Задача
 

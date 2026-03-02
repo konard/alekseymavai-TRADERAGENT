@@ -16,6 +16,9 @@ import pandas as pd
 import redis.asyncio as redis
 
 from bot.config.schemas import BotConfig, StrategyType
+from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
+from bot.data.history_manager import HistoryManager
+from bot.data.candle_ws_feed import CandleWSFeed
 from bot.core.dca_engine import DCAEngine
 from bot.core.grid_engine import GridEngine, GridType
 from bot.core.risk_manager import RiskManager
@@ -83,6 +86,7 @@ class BotOrchestrator:
         db_manager: DatabaseManager,
         redis_url: str = "redis://localhost:6379",
         portfolio_risk_manager: PortfolioRiskManager | None = None,
+        history_manager: HistoryManager | None = None,
     ):
         """
         Initialize Bot Orchestrator.
@@ -92,11 +96,17 @@ class BotOrchestrator:
             exchange_client: Exchange API client
             db_manager: Database manager
             redis_url: Redis connection URL
+            portfolio_risk_manager: Optional cross-pair portfolio risk manager
+            history_manager: Optional HistoryManager for persistent OHLCV cache
         """
         self.config = bot_config
         self.exchange = exchange_client
         self.db = db_manager
         self.redis_url = redis_url
+
+        # HistoryManager for persistent OHLCV (TimescaleDB); optional
+        self.history_manager: HistoryManager | None = history_manager
+        self._candle_ws_task: asyncio.Task | None = None
 
         # State management
         self.state = BotState.STOPPED
@@ -326,6 +336,10 @@ class BotOrchestrator:
                 working_timeframe=pydantic_smc.working_timeframe,
                 entry_timeframe=pydantic_smc.entry_timeframe,
                 swing_length=pydantic_smc.swing_length,
+                swing_length_m5=pydantic_smc.swing_length_m5,
+                swing_length_h1=pydantic_smc.swing_length_h1,
+                m5_limit=pydantic_smc.m5_limit,
+                h1_limit=pydantic_smc.h1_limit,
                 trend_period=pydantic_smc.trend_period,
                 close_break=pydantic_smc.close_break,
                 close_mitigation=pydantic_smc.close_mitigation,
@@ -436,6 +450,16 @@ class BotOrchestrator:
                         self.dca_engine.reset()
                         logger.info("dca_engine_ready")
 
+                # DCA catch-up: place missing levels below current price
+                if self.dca_engine and self.config.dca and self.config.dca.catch_up_enabled:
+                    await self._run_dca_catchup()
+
+                # Start HistoryManager backfill + WebSocket feed for SMC / TrendFollower
+                if self.history_manager and self.config.strategy in (
+                    StrategyType.SMC, StrategyType.TREND_FOLLOWER
+                ):
+                    await self._start_history_feed()
+
                 # Start main loop
                 self._running = True
                 self.state = BotState.RUNNING
@@ -505,6 +529,14 @@ class BotOrchestrator:
             # v2.0: Stop health monitor and all strategies
             await self.health_monitor.stop()
             await self.strategy_registry.stop_all()
+
+            # Stop WebSocket candle feed if running
+            if self._candle_ws_task and not self._candle_ws_task.done():
+                self._candle_ws_task.cancel()
+                try:
+                    await self._candle_ws_task
+                except asyncio.CancelledError:
+                    pass
 
             # Cancel all open orders (if not dry run)
             if not self.config.dry_run:
@@ -1058,6 +1090,123 @@ class BotOrchestrator:
                     if rebalance_order and self.state == BotState.RUNNING:
                         await self._place_single_order(rebalance_order)
 
+    async def _start_history_feed(self) -> None:
+        """Backfill OHLCV history and launch a WebSocket kline feed.
+
+        Called from ``start()`` when a HistoryManager is available and the
+        strategy is SMC or TrendFollower.
+        """
+        if not self.history_manager:
+            return
+
+        symbol = self.config.symbol
+        # Choose entry timeframe: SMC uses 5m, TrendFollower uses 1h
+        if self.config.strategy == StrategyType.SMC:
+            entry_tf = "5m"
+            backfill_bars = getattr(self.config.smc, "m5_limit", 1000) if self.config.smc else 1000
+        else:
+            entry_tf = "1h"
+            backfill_bars = 500
+
+        try:
+            logger.info(
+                "history_backfill_starting",
+                symbol=symbol,
+                interval=entry_tf,
+                target_bars=backfill_bars,
+            )
+            await self.history_manager.backfill(symbol, entry_tf, target_bars=backfill_bars)
+            logger.info("history_backfill_done", symbol=symbol, interval=entry_tf)
+        except Exception as e:
+            logger.warning("history_backfill_failed", error=str(e))
+
+        # Launch background WebSocket feed
+        sandbox = bool(getattr(self.config.exchange, "sandbox", False))
+        feed = CandleWSFeed(
+            history_manager=self.history_manager,
+            symbol=symbol,
+            interval=entry_tf,
+            exchange_name=getattr(self.config.exchange, "exchange_id", "bybit"),
+            sandbox=sandbox,
+        )
+        self._candle_ws_task = asyncio.create_task(feed.run())
+        logger.info("candle_ws_feed_launched", symbol=symbol, interval=entry_tf)
+
+    async def _run_dca_catchup(self) -> None:
+        """Place missing DCA levels below current price on startup (catch-up mode).
+
+        Called once from ``start()`` after reconciliation, only when
+        ``config.dca.catch_up_enabled`` is True.
+        """
+        if not self.dca_engine or not self.config.dca or not self.current_price:
+            return
+
+        dca_cfg = self.config.dca
+        min_order_size = Decimal(str(self.config.risk_management.min_order_size)) if self.config.risk_management else Decimal("10")
+
+        try:
+            # 1. Fetch historical OHLCV (1h) for reference-price analysis
+            ohlcv = await self.exchange.fetch_ohlcv(
+                symbol=self.config.symbol,
+                timeframe="1h",
+                limit=dca_cfg.catch_up_lookback_bars,
+            )
+
+            # 2. Fetch open orders to avoid duplicates
+            open_orders = await self.exchange.fetch_open_orders(self.config.symbol)
+
+            # 3. Build catch-up plan
+            analyzer = DCAStartupAnalyzer(
+                trigger_pct=Decimal(str(dca_cfg.trigger_percentage)),
+                amount_per_step=Decimal(str(dca_cfg.amount_per_step)),
+                max_steps=dca_cfg.max_steps,
+                catch_up_max_orders=dca_cfg.catch_up_max_orders,
+                catch_up_reference=dca_cfg.catch_up_reference,
+                catch_up_lookback_bars=dca_cfg.catch_up_lookback_bars,
+            )
+            plan = analyzer.analyze(
+                ohlcv=ohlcv,
+                current_price=self.current_price,
+                open_orders=open_orders,
+                min_order_size=min_order_size,
+            )
+
+            # 4. Place orders
+            placed = 0
+            for level in plan.orders_to_place:
+                logger.info(
+                    "catchup_order_placing",
+                    level=level.level_num,
+                    price=float(level.price),
+                    amount_usd=float(level.amount_usd),
+                    dry_run=self.config.dry_run,
+                )
+                if not self.config.dry_run:
+                    try:
+                        base_amount = float(level.amount_usd / level.price)
+                        await self.exchange.create_order(
+                            symbol=self.config.symbol,
+                            order_type="market",
+                            side="buy",
+                            amount=base_amount,
+                        )
+                        # Advance DCA state
+                        self.dca_engine.execute_dca_step(level.price)
+                    except Exception as e:
+                        logger.error("catchup_order_failed", level=level.level_num, error=str(e))
+                        continue
+                placed += 1
+
+            logger.info(
+                "catchup_completed",
+                placed=placed,
+                skipped_covered=plan.skipped_covered,
+                skipped_above=plan.skipped_above,
+            )
+
+        except Exception as e:
+            logger.error("dca_catchup_error", error=str(e), exc_info=True)
+
     async def _process_dca_logic(self) -> None:
         """Process DCA triggers and take profit logic."""
         if not self.dca_engine or not self.current_price:
@@ -1293,18 +1442,23 @@ class BotOrchestrator:
             return
 
         try:
-            # Fetch OHLCV data for analysis
-            ohlcv = await self.exchange.fetch_ohlcv(
-                symbol=self.config.symbol,
-                timeframe="1h",  # TODO: Make configurable
-                limit=100,
-            )
-
-            # Convert to DataFrame
-            df = pd.DataFrame(
-                ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
-            )
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            # Fetch OHLCV data — HistoryManager (DB-first) when available
+            if self.history_manager:
+                df = await self.history_manager.get_candles(
+                    self.config.symbol, "1h", limit=100
+                )
+                if "time" in df.columns:
+                    df = df.rename(columns={"time": "timestamp"})
+            else:
+                ohlcv = await self.exchange.fetch_ohlcv(
+                    symbol=self.config.symbol,
+                    timeframe="1h",
+                    limit=100,
+                )
+                df = pd.DataFrame(
+                    ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+                )
+                df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
             # 1. Analyze market
             market_conditions = self.trend_follower_strategy.analyze_market(df)
@@ -1499,14 +1653,11 @@ class BotOrchestrator:
             self._smc_last_analysis = now
 
             # Fetch 4 timeframes of OHLCV data
-            ohlcv_d1, ohlcv_h4, ohlcv_h1, ohlcv_m15 = await asyncio.gather(
-                self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1d", limit=200),
-                self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="4h", limit=200),
-                self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1h", limit=200),
-                self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="15m", limit=200),
-            )
+            # HistoryManager (DB-first) when available; otherwise direct REST call
+            smc_cfg = self.config.smc
+            m5_limit = getattr(smc_cfg, "m5_limit", 1000) if smc_cfg else 1000
+            h1_limit = getattr(smc_cfg, "h1_limit", 200) if smc_cfg else 200
 
-            # Convert each to DataFrame
             def _to_df(ohlcv_data: list) -> pd.DataFrame:
                 df = pd.DataFrame(
                     ohlcv_data,
@@ -1516,10 +1667,29 @@ class BotOrchestrator:
                 df.set_index("timestamp", inplace=True)
                 return df
 
-            df_d1 = _to_df(ohlcv_d1)
-            df_h4 = _to_df(ohlcv_h4)
-            df_h1 = _to_df(ohlcv_h1)
-            df_m15 = _to_df(ohlcv_m15)
+            if self.history_manager:
+                df_d1, df_h4, df_h1, df_m5 = await asyncio.gather(
+                    self.history_manager.get_candles(self.config.symbol, "1d", limit=200),
+                    self.history_manager.get_candles(self.config.symbol, "4h", limit=200),
+                    self.history_manager.get_candles(self.config.symbol, "1h", limit=h1_limit),
+                    self.history_manager.get_candles(self.config.symbol, "5m", limit=m5_limit),
+                )
+                # Rename "time" column to match downstream expectations
+                for df_item in (df_d1, df_h4, df_h1, df_m5):
+                    if "time" in df_item.columns:
+                        df_item.set_index("time", inplace=True)
+                df_m15 = df_m5  # alias: SMC adapter receives M5 data as entry TF
+            else:
+                ohlcv_d1, ohlcv_h4, ohlcv_h1, ohlcv_m15 = await asyncio.gather(
+                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1d", limit=200),
+                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="4h", limit=200),
+                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1h", limit=h1_limit),
+                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="5m", limit=m5_limit),
+                )
+                df_d1 = _to_df(ohlcv_d1)
+                df_h4 = _to_df(ohlcv_h4)
+                df_h1 = _to_df(ohlcv_h1)
+                df_m15 = _to_df(ohlcv_m15)
 
             # 1. Analyze market (multi-timeframe)
             analysis = self.smc_strategy.analyze_market(df_d1, df_h4, df_h1, df_m15)

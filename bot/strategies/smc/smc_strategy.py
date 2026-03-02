@@ -12,6 +12,7 @@ import pandas as pd
 from bot.strategies.smc.config import DEFAULT_SMC_CONFIG, SMCConfig
 from bot.strategies.smc.confluence_zones import ConfluenceZoneAnalyzer
 from bot.strategies.smc.entry_signals import EntrySignalGenerator, SMCSignal
+from bot.strategies.smc.entry_signals import SignalDirection as SMCSignalDirection
 from bot.strategies.smc.market_structure import MarketStructureAnalyzer, TrendDirection
 from bot.strategies.smc.position_manager import PositionManager, PositionMetrics
 from bot.utils.logger import get_logger
@@ -228,6 +229,97 @@ class SMCStrategy:
 
         # Limit to max 3 concurrent signals
         return filtered[:3]
+
+    def generate_signals_m5(
+        self, df_h1: pd.DataFrame, df_m5: pd.DataFrame
+    ) -> list[SMCSignal]:
+        """
+        Two-level entry: H1 structure → M5 precision entry.
+
+        Logic:
+          1. Analyse H1 for BOS/CHoCH to determine direction.
+          2. Use M5 data (with swing_length_m5) to find OB/FVG entries
+             within the H1 zone.
+          3. Only emit signals when M5 FVG/OB overlaps with the H1 zone.
+
+        Args:
+            df_h1: 1-hour candles for structural context.
+            df_m5: 5-minute candles for precision entry.
+
+        Returns:
+            List of validated SMCSignal objects (empty list if in warmup).
+        """
+        self._generate_call_count += 1
+
+        if self._generate_call_count <= self.config.warmup_bars:
+            return []
+
+        if df_h1.empty or df_m5.empty:
+            return []
+
+        # 1. Determine H1 trend/direction (uses existing market_structure analyser)
+        h1_structure = self.market_structure.analyze(df_h1)
+        h1_trend = h1_structure.get("trend", self.current_trend)
+
+        # No strong directional bias — skip
+        if h1_trend == TrendDirection.RANGING:
+            logger.debug("m5_entry_skipped_ranging_h1")
+            return []
+
+        # 2. Create a dedicated M5 structure analyser with noise-filtering swing_length
+        m5_swing_length = self.config.swing_length_m5
+        m5_analyzer = MarketStructureAnalyzer(
+            swing_length=m5_swing_length,
+            trend_period=self.config.trend_period,
+            close_break=self.config.close_break,
+        )
+        m5_confluence = ConfluenceZoneAnalyzer(
+            market_structure=m5_analyzer,
+            timeframe="5m",
+            close_mitigation=self.config.close_mitigation,
+            join_consecutive_fvg=self.config.join_consecutive_fvg,
+            liquidity_range_percent=self.config.liquidity_range_percent,
+        )
+        m5_signal_gen = EntrySignalGenerator(
+            market_structure=m5_analyzer,
+            confluence_analyzer=m5_confluence,
+            min_risk_reward=self.config.min_risk_reward,
+            sl_buffer_pct=0.5,
+        )
+
+        # 3. Detect M5 entry signals
+        try:
+            m5_signals_raw = m5_signal_gen.analyze(df_m5)
+        except Exception as e:
+            logger.warning("m5_signal_gen_error", error=str(e))
+            return []
+
+        # 4. Filter: only keep signals aligned with H1 trend
+        aligned: list[SMCSignal] = []
+        for sig in m5_signals_raw:
+            if h1_trend == TrendDirection.BULLISH and sig.direction == SMCSignalDirection.LONG:
+                aligned.append(sig)
+            elif h1_trend == TrendDirection.BEARISH and sig.direction == SMCSignalDirection.SHORT:
+                aligned.append(sig)
+
+        # Validate risk / position sizing
+        validated: list[SMCSignal] = []
+        for signal in aligned:
+            position_size = self.position_manager.calculate_position_size(signal)
+            is_valid, reason = self.position_manager.validate_position_risk(signal, position_size)
+            if is_valid:
+                validated.append(signal)
+            else:
+                logger.debug("m5_signal_rejected", reason=reason)
+
+        logger.info(
+            "m5_signals_generated",
+            h1_trend=h1_trend,
+            m5_raw=len(m5_signals_raw),
+            aligned=len(aligned),
+            validated=len(validated),
+        )
+        return validated
 
     def manage_positions(
         self, current_prices: dict[str, Decimal], df: Optional[pd.DataFrame] = None

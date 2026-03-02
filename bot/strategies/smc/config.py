@@ -15,12 +15,20 @@ class SMCConfig:
     trend_timeframe: str = "1d"  # D1 for global trend
     structure_timeframe: str = "4h"  # H4 for market structure
     working_timeframe: str = "1h"  # H1 for confluence zones
-    entry_timeframe: str = "15m"  # M15 for entry signals
+    entry_timeframe: str = "15m"  # M15 for entry signals (legacy; M5 when m5_limit>0)
 
     # Market Structure parameters
     trend_period: int = 20  # Lookback period for trend detection
-    swing_length: int = 10  # Candles for swing high/low identification
+    swing_length: int = 10  # Candles for swing high/low (single-TF or H1 default)
     close_break: bool = True  # BOS/CHoCH: require candle close beyond level (vs wick)
+
+    # Per-TF swing_length overrides (M5 two-level entry)
+    swing_length_m5: int = 20  # M5: 20 bars = 100-min window (noise filter)
+    swing_length_h1: int = 10  # H1: 10 bars (current default, backward compat)
+
+    # OHLCV limits for each timeframe
+    m5_limit: int = 1000    # 1000 M5 candles ≈ 3.5 days history
+    h1_limit: int = 200     # H1 candles for structure (unchanged)
 
     # Warmup — skip signal generation for first N calls to build structure
     warmup_bars: int = 100  # auto-computed as max(swing_length * 4, 100) in __post_init__

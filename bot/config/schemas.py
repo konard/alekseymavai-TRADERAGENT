@@ -5,6 +5,7 @@ Defines the structure and validation rules for bot configurations.
 
 from decimal import Decimal
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -97,6 +98,28 @@ class DCAConfig(BaseModel):
         default=Decimal("0.1"),
         gt=0,
         description="Take profit percentage after DCA (0.1 = 10%)",
+    )
+
+    # Catch-up mode: place missing DCA levels on bot startup
+    catch_up_enabled: bool = Field(
+        default=False,
+        description="Place missing DCA levels below current price on startup",
+    )
+    catch_up_max_orders: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum number of catch-up orders to place on startup",
+    )
+    catch_up_reference: Literal["current_price", "last_high"] = Field(
+        default="current_price",
+        description="Reference point for calculating DCA levels: current price or recent high",
+    )
+    catch_up_lookback_bars: int = Field(
+        default=500,
+        ge=50,
+        le=2000,
+        description="Number of 1h bars to look back when finding the reference high",
     )
 
 
@@ -221,7 +244,7 @@ class SMCConfigSchema(BaseModel):
         default=10,
         ge=5,
         le=200,
-        description="Candles for swing high/low identification",
+        description="Candles for swing high/low identification (single-TF default)",
     )
     trend_period: int = Field(
         default=20,
@@ -232,6 +255,34 @@ class SMCConfigSchema(BaseModel):
     close_break: bool = Field(
         default=True,
         description="BOS/CHoCH: require candle close beyond level (vs wick)",
+    )
+
+    # Per-TF swing_length overrides (M5 two-level entry mode)
+    swing_length_m5: int = Field(
+        default=20,
+        ge=5,
+        le=200,
+        description="Swing length for M5 entry timeframe (noise filter)",
+    )
+    swing_length_h1: int = Field(
+        default=10,
+        ge=5,
+        le=200,
+        description="Swing length for H1 structure timeframe",
+    )
+
+    # OHLCV limits
+    m5_limit: int = Field(
+        default=1000,
+        ge=100,
+        le=5000,
+        description="Number of M5 candles to fetch (~3.5 days at 1000)",
+    )
+    h1_limit: int = Field(
+        default=200,
+        ge=50,
+        le=1000,
+        description="Number of H1 candles to fetch for structure",
     )
 
     # Warmup
