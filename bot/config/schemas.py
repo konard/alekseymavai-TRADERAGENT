@@ -376,6 +376,12 @@ class BotConfig(BaseModel):
         le=7200,
         description="Minimum seconds between regime-based strategy switches (0 to disable)",
     )
+    regime_check_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="How often (seconds) the bot re-evaluates the market regime and active strategies",
+    )
     close_positions_on_switch: bool = Field(
         default=False,
         description="Close open positions when deactivating a strategy (False = hold positions)",

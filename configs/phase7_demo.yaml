@@ -65,6 +65,8 @@ bots:
 
     dry_run: false     # LIVE orders on demo exchange
     auto_start: true   # Auto-start primary bot
+    strategy_switch_cooldown_seconds: 600   # 10 min cooldown between strategy switches
+    regime_check_interval_seconds: 60       # Check market regime every 60 s
 
   # =========================================================================
   # 2. ETH/USDT Grid Strategy
@@ -100,6 +102,8 @@ bots:
 
     dry_run: false
     auto_start: true   # Auto-start
+    strategy_switch_cooldown_seconds: 600
+    regime_check_interval_seconds: 60
 
   # =========================================================================
   # 3. SOL/USDT DCA Strategy
@@ -134,6 +138,8 @@ bots:
 
     dry_run: false
     auto_start: true   # Auto-start
+    strategy_switch_cooldown_seconds: 600
+    regime_check_interval_seconds: 60
 
   # =========================================================================
   # 4. BTC/USDT Trend Follower Strategy
@@ -180,6 +186,8 @@ bots:
 
     dry_run: false
     auto_start: false
+    strategy_switch_cooldown_seconds: 600
+    regime_check_interval_seconds: 60
 
   # =========================================================================
   # 5. BTC/USDT SMC (Smart Money Concepts) Strategy
@@ -214,3 +222,5 @@ bots:
 
     dry_run: true
     auto_start: true
+    strategy_switch_cooldown_seconds: 600
+    regime_check_interval_seconds: 60

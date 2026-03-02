@@ -140,6 +140,9 @@ class BotOrchestrator:
                 cooldown_seconds=int(
                     getattr(bot_config, "strategy_switch_cooldown_seconds", 600)
                 ),
+                regime_check_interval_seconds=int(
+                    getattr(bot_config, "regime_check_interval_seconds", 60)
+                ),
             )
         )
 
