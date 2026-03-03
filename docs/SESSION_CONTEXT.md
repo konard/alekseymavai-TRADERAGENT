@@ -1,13 +1,13 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-02)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-03)
 
 ## Текущий статус проекта
 
-**Дата:** 2 марта 2026
-**Статус:** v2.0.0 + **DCA Catch-up + TimescaleDB + SMC M5 (Session 42)**
+**Дата:** 3 марта 2026
+**Статус:** v2.0.0 + **DCA Catch-up + TimescaleDB + SMC M5 + Активация стратегий (Session 43)**
 **Pass Rate:** 1352+ tests passing (35 новых тестов добавлено; 1 pre-existing failure в test_smc_adapter_backtest)
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `2551822` (fix(config): increase ETH/USDT grid amount to meet Bybit minimum lot size)
-**Bot Status:** RUNNING — 4 бота на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_smc. Ошибка 10001 устранена.
+**Последний коммит:** `9d53210` (fix(bybit): skip LinearFutures in fetch_markets to preserve perpetual precision)
+**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. DCA catch-up работает корректно.
 **Pipeline Status:** Phase 1 DONE (135/135 OK). Phase 2 остановлена (5/135) — алгоритм требует оптимизации.
 **Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`). Запустить через панель Yandex Cloud.
 
@@ -18,12 +18,85 @@
 | Сервер | IP | Роль | Репозиторий | Данные |
 |--------|----|------|-------------|--------|
 | Мой (Claude) | `173.249.2.184` | Разработка | Session 37 ✓ | 8 файлов |
-| Продакшн | `185.233.200.13` | Только бот (Docker) | Session 37 ✓ | 5.4 GB, 45 пар |
+| Продакшн | `185.233.200.13` | Только бот (Docker) | Session 43 ✓ | 5.4 GB, 45 пар |
 | Тест | `158.160.215.57` | Только бэктесты | **ВЫКЛЮЧЕН** | 5.4 GB, 45 пар |
 
 ---
 
-## Последняя сессия (2026-03-02) — Session 42: DCA Catch-up + TimescaleDB + SMC M5
+## Последняя сессия (2026-03-03) — Session 43: Активация стратегий + Fix LinearFutures precision
+
+### Задача
+
+Активировать готовые фичи из Session 42 в конфиге, задеплоить на продакшн и исправить ошибки запуска.
+
+### Сделано в сессии 43
+
+#### 1. Активация всех готовых стратегий (`configs/phase7_demo.yaml`)
+
+| Параметр | Было | Стало | Причина |
+|----------|------|-------|---------|
+| BTC Hybrid `upper_price` | 69000 | 74000 | Перецентровка (BTC ~$69,390) |
+| BTC Hybrid `lower_price` | 62000 | 64000 | Перецентровка |
+| ETH Grid `amount_per_grid` | 20 | 30 | Bybit мин. 0.01 ETH (~$20.44 < $30) |
+| ETH Grid `min_order_size` | 20 | 30 | Соответствие amount_per_grid |
+| SOL DCA `trigger_percentage` | 0.05 | 0.02 | Слишком строгий триггер |
+| SOL DCA `min_confluence_score` | 0.75 | 0.6 | Больше входов |
+| SOL DCA `catch_up_enabled` | false | true | Включение catch-up |
+| BTC Trend `auto_start` | false | true | Первый запуск |
+| SMC `swing_length` | 50 | 10 | Warmup 40 баров вместо 200 |
+| SMC `min_risk_reward` | 2.5 | 2.0 | Больше сигналов |
+| SMC `dry_run` | true | false | Live торговля |
+
+Добавлен бот `demo_btc_smc_m5` (SMC на M5, `dry_run: true`, `auto_start: false`) — для проверки через бэктест перед включением.
+
+#### 2. Fix: `qtyStep` вместо `basePrecision` (коммит `7793d2b`)
+
+`bybit_direct_client.py` использовал `basePrecision` (fallback `"0.001"`) вместо `qtyStep` (`"0.1"` для SOL). Для SOL: `20/83.8 = 0.2386` с precision=3 → отправлял `"0.238"` → `ByBit error 10001: Qty invalid`.
+
+**Фикс:** `lot_size_filter.get("qtyStep", lot_size_filter.get("basePrecision", "0.01"))`
+
+#### 3. Root cause fix: `LinearFutures` перезаписывали `LinearPerpetual` (коммит `9d53210`)
+
+Bybit API `/v5/market/instruments-info` возвращает **5 инструментов** для SOL/USDT:
+- `SOLUSDT` (LinearPerpetual): `qtyStep=0.1` → precision=1 → qty=**0.2** ✅
+- `SOLUSDT-06MAR26` ... `SOLUSDT-27MAR26` (LinearFutures): `qtyStep=0.01` → precision=2 → qty=**0.24** ❌
+
+Все они имеют `baseCoin=SOL, quoteCoin=USDT`, поэтому `fetch_markets()` создавал один ключ `"SOL/USDT"` — и последний (dated futures) перезаписывал perpetual. Итог: бот отправлял `qty=0.24` для perpetual-контракта, который требует шаг 0.1.
+
+**Фикс:** пропустить `contractType != "LinearPerpetual"` в цикле `fetch_markets()`.
+
+```python
+# bot/api/bybit_direct_client.py, строка ~426
+for instrument in data.get("list", []):
+    if instrument.get("contractType") != "LinearPerpetual":
+        continue  # пропускаем dated futures
+    ...
+```
+
+После фикса: `Created market order amount=0.2 symbol=SOL/USDT` ✅ — все 3 catch-up ордера размещены.
+
+### Состояние ботов после Session 43
+
+| Бот | Статус | Примечания |
+|-----|--------|------------|
+| demo_btc_hybrid | ✅ RUNNING | Grid 64k–74k, DCA 4% |
+| demo_eth_grid | ✅ RUNNING | $30/level = 0.015 ETH ✅ |
+| demo_sol_dca | ✅ RUNNING | catch-up: 3 ордера размещены |
+| demo_btc_trend | ✅ RUNNING | Первый запуск, EMA 20/50 |
+| demo_btc_smc | ✅ RUNNING | swing=10, warmup=100 баров |
+| demo_btc_smc_m5 | ⏸ dry_run | auto_start=false, ждёт бэктест |
+
+### Коммиты сессии 43
+
+```
+9d53210 fix(bybit): skip LinearFutures in fetch_markets to preserve perpetual precision
+7793d2b fix(bybit): use qtyStep instead of basePrecision for order qty precision
+319c148 config: activate all ready strategies (trend, smc, sol catchup, btc grid recenter)
+```
+
+---
+
+## Предыдущая сессия (2026-03-02) — Session 42: DCA Catch-up + TimescaleDB + SMC M5
 
 ### Задача
 
