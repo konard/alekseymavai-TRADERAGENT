@@ -217,7 +217,7 @@ TF_DEFAULTS: dict[str, Any] = {
 
 SMC_DEFAULTS: dict[str, Any] = {
     "swing_length": 10,
-    "min_risk_reward": 2.5,
+    "min_risk_reward": 2.0,
     "risk_per_trade": 0.02,
     "close_mitigation": False,
 }
@@ -997,7 +997,6 @@ async def run_pipeline(args: argparse.Namespace) -> None:
 
     logger.info("Pipeline starting: %d pairs, %d workers", len(pairs), workers)
     logger.info("Pairs: %s", ", ".join(pairs))
-    tg_send(f"🚀 *Pipeline started*\nPairs: {len(pairs)}, Workers: {workers}\nPhases: {phases if args.phase else 'all (1-5)'}")
 
     # Determine which phases to run
     if args.phase:
@@ -1006,6 +1005,7 @@ async def run_pipeline(args: argparse.Namespace) -> None:
         start = args.start_phase or 1
         phases = list(range(start, 6))
 
+    tg_send(f"🚀 *Pipeline started*\nPairs: {len(pairs)}, Workers: {workers}\nPhases: {phases}")
     logger.info("Phases to run: %s", phases)
 
     phase1_data = None
