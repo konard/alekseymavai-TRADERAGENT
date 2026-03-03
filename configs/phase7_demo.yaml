@@ -2,12 +2,12 @@
 # Uses production API keys with api-demo.bybit.com (demo/paper trading)
 # ALL instruments must be linear (futures) - demo does NOT support spot
 #
-# Market prices as of Feb 23, 2026:
-#   BTC/USDT ~ $65,600
-#   ETH/USDT ~ $2,013
-#   SOL/USDT ~ $88
+# Market prices as of Mar 03, 2026:
+#   BTC/USDT ~ $69,390
+#   ETH/USDT ~ $2,044
+#   SOL/USDT ~ $87.61
 #
-# Date: February 2026 (updated Feb 23)
+# Date: March 2026 (updated Mar 03)
 
 # Database Configuration
 database_url: ${DATABASE_URL}
@@ -41,8 +41,8 @@ bots:
 
     grid:
       enabled: true
-      upper_price: "69000"    # +5% from ~$65,600
-      lower_price: "62000"    # -5.5% from ~$65,600
+      upper_price: "74000"    # +6.6% from ~$69,390 (Mar 03, 2026)
+      lower_price: "64000"    # -7.8% from ~$69,390
       grid_levels: 6
       amount_per_grid: "150"  # $150 per grid (~0.002 BTC, min 0.001 BTC = ~$66)
       profit_per_grid: "0.012" # 1.2% profit per grid
@@ -70,7 +70,6 @@ bots:
 
   # =========================================================================
   # 2. ETH/USDT Grid Strategy
-  # Manual start via Telegram or config change
   # =========================================================================
   - version: 1
     name: demo_eth_grid
@@ -85,29 +84,28 @@ bots:
 
     grid:
       enabled: true
-      upper_price: "2150"     # +7% from ~$1,940
-      lower_price: "1870"     # -7% from ~$1,940
+      upper_price: "2150"     # +5.2% from ~$2,044
+      lower_price: "1870"     # -8.5% from ~$2,044
       grid_levels: 8
-      amount_per_grid: "20"   # $20 per grid level → ~0.010 ETH @ $1940 (Bybit min 0.01)
+      amount_per_grid: "30"   # $30 per grid → ~0.015 ETH @ $2044 (Bybit min 0.01 ✅)
       profit_per_grid: "0.015" # 1.5% profit per grid
 
     risk_management:
       max_position_size: "400"
       stop_loss_percentage: "0.15"
       max_daily_loss: "80"
-      min_order_size: "20"    # must be >= amount_per_grid
+      min_order_size: "30"    # must be >= amount_per_grid
 
     notifications:
       enabled: false
 
     dry_run: false
-    auto_start: true   # Auto-start
+    auto_start: true
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
   # =========================================================================
   # 3. SOL/USDT DCA Strategy
-  # Manual start
   # =========================================================================
   - version: 1
     name: demo_sol_dca
@@ -122,11 +120,12 @@ bots:
 
     dca:
       enabled: true
-      trigger_percentage: "0.05"      # Buy when price drops 5%
+      trigger_percentage: "0.02"      # Buy when price drops 2% (was 5% — too strict)
       amount_per_step: "20"           # $20 per step
       max_steps: 5                    # Max 5 steps
       take_profit_percentage: "0.10"  # Take profit at 10%
-      catch_up_enabled: false          # Set to true to place missing levels on startup
+      min_confluence_score: 0.6       # Reduced from 0.75 — more entries allowed
+      catch_up_enabled: true          # Place missing levels on startup
 
     risk_management:
       max_position_size: "300"
@@ -138,13 +137,12 @@ bots:
       enabled: false
 
     dry_run: false
-    auto_start: true   # Auto-start
+    auto_start: true
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
   # =========================================================================
   # 4. BTC/USDT Trend Follower Strategy
-  # Manual start
   # =========================================================================
   - version: 1
     name: demo_btc_trend
@@ -186,13 +184,12 @@ bots:
       enabled: false
 
     dry_run: false
-    auto_start: false
+    auto_start: true   # Enabled (was false)
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
   # =========================================================================
   # 5. BTC/USDT SMC (Smart Money Concepts) Strategy
-  # Auto-start in dry_run mode, analysis every 5 min
   # =========================================================================
   - version: 1
     name: demo_btc_smc
@@ -207,9 +204,9 @@ bots:
 
     smc:
       enabled: true
-      swing_length: 50
+      swing_length: 10          # Reduced from 50 → warmup 40 bars instead of 200
       risk_per_trade: "0.02"
-      min_risk_reward: "2.5"
+      min_risk_reward: "2.0"    # Reduced from 2.5 — more signals
       max_position_size: "1666"
       max_positions: 3
 
@@ -221,7 +218,7 @@ bots:
     notifications:
       enabled: false
 
-    dry_run: true
+    dry_run: false     # Live trading enabled (was true)
     auto_start: true
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
