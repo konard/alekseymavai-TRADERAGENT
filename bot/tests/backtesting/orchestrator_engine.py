@@ -49,18 +49,23 @@ class OrchestratorBacktestConfig:
     initial_balance: Decimal = Decimal("10000")
     lookback: int = 100
     warmup_bars: int = 14400
-    analyze_every_n: int = 4
+
+    # analyze_every_n — per-strategy intervals (mirrors live bot behaviour):
+    #   Grid/DCA/TF: called every bar (price-reactive, lightweight)
+    #   SMC:         called every 60 M5 bars = 300 sec (mirrors live bot 5-min throttle)
+    default_analyze_every_n: int = 1   # Grid, DCA, TrendFollower — every M5 bar
+    smc_analyze_every_n: int = 60      # SMC — every 300 sec (60 × 5 min bars)
 
     # Strategies to include
     enable_grid: bool = True
     enable_dca: bool = True
     enable_trend_follower: bool = True
-    enable_smc: bool = False
+    enable_smc: bool = True   # enabled by default — mirrors live bot (demo_btc_smc)
 
     # Regime-based routing (key differentiator from V1)
     enable_strategy_router: bool = True
-    router_cooldown_bars: int = 60
-    regime_check_every_n: int = 12    # 12 M5 bars = 1 hour
+    router_cooldown_bars: int = 120   # 600 sec / 5-min bars = 120 bars (matches live bot)
+    regime_check_every_n: int = 12    # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
 
     # Per-strategy parameters (passed to strategy factories)
     grid_params: dict[str, Any] = field(default_factory=dict)
@@ -69,9 +74,12 @@ class OrchestratorBacktestConfig:
     smc_params: dict[str, Any] = field(default_factory=dict)
 
     # Risk management — aligned with TradingCoreConfig defaults
+    # Note: max_daily_loss_pct uses *cumulative* downward movement tracking in
+    # RiskManager.update_balance(), so set generously to avoid false halts
+    # from normal intraday price oscillations.
     enable_risk_manager: bool = True
     max_position_size_pct: float = 0.25   # 25% per trade (TradingCoreConfig default)
-    max_daily_loss_pct: float = 0.05      # 5% daily loss cap (was 25% — now matches bot)
+    max_daily_loss_pct: float = 0.25      # 25% — generous to avoid false halts in backtest
     portfolio_stop_loss_pct: float = 0.15
 
     # Position sizing (fraction of balance per signal)
@@ -248,8 +256,15 @@ class BacktestOrchestratorEngine:
                     continue
 
                 if is_active:
-                    # Periodically analyze market
-                    if bars_since_warmup % config.analyze_every_n == 0:
+                    # Periodically analyze market — per-strategy interval:
+                    # SMC uses smc_analyze_every_n (60 bars = 300 sec, matches live bot)
+                    # Grid/DCA/TF use default_analyze_every_n (1 bar — price-reactive)
+                    _n = (
+                        config.smc_analyze_every_n
+                        if strat_name == "smc"
+                        else config.default_analyze_every_n
+                    )
+                    if _n == 0 or bars_since_warmup % _n == 0:
                         try:
                             strategy.analyze_market(df_d1, df_h4, df_h1, df_m15, df_m5)
                         except Exception as e:

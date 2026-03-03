@@ -78,7 +78,7 @@ logger = logging.getLogger("run_backtest_v2")
 # ---------------------------------------------------------------------------
 ORCHESTRATOR_PARAM_GRID: dict[str, list[Any]] = {
     # Router params
-    "router_cooldown_bars": [30, 60, 120],
+    "router_cooldown_bars": [60, 120, 240],
     "regime_check_every_n": [6, 12, 24],
     # Risk params
     "max_position_size_pct": [0.15, 0.20, 0.25],
@@ -87,6 +87,8 @@ ORCHESTRATOR_PARAM_GRID: dict[str, list[Any]] = {
     "dca_tp_pct": [0.05, 0.08, 0.10],
     # TrendFollower sub-params
     "tf_ema_fast": [10, 15, 20],
+    # SMC sub-params (forwarded to smc_params dict via "smc_" prefix)
+    "smc_min_risk_reward": [2.0, 2.5, 3.0],
 }
 
 
@@ -99,6 +101,7 @@ def _make_strategy_factories(
     grid_params: dict | None = None,
     dca_params: dict | None = None,
     tf_params: dict | None = None,
+    smc_params: dict | None = None,
 ) -> dict:
     """
     Build strategy factory callables.
@@ -146,6 +149,29 @@ def _make_strategy_factories(
         factories["trend_follower"] = _tf_factory
     except ImportError as e:
         logger.debug("Could not import TrendFollowerAdapter: %s", e)
+
+    try:
+        from bot.strategies.smc_adapter import SMCStrategyAdapter
+        from bot.strategies.smc.config import SMCConfig
+
+        _smc_fields = {f.name for f in SMCConfig.__dataclass_fields__.values()}  # type: ignore[union-attr]
+
+        def _smc_factory(params: dict):
+            merged = {**(smc_params or {}), **params}
+            # warmup_bars=0: engine warmup already provides historical context,
+            # so skip the strategy-level warmup guard to avoid double-warmup.
+            merged.setdefault("warmup_bars", 0)
+            cfg_kwargs = {k: v for k, v in merged.items() if k in _smc_fields}
+            cfg = SMCConfig(**cfg_kwargs)
+            return SMCStrategyAdapter(
+                config=cfg,
+                account_balance=Decimal("10000"),
+                name="smc-backtest",
+            )
+
+        factories["smc"] = _smc_factory
+    except ImportError as e:
+        logger.debug("Could not import SMCStrategyAdapter: %s", e)
 
     if not factories:
         logger.warning(
@@ -406,7 +432,7 @@ async def run_single(args: argparse.Namespace) -> None:
         warmup_bars=warmup,
         enable_strategy_router=True,
     )
-    factories = _make_strategy_factories(symbol)
+    factories = _make_strategy_factories(symbol, smc_params={})
 
     output_dir = Path(args.output_dir) / f"single_{symbol}_{datetime.now():%Y%m%d_%H%M%S}"
 
@@ -477,7 +503,7 @@ async def run_multi(args: argparse.Namespace) -> None:
         warmup_bars=warmup,
         enable_strategy_router=True,
     )
-    factories = _make_strategy_factories(symbols[0])
+    factories = _make_strategy_factories(symbols[0], smc_params={})
     output_dir = Path(args.output_dir) / f"multi_{datetime.now():%Y%m%d_%H%M%S}"
 
     # Phase 1: baseline per pair
@@ -542,7 +568,7 @@ async def run_auto(args: argparse.Namespace) -> None:
                 warmup_bars=args.warmup_bars,
                 enable_strategy_router=True,
             )
-            factories = _make_strategy_factories(sym)
+            factories = _make_strategy_factories(sym, smc_params={})
             result = await phase1_baseline(sym, data, cfg, factories)
             rankings[sym] = float(result.total_return_pct)
         except Exception as e:
@@ -558,7 +584,7 @@ async def run_auto(args: argparse.Namespace) -> None:
         warmup_bars=args.warmup_bars,
         enable_strategy_router=True,
     )
-    factories = _make_strategy_factories(top_symbols[0] if top_symbols else "BTC")
+    factories = _make_strategy_factories(top_symbols[0] if top_symbols else "BTC", smc_params={})
     output_dir = Path(args.output_dir) / f"auto_{datetime.now():%Y%m%d_%H%M%S}"
 
     p3 = await phase3_portfolio(
