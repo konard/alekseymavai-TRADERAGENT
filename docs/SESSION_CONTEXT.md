@@ -3,13 +3,13 @@
 ## Текущий статус проекта
 
 **Дата:** 3 марта 2026
-**Статус:** v2.0.0 + **Backtest V2.0 — основная система тестирования (Session 44)**
+**Статус:** v2.0.0 + **Backtest V2.0 Phase 1 завершён — движок требует переработки (Session 44)**
 **Pass Rate:** 1352+ tests passing
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `fe14ada` (fix(backtest): align V2.0 with live bot — SMC, analyze intervals, cooldown)
+**Последний коммит:** `51a965f` (docs: Backtest V2.0 Phase 1 baseline results + engine rework plan)
 **Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Все стратегии активны.
-**Backtest V2.0 Status:** ✅ ГОТОВ — `run_backtest_v2.py` синхронизирован с live ботом. Smoke test: 28 сделок, win_rate=57.1%.
-**Тест-сервер:** ВКЛЮЧЁН (`158.160.215.57`). 39/45 пар с актуальными данными (до фев 2026).
+**Backtest V2.0 Status:** ⚠️ Phase 1 запущен на 45 парах (50k баров), 28/45 завершены. Обнаружены 5 критических багов в `BacktestOrchestratorEngine` — план переработки готов.
+**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа завершена, сервер остановлен после Session 44.
 
 ---
 
@@ -19,7 +19,7 @@
 |--------|----|------|-------------|--------|
 | Мой (Claude) | `173.249.2.184` | Разработка | Session 37 ✓ | 8 файлов |
 | Продакшн | `185.233.200.13` | Только бот (Docker) | Session 43 ✓ | 5.4 GB, 45 пар |
-| Тест | `158.160.215.57` | Только бэктесты | **ВЫКЛЮЧЕН** | 5.4 GB, 45 пар |
+| Тест | `158.160.215.57` | Только бэктесты | Session 44 ✓ **ВЫКЛЮЧЕН** | 5.4 GB, 45 пар |
 
 ---
 
@@ -90,10 +90,41 @@ cd /home/ai-agent/TRADERAGENT
 ```
 Оценочное время: ~5 часов (39 пар × 50k баров).
 
+#### 5. Phase 1 Backtest — запуск на тест-сервере (158.160.215.57)
+
+**Запуск:** 45 пар × 50,000 баров M5 (~163 дня), 14 воркеров (16-core Xeon), параллельно через `ProcessPoolExecutor`.
+
+**Результат:** 28/45 пар завершено (остальные упали с ошибками данных), **все результаты содержат системные артефакты**.
+
+| Метрика | Значение | Причина |
+|---------|----------|---------|
+| Ср. сделок/пару | 3.6 | Стратегии работают по очереди (не параллельно) |
+| SMC сделок | **0 из 28 пар** | Устаревший кэш M5 + фильтр объёма |
+| PnL на сделку | ~$2.5 фиксированно | Заглушка `× 0.001` вместо реального расчёта |
+| Ср. просадка | **64%** | DD > 100% физически невозможно без плеча |
+| Ср. переключений | 199 | Router активирует стратегии по очереди |
+
+**5 критических багов в `BacktestOrchestratorEngine`:**
+
+| # | Баг | Файл / Строка | Приоритет |
+|---|-----|----------------|-----------|
+| 1 | `pnl = amount × price × 0.001` (заглушка) | `orchestrator_engine.py` L~460 | **P0** |
+| 2 | Стратегии по очереди, а не параллельно | `run()` L~249 | **P0** |
+| 3 | SMC: `generate_signal()` использует данные 60-барной давности | `smc_adapter.py` | **P1** |
+| 4 | Позиция не закрывается при смене стратегии → DD > 100% | `run()` L~255 | **P1** |
+| 5 | `require_volume_confirmation=True` блокирует SMC на истории | `smc_adapter.py` | **P1** |
+
+**Следующий шаг:** переработка `BacktestOrchestratorEngine` v3.0 (параллельные стратегии, реальный PnL, weight-based routing).
+Детали: `docs/backtest_v2_engine_rework_plan.md`, результаты: `docs/backtest_v2_phase1_results.md`.
+
+**Аномалия:** FTTUSDT (FTX token, банкрот Nov 2022) → 40 сделок, +4.38%, 465% DD — исключить из тестирования.
+Также исключить: LUNAUSDT (Terra collapse May 2022), WAVESUSDT (низкая ликвидность).
+
 ### Коммиты Session 44
 
 | Коммит | Описание |
 |--------|----------|
+| `51a965f` | docs: Backtest V2.0 Phase 1 baseline results + engine rework plan |
 | `fe14ada` | fix(backtest): align V2.0 with live bot — SMC, analyze intervals, cooldown |
 | `1112165` | docs: update architecture_comparison.md to v3.1 (Sessions 42-44) |
 | `2914260` | fix(pipeline): fix UnboundLocalError for phases + align SMC min_risk_reward to 2.0 |
