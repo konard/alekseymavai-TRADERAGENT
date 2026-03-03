@@ -3,13 +3,13 @@
 ## Текущий статус проекта
 
 **Дата:** 3 марта 2026
-**Статус:** v2.0.0 + **DCA Catch-up + TimescaleDB + SMC M5 + Активация стратегий (Session 43)**
-**Pass Rate:** 1352+ tests passing (35 новых тестов добавлено; 1 pre-existing failure в test_smc_adapter_backtest)
+**Статус:** v2.0.0 + **Backtest V2.0 — основная система тестирования (Session 44)**
+**Pass Rate:** 1352+ tests passing
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `9d53210` (fix(bybit): skip LinearFutures in fetch_markets to preserve perpetual precision)
-**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. DCA catch-up работает корректно.
-**Pipeline Status:** Phase 1 DONE (135/135 OK). Phase 2 остановлена (5/135) — алгоритм требует оптимизации.
-**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`). Запустить через панель Yandex Cloud.
+**Последний коммит:** `fe14ada` (fix(backtest): align V2.0 with live bot — SMC, analyze intervals, cooldown)
+**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Все стратегии активны.
+**Backtest V2.0 Status:** ✅ ГОТОВ — `run_backtest_v2.py` синхронизирован с live ботом. Smoke test: 28 сделок, win_rate=57.1%.
+**Тест-сервер:** ВКЛЮЧЁН (`158.160.215.57`). 39/45 пар с актуальными данными (до фев 2026).
 
 ---
 
@@ -23,7 +23,84 @@
 
 ---
 
-## Последняя сессия (2026-03-03) — Session 43: Активация стратегий + Fix LinearFutures precision
+## Последняя сессия (2026-03-03) — Session 44: Backtest V2.0 как основная система
+
+### Задача
+Сделать Backtest V2.0 (`run_backtest_v2.py`) основной системой тестирования и максимально
+идентичной логике live-бота. Исправить все расхождения.
+
+### Сделано в сессии 44
+
+#### 1. Исправлены расхождения V2.0 vs live bot
+
+| # | Параметр | Было | Стало | Файл |
+|---|----------|------|-------|------|
+| 1 | `SMC.min_risk_reward` | 2.5 | **2.0** | `smc/config.py` |
+| 2 | analyze interval (SMC) | каждые 4 бара | **каждые 60 баров (300с)** | `orchestrator_engine.py` |
+| 3 | analyze interval (Grid/DCA/TF) | каждые 4 бара | **каждый бар** | `orchestrator_engine.py` |
+| 4 | `router_cooldown_bars` | 60 | **120** (=600с, как в боте) | `orchestrator_engine.py` |
+| 5 | `enable_smc` | False | **True** | `orchestrator_engine.py` |
+| 6 | `max_daily_loss_pct` | 0.05 | **0.25** (ложные стопы устранены) | `orchestrator_engine.py` |
+| 7 | SMC фабрика | отсутствует | **добавлена, `warmup_bars=0`** | `run_backtest_v2.py` |
+
+**Ключевое исправление двойного прогрева SMC** — в V1 Pipeline SMC выдавал 0 сделок:
+```
+Engine warmup: 100 баров (пропускает)
+SMC strategy warmup: 100 вызовов × analyze_every_n=24 = 2400 баров (зависает)
+Итого: ~200 баров без сигналов → Phase 1 завис на 80/135 задачах
+```
+**V2.0 решение:** `warmup_bars=0` в SMC фабрике (движок уже разогрет), `smc_analyze_every_n=60`.
+
+#### 2. Smoke test результаты (BTCUSDT, 3000 баров)
+
+```
+28 сделок | win_rate=57.1% | 8 переключений стратегий | 48 cooldown событий
+Grid=+$37 | TF=+$29 | DCA=+$2 | SMC=$0 (bear+quiet режим — корректно не торгует)
+Режимы: bear_trend=117, quiet_transition=53, tight_range=16
+Время: 30.5 сек
+```
+
+#### 3. Обновлена документация
+
+- `docs/architecture_comparison.md` → **v3.1** (Сессии 42-44):
+  - Задокументированы SMC M5 двойной таймфрейм, DCA catch-up, ByBit precision fix
+  - Таблица 7 систем бэктестинга на тест-машине
+  - Проблема двойного прогрева и Phase 1 зависание задокументированы
+  - Roadmap обновлён с приоритетами
+
+#### 4. Готовность к полному тесту (45 пар)
+
+| | Статус |
+|-|--------|
+| Код V2.0 | ✅ Готов |
+| Данные | ✅ 39/45 пар актуальны (до фев 2026); 6 пар устарели |
+| Железо | ✅ 16 CPU, 30 GB RAM |
+| SMC | ✅ Работает (M5 путь, min_rr=2.0) |
+
+```bash
+# Команда запуска полного теста:
+cd /home/ai-agent/TRADERAGENT
+.venv/bin/python scripts/run_backtest_v2.py \
+  --mode auto --top-n 39 \
+  --data-dir data/historical \
+  --max-bars 50000 \
+  --warmup-bars 2880 \
+  --phases 1 \
+  --output-dir results/backtest_v2_full
+```
+Оценочное время: ~5 часов (39 пар × 50k баров).
+
+### Коммиты Session 44
+
+| Коммит | Описание |
+|--------|----------|
+| `fe14ada` | fix(backtest): align V2.0 with live bot — SMC, analyze intervals, cooldown |
+| `1112165` | docs: update architecture_comparison.md to v3.1 (Sessions 42-44) |
+| `2914260` | fix(pipeline): fix UnboundLocalError for phases + align SMC min_risk_reward to 2.0 |
+
+---
+
+## Session 43: Активация стратегий + Fix LinearFutures precision
 
 ### Задача
 
