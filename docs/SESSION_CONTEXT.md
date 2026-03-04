@@ -1,15 +1,107 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-03)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-04)
 
 ## Текущий статус проекта
 
-**Дата:** 3 марта 2026
-**Статус:** v2.0.0 + **Backtest V2.0 Phase 1 завершён — движок требует переработки (Session 44)**
+**Дата:** 4 марта 2026
+**Статус:** v2.0.0 + **BacktestOrchestratorEngine V3.0 — Phase 1 завершён (37 пар, Session 45)**
 **Pass Rate:** 1352+ tests passing
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `51a965f` (docs: Backtest V2.0 Phase 1 baseline results + engine rework plan)
+**Последний коммит:** `276d0dd` (perf(backtest): fix O(n) bottleneck in get_context_at + throttle SMC signals)
 **Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Все стратегии активны.
-**Backtest V2.0 Status:** ⚠️ Phase 1 запущен на 45 парах (50k баров), 28/45 завершены. Обнаружены 5 критических багов в `BacktestOrchestratorEngine` — план переработки готов.
-**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа завершена, сервер остановлен после Session 44.
+**Backtest V2.0 Status:** ✅ Phase 1 завершён (37 пар, 50k баров, 35 мин). Движок V3.0 работает. Phase 2 (оптимизация) — следующий шаг после расследования SMC=0.
+**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа Session 45 завершена.
+
+---
+
+## Последняя сессия (2026-03-04) — Session 45: BacktestOrchestratorEngine V3.0 + Phase 1 (37 пар)
+
+### Задача
+Исправить 5 критических багов движка, переработать `BacktestOrchestratorEngine` до V3.0, устранить узкие места производительности, запустить Phase 1 на 37 парах.
+
+### Сделано в сессии 45
+
+#### 1. BacktestOrchestratorEngine V3.0 (коммит `dda77dc`)
+
+| Изменение | Было (V2.0) | Стало (V3.0) |
+|-----------|-------------|--------------|
+| Режим стратегий | Последовательно (active_set блокирует) | **Параллельно — все 4 стратегии каждый бар** |
+| Роутер | Блокирует неактивные стратегии | **Advisory weights (1.0 / 0.5) — никого не блокирует** |
+| PnL расчёт | `× 0.001` заглушка | **Реальный: `(exit_price - entry_price) × amount`** |
+| Трекинг позиций | Нет | **`position_entry_prices` dict** |
+| SMC M5 данные | Кэш 60-бар-давности | **Свежий `df` каждый вызов `generate_signal`** |
+| `require_volume_confirmation` | True (блокировало SMC) | **False для бэктеста** |
+
+#### 2. Два критических фикса производительности (коммит `276d0dd`)
+
+**Фикс 1: `get_context_at` O(n) → O(log n)** (`bot/tests/backtesting/multi_tf_data_loader.py`)
+```python
+# Было: булева маска — 5 TF × 47k баров × O(50k строк) = 11.75 млрд операций
+df_h1 = data.h1[data.h1.index <= current_ts].tail(lookback)
+
+# Стало: searchsorted — O(log n), ~3000x быстрее
+def _slice(df):
+    pos = df.index.searchsorted(current_ts, side="right")
+    return df.iloc[max(0, pos - lookback) : pos]
+```
+
+**Фикс 2: SMC generate_signal throttle** (`bot/tests/backtesting/orchestrator_engine.py`)
+```python
+smc_generate_signal_every_n: int = 12  # каждые 12 × 5 мин = 1 час
+# generate_signals_m5 — O(n²) паттерн-скан, 25ms/вызов
+# Было: 47,120 вызовов/пару → Стало: 3,927 вызовов (12x меньше)
+```
+
+**Результат:** ~20+ мин/пару → **~13 мин/пару**.
+
+#### 3. Phase 1 — полный запуск (37 пар × 50k баров)
+
+- 37 пар (исключены 8 устаревших: FTT, LUNA, HNT, WAVES, XEM, MATIC, EOS, FTM)
+- 50,000 баров M5 (Aug 2025 – Feb 2026, ~163 дня), warmup 2,880 баров
+- 14 воркеров `ProcessPoolExecutor` на 16-core Xeon
+- Время выполнения: **35 минут** (06:55 → 07:30 UTC)
+- Результаты: `results/backtest_v3_phase1/multi_20260304_065518/` (37 JSON файлов)
+
+#### 4. Phase 1 результаты (медвежий рынок Aug 2025 – Feb 2026)
+
+| Метрика | Значение |
+|---------|----------|
+| Прибыльных пар | **5/37 (13%)** |
+| Средний return | **-11.68%** |
+| Средний Sharpe | **-1.545** |
+| Средний win rate | ~77% |
+| Средних trades/пару | 366 |
+| Risk halted | 5 пар |
+
+**Топ-5 прибыльных:** BATUSDT +3.80%, ETCUSDT +1.85%, BCHUSDT +1.21%, BNBUSDT +1.09%, UNIUSDT +0.25%
+
+**PnL по стратегиям (суммарный $, 37 пар):**
+
+| Стратегия | Total PnL | Анализ |
+|-----------|-----------|--------|
+| Grid | -3,898 | Умеренные потери; + на BAT, BCH, BNB — стабильные пары |
+| DCA | **-10,000** | ⚠️ Катастрофа — усредняет лонг в устойчивом даунтренде |
+| TrendFollower | -894 | Минимальное влияние |
+| SMC | **0** | ⚠️ Ноль сделок на всех 37 парах — нужно расследование |
+
+#### 5. Ключевые выводы и следующие шаги
+
+**Проблемы:**
+1. **DCA смертельно для медвежьего рынка** — `price_deviation_pct=2%` бесконечно накапливает лонг вниз. Нужен `max_safety_orders` или отключение в bear regime.
+2. **SMC = 0 везде** — throttle `smc_generate_signal_every_n=12` + риск-менеджер (Grid/DCA занимают 50% позиций) возможно полностью блокируют SMC. Расследование: запустить single-mode без риск-лимита.
+3. **Win rate 77%+ при отрицательном return** — много мелких побед сетки, одна крупная потеря DCA нивелирует всё.
+
+**Следующие шаги (Phase 2):**
+- Расследовать SMC = 0 (single smoke test с `enable_dca=False, enable_grid=False`)
+- Phase 2: оптимизация DCA параметров (`price_deviation_pct=3-5%`, `max_safety_orders=3`)
+- Рассмотреть SHORT для TrendFollower при bear trend
+
+### Коммиты Session 45
+
+| Коммит | Описание |
+|--------|----------|
+| `0389761` | docs: update SESSION_CONTEXT.md — Session 44 |
+| `dda77dc` | feat(backtest): BacktestOrchestratorEngine v3.0 — parallel strategies + real PnL |
+| `276d0dd` | perf(backtest): fix O(n) bottleneck in get_context_at + throttle SMC signals |
 
 ---
 
