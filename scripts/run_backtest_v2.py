@@ -8,7 +8,7 @@ cooldown guards and portfolio-level risk management.
 
 Modes:
   single  — one pair, all four phases
-  multi   — fixed list of pairs, phases 1 + 3 + 4
+  multi   — fixed list of pairs, Phase 1 parallel + Phase 3 portfolio
   auto    — Phase 1 discovers top-N pairs, then runs phases 2-4
 
 Phases:
@@ -21,7 +21,7 @@ Usage:
     # Mode 1: Single pair
     python scripts/run_backtest_v2.py --mode single --symbol BTCUSDT --workers 8
 
-    # Mode 2: Fixed multi-pair
+    # Mode 2: Fixed multi-pair (parallel Phase 1)
     python scripts/run_backtest_v2.py --mode multi --symbols BTC,ETH,SOL --workers 8
 
     # Mode 3: Auto-select from data dir
@@ -35,10 +35,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import logging
+import os
 import sys
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +76,53 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("run_backtest_v2")
+
+# ---------------------------------------------------------------------------
+# Telegram notifications
+# ---------------------------------------------------------------------------
+
+_TG_CACHE: dict[str, str] = {}
+
+
+def _load_env_file() -> dict[str, str]:
+    """Load .env file from project root into a dict."""
+    env: dict[str, str] = {}
+    env_path = PROJECT_ROOT / ".env"
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+
+def tg_send(text: str) -> None:
+    """Send message to Telegram. Silently skips if not configured."""
+    global _TG_CACHE
+    if not _TG_CACHE:
+        _TG_CACHE = _load_env_file()
+        _TG_CACHE.update(os.environ)
+
+    token = _TG_CACHE.get("TELEGRAM_BOT_TOKEN") or _TG_CACHE.get("TG_TOKEN")
+    chat_id = _TG_CACHE.get("TELEGRAM_CHAT_ID") or _TG_CACHE.get("TG_CHAT_ID")
+    if not token or not chat_id:
+        logger.debug("Telegram not configured — skipping notification")
+        return
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = urllib.parse.urlencode({
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }).encode()
+        req = urllib.request.Request(url, data=payload)
+        urllib.request.urlopen(req, timeout=8)
+        logger.debug("Telegram notification sent (%d chars)", len(text))
+    except Exception as exc:
+        logger.debug("Telegram send failed: %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Default optimization parameter grid (Unified for one-pair optimization)
@@ -122,7 +173,6 @@ def _make_strategy_factories(
 
         def _dca_factory(params: dict):
             merged = {**(dca_params or {}), **params}
-            # Map grid-search friendly names to DCAAdapter constructor names
             trigger = merged.pop("trigger_pct", None)
             tp = merged.pop("tp_pct", None)
             if trigger is not None:
@@ -158,12 +208,13 @@ def _make_strategy_factories(
 
         def _smc_factory(params: dict):
             merged = {**(smc_params or {}), **params}
-            # warmup_bars=0: engine warmup already provides historical context,
-            # so skip the strategy-level warmup guard to avoid double-warmup.
+            # warmup_bars=0: engine warmup already provides historical context
             merged.setdefault("warmup_bars", 0)
-            # Historical data rarely has volume spikes matching live conditions.
-            # Disable volume filter so SMC signals are not blocked in backtest.
+            # Historical data lacks volume spikes — disable filter for backtest
             merged.setdefault("require_volume_confirmation", False)
+            # Disable verbose debug logging for backtest performance
+            merged.setdefault("debug_mode", False)
+            merged.setdefault("log_all_signals", False)
             cfg_kwargs = {k: v for k, v in merged.items() if k in _smc_fields}
             cfg = SMCConfig(**cfg_kwargs)
             return SMCStrategyAdapter(
@@ -199,7 +250,6 @@ def _load_data(
     loader = MultiTimeframeDataLoader()
 
     if data_dir and data_dir.exists():
-        # Use exact suffix match to avoid e.g. "*15m*.csv" matching "*5m*" pattern
         csv_files = [
             f for f in data_dir.glob(f"*{symbol}*.csv")
             if f.stem.endswith("_5m")
@@ -208,14 +258,12 @@ def _load_data(
             try:
                 data = loader.load_csv(str(csv_files[0]))
                 if max_bars and len(data.m5) > max_bars:
-                    # Trim to last max_bars M5 bars
                     data = _trim_data(data, max_bars)
                 logger.info("Loaded %d M5 bars from %s", len(data.m5), csv_files[0].name)
                 return data
             except Exception as e:
                 logger.warning("Failed to load CSV for %s: %s — using synthetic data", symbol, e)
 
-    # Fall back to synthetic data
     from datetime import timedelta
 
     _end = end_date or datetime(2024, 1, 1)
@@ -289,7 +337,6 @@ async def phase2_optimize(
 
     opt_cfg = OptimizationConfig(objective="sharpe_ratio", higher_is_better=True)
     optimizer = ParameterOptimizer(config=opt_cfg)
-    # Pass strategy factories so each trial can build strategies
     if factories:
         optimizer._strategy_factories = factories
 
@@ -300,7 +347,6 @@ async def phase2_optimize(
         max_workers=workers if workers > 1 else None,
     )
 
-    # Build optimized config
     optimized_config = ParameterOptimizer._apply_orchestrator_params(
         config_template, opt_result.best_params
     )
@@ -364,7 +410,6 @@ async def phase4_robustness(
     t0 = time.perf_counter()
     robustness: dict[str, Any] = {}
 
-    # Monte Carlo on the trade history
     try:
         from bot.tests.backtesting.monte_carlo import MonteCarloConfig, MonteCarloSimulation
 
@@ -416,6 +461,57 @@ def _count_combos(grid: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
+# ProcessPoolExecutor worker for Phase 1 (module-level for pickling)
+# ---------------------------------------------------------------------------
+
+def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, float]:
+    """
+    Sync worker for ProcessPoolExecutor.
+    Runs Phase 1 for a single pair in a subprocess worker.
+    Returns (symbol, result_dict | None, error_msg | None, elapsed_sec).
+    """
+    sym, data_dir_str, max_bars, warmup_bars, initial_balance = args_tuple
+    t0 = time.perf_counter()
+
+    # Suppress verbose debug/info logging in worker processes
+    # (structlog inherits parent's handlers via fork on Linux)
+    logging.root.setLevel(logging.WARNING)
+    # Silence structlog (it bypasses Python logging level)
+    try:
+        import structlog as _sl
+        _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(logging.WARNING))
+    except Exception:
+        pass
+    for handler in logging.root.handlers[:]:
+        handler.setLevel(logging.WARNING)
+
+    # Re-insert project root for subprocess workers
+    _root = Path(__file__).resolve().parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+
+    try:
+        async def _inner() -> dict:
+            data = _load_data(sym, Path(data_dir_str), max_bars)
+            cfg = OrchestratorBacktestConfig(
+                symbol=sym,
+                initial_balance=Decimal(str(initial_balance)),
+                warmup_bars=warmup_bars,
+                enable_strategy_router=True,
+            )
+            factories = _make_strategy_factories(sym, smc_params={})
+            result = await phase1_baseline(sym, data, cfg, factories)
+            return result.to_dict()
+
+        result_dict = asyncio.run(_inner())
+        elapsed = time.perf_counter() - t0
+        return sym, result_dict, None, elapsed
+    except Exception as exc:
+        elapsed = time.perf_counter() - t0
+        return sym, None, str(exc), elapsed
+
+
+# ---------------------------------------------------------------------------
 # Mode runners
 # ---------------------------------------------------------------------------
 
@@ -439,7 +535,6 @@ async def run_single(args: argparse.Namespace) -> None:
 
     output_dir = Path(args.output_dir) / f"single_{symbol}_{datetime.now():%Y%m%d_%H%M%S}"
 
-    # Phase 1
     phases_set = set(args.phases.split(",")) if args.phases else set()
     p1_result = await phase1_baseline(symbol, data, config, factories)
     _save_results(output_dir, "phase1_baseline", p1_result.to_dict())
@@ -447,7 +542,6 @@ async def run_single(args: argparse.Namespace) -> None:
     if phases_set and "2" not in phases_set:
         return
 
-    # Phase 2
     p2_result, optimized_config = await phase2_optimize(
         symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers, factories=factories
     )
@@ -459,7 +553,6 @@ async def run_single(args: argparse.Namespace) -> None:
     if phases_set and "3" not in phases_set and "4" not in phases_set:
         return
 
-    # Phase 3 (single pair "portfolio")
     p3_result = await phase3_portfolio(
         symbols=[symbol],
         data_map={symbol: data},
@@ -469,13 +562,11 @@ async def run_single(args: argparse.Namespace) -> None:
     )
     _save_results(output_dir, "phase3_portfolio", p3_result.to_dict())
 
-    # Phase 4
     best_result = (
         p2_result.all_trials[0].result
         if p2_result.all_trials
         else p1_result
     )
-    # Cast to OrchestratorBacktestResult if needed
     if not isinstance(best_result, OrchestratorBacktestResult):
         best_result = p1_result
     p4_result = await phase4_robustness(symbol, data, best_result)
@@ -485,50 +576,137 @@ async def run_single(args: argparse.Namespace) -> None:
 
 
 async def run_multi(args: argparse.Namespace) -> None:
-    """Multi-pair mode: phases 1 + 3."""
+    """Multi-pair mode: Phase 1 in parallel via ProcessPoolExecutor."""
     raw_symbols = (args.symbols or "BTC,ETH,SOL").split(",")
     symbols = [s.strip() for s in raw_symbols if s.strip()]
 
-    data_map: dict[str, MultiTimeframeData] = {}
-    for sym in symbols:
-        try:
-            data_map[sym] = _load_data(
-                symbol=sym,
-                data_dir=Path(args.data_dir) if args.data_dir else None,
-                max_bars=args.max_bars,
-            )
-        except Exception as e:
-            logger.warning("Skipping %s — data load failed: %s", sym, e)
-
-    warmup = args.warmup_bars
-    config = OrchestratorBacktestConfig(
-        initial_balance=Decimal(str(args.initial_balance)) / len(symbols),
-        warmup_bars=warmup,
-        enable_strategy_router=True,
-    )
-    factories = _make_strategy_factories(symbols[0], smc_params={})
+    max_workers = max(1, min(args.workers, len(symbols)))
+    data_dir = str(Path(args.data_dir) if args.data_dir else Path("data/historical"))
     output_dir = Path(args.output_dir) / f"multi_{datetime.now():%Y%m%d_%H%M%S}"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Phase 1: baseline per pair
-    for sym, data in data_map.items():
-        cfg = OrchestratorBacktestConfig(
-            symbol=sym,
-            initial_balance=Decimal(str(args.initial_balance)),
-            warmup_bars=warmup,
+    tg_send(
+        f"🚀 <b>Backtest V2.0 — Phase 1 запущен</b>\n"
+        f"Пар: {len(symbols)} | Workers: {max_workers}\n"
+        f"Баров на пару: {args.max_bars or 'все'} | Warmup: {args.warmup_bars}\n"
+        f"⏳ Обрабатываю..."
+    )
+
+    # Build args for each worker
+    worker_args = [
+        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance)
+        for sym in symbols
+    ]
+
+    phase1_results: dict[str, dict] = {}
+    total = len(symbols)
+    done_count = 0
+    t_total = time.perf_counter()
+
+    loop = asyncio.get_event_loop()
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all pairs; as_completed yields results as they finish
+        future_to_sym = {
+            loop.run_in_executor(executor, _phase1_worker, wa): wa[0]
+            for wa in worker_args
+        }
+
+        for future in asyncio.as_completed(list(future_to_sym.keys())):
+            sym_name, result_dict, error, elapsed = await future
+            done_count += 1
+            idx = done_count
+
+            if result_dict is not None:
+                phase1_results[sym_name] = result_dict
+                _save_results(output_dir, f"phase1_{sym_name}", result_dict)
+
+                ret = float(result_dict.get("total_return_pct", 0) or 0)
+                sharpe = float(result_dict.get("sharpe_ratio", 0) or 0)
+                trades = int(result_dict.get("total_trades", 0) or 0)
+                dd = float(result_dict.get("max_drawdown_pct", 0) or 0)
+                sign = "+" if ret >= 0 else ""
+                tg_send(
+                    f"✅ <b>{sym_name}</b> [{idx}/{total}]\n"
+                    f"Return: {sign}{ret:.2f}% | Sharpe: {sharpe:.2f}\n"
+                    f"Trades: {trades} | DD: {dd:.1f}%\n"
+                    f"⏱ {elapsed:.0f}s"
+                )
+            else:
+                err_short = (error or "unknown")[:120]
+                logger.warning("Phase 1 failed for %s: %s", sym_name, error)
+                tg_send(f"❌ <b>{sym_name}</b> [{idx}/{total}]\n{err_short}")
+
+    # Final summary
+    total_elapsed = time.perf_counter() - t_total
+    if phase1_results:
+        ranked = sorted(
+            phase1_results.items(),
+            key=lambda x: float(x[1].get("total_return_pct", 0) or 0),
+            reverse=True,
+        )
+        top5_lines = []
+        for i, (sym, r) in enumerate(ranked[:5], 1):
+            ret = float(r.get("total_return_pct", 0) or 0)
+            sharpe = float(r.get("sharpe_ratio", 0) or 0)
+            sign = "+" if ret >= 0 else ""
+            top5_lines.append(f"{i}. {sym}: {sign}{ret:.2f}% (Sharpe {sharpe:.2f})")
+
+        profitable = sum(
+            1 for r in phase1_results.values()
+            if float(r.get("total_return_pct", 0) or 0) > 0
+        )
+        avg_ret = sum(
+            float(r.get("total_return_pct", 0) or 0) for r in phase1_results.values()
+        ) / len(phase1_results)
+
+        tg_send(
+            f"📊 <b>Phase 1 завершён!</b>\n"
+            f"Пар: {len(phase1_results)}/{total} | Прибыльных: {profitable}\n"
+            f"Средний return: {'+' if avg_ret >= 0 else ''}{avg_ret:.2f}%\n"
+            f"⏱ Общее время: {total_elapsed/60:.1f} мин\n\n"
+            f"<b>Топ-5 по return:</b>\n" + "\n".join(top5_lines)
+        )
+
+    # Phase 3 only if requested
+    phases_set = set(args.phases.split(",")) if args.phases else set()
+    if phases_set and "3" not in phases_set:
+        logger.info("Multi-pair Phase 1 complete. Results in %s", output_dir)
+        return
+
+    # Phase 3 portfolio (reload data sequentially for now)
+    tg_send("🔄 Запускаю Phase 3 — портфельный анализ...")
+    data_map: dict[str, MultiTimeframeData] = {}
+    for sym in list(phase1_results.keys()):
+        try:
+            data_map[sym] = _load_data(sym, Path(data_dir), args.max_bars)
+        except Exception as e:
+            logger.warning("Phase 3 data load failed for %s: %s", sym, e)
+
+    if data_map:
+        config = OrchestratorBacktestConfig(
+            initial_balance=Decimal(str(args.initial_balance)) / max(len(data_map), 1),
+            warmup_bars=args.warmup_bars,
             enable_strategy_router=True,
         )
-        p1 = await phase1_baseline(sym, data, cfg, factories)
-        _save_results(output_dir, f"phase1_{sym}", p1.to_dict())
+        factories = _make_strategy_factories(list(data_map.keys())[0], smc_params={})
+        p3 = await phase3_portfolio(
+            symbols=list(data_map.keys()),
+            data_map=data_map,
+            per_pair_config=config,
+            factories=factories,
+            initial_capital=Decimal(str(args.initial_balance)),
+        )
+        _save_results(output_dir, "phase3_portfolio", p3.to_dict())
 
-    # Phase 3: portfolio
-    p3 = await phase3_portfolio(
-        symbols=list(data_map.keys()),
-        data_map=data_map,
-        per_pair_config=config,
-        factories=factories,
-        initial_capital=Decimal(str(args.initial_balance)),
-    )
-    _save_results(output_dir, "phase3_portfolio", p3.to_dict())
+        tg_send(
+            f"🏁 <b>Phase 3 завершён!</b>\n"
+            f"Portfolio return: {p3.portfolio_total_return_pct:+.2f}%\n"
+            f"Sharpe: {p3.portfolio_sharpe:.2f}\n"
+            f"Max DD: {p3.portfolio_max_drawdown_pct:.1f}%\n"
+            f"Прибыльных: {p3.pairs_profitable}/{p3.total_pairs}"
+        )
+
     logger.info("Multi-pair mode complete. Results in %s", output_dir)
 
 
@@ -539,11 +717,9 @@ async def run_auto(args: argparse.Namespace) -> None:
         logger.error("Data dir does not exist: %s", data_dir)
         sys.exit(1)
 
-    # Discover symbols from 5m CSV files
     csv_files = list(data_dir.glob("*5m*.csv")) + list(data_dir.glob("*_5m.csv"))
     symbols_found = []
     for f in csv_files:
-        # Try to extract symbol from filename
         name = f.stem.upper()
         for suffix in ["_5M", "_5MIN", "_5m", "_5min"]:
             name = name.replace(suffix.upper(), "")
@@ -556,7 +732,6 @@ async def run_auto(args: argparse.Namespace) -> None:
     symbols_found = symbols_found[: args.top_n]
     logger.info("Auto mode: found %d symbols: %s", len(symbols_found), symbols_found)
 
-    # Run Phase 1 to rank pairs
     loader = MultiTimeframeDataLoader()
     data_map: dict[str, MultiTimeframeData] = {}
     rankings: dict[str, float] = {}
@@ -577,7 +752,6 @@ async def run_auto(args: argparse.Namespace) -> None:
         except Exception as e:
             logger.warning("Phase 1 failed for %s: %s", sym, e)
 
-    # Top-N by return
     top_symbols = sorted(rankings, key=rankings.__getitem__, reverse=True)[: args.top_n]
     logger.info("Top-%d pairs by return: %s", args.top_n, top_symbols)
 
@@ -647,8 +821,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=1,
-        help="Parallel workers for optimization (default: 1)",
+        default=14,
+        help="Parallel workers for Phase 1 multi mode (default: 14)",
     )
     parser.add_argument(
         "--phases",
@@ -664,7 +838,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    logger.info("Backtest V2.0 | mode=%s", args.mode)
+    logger.info("Backtest V2.0 | mode=%s | workers=%d", args.mode, args.workers)
 
     if args.mode == "single":
         asyncio.run(run_single(args))

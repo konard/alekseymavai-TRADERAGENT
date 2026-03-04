@@ -61,6 +61,10 @@ class OrchestratorBacktestConfig:
     #   SMC:         called every 60 M5 bars = 300 sec (mirrors live bot 5-min throttle)
     default_analyze_every_n: int = 1   # Grid, DCA, TrendFollower — every M5 bar
     smc_analyze_every_n: int = 60      # SMC — every 300 sec (60 × 5 min bars)
+    # SMC generate_signal throttle: generate_signals_m5 is O(n²) — calling it every 5-min bar
+    # × 47k bars × 14 workers is prohibitively slow (~20 min/pair). Call every 12 bars (1 hour)
+    # instead — SMC is a swing strategy, hourly signal generation is sufficient.
+    smc_generate_signal_every_n: int = 12   # SMC signal check every 12 M5 bars = 1 hour
 
     # Strategies to include
     enable_grid: bool = True
@@ -271,11 +275,20 @@ class BacktestOrchestratorEngine:
                     except Exception as e:
                         logger.debug("analyze_market error %s bar %d: %s", strat_name, i, e)
 
-                # generate_signal — always (weight scales position size)
-                try:
-                    signal = strategy.generate_signal(df_m5, balance)
-                except Exception as e:
-                    logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
+                # generate_signal — throttled for SMC (expensive O(n²) pattern scan),
+                # every bar for Grid/DCA/TF (lightweight, price-reactive).
+                _gen_n = (
+                    config.smc_generate_signal_every_n
+                    if strat_name == "smc"
+                    else 1
+                )
+                if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
+                    try:
+                        signal = strategy.generate_signal(df_m5, balance)
+                    except Exception as e:
+                        logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
+                        signal = None
+                else:
                     signal = None
 
                 if signal is not None:

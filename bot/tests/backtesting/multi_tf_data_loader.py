@@ -239,12 +239,18 @@ class MultiTimeframeDataLoader:
         start = max(0, idx - lookback + 1)
         df_base = base_df.iloc[start : idx + 1]
 
-        # All other TFs: filter by timestamp
-        df_m5 = data.m5[data.m5.index <= current_ts].tail(lookback)
-        df_m15 = data.m15[data.m15.index <= current_ts].tail(lookback)
-        df_h1 = data.h1[data.h1.index <= current_ts].tail(lookback)
-        df_h4 = data.h4[data.h4.index <= current_ts].tail(lookback)
-        df_d1 = data.d1[data.d1.index <= current_ts].tail(lookback)
+        # All other TFs: use searchsorted (O(log n)) instead of boolean mask (O(n)).
+        # Boolean mask on 50k-row DataFrame × 5 TFs × 47k bars = 11.75 billion ops.
+        # searchsorted reduces this to O(5 × log(50k)) per bar — ~3000x faster.
+        def _slice(df: pd.DataFrame) -> pd.DataFrame:
+            pos = df.index.searchsorted(current_ts, side="right")
+            return df.iloc[max(0, pos - lookback) : pos]
+
+        df_m5 = _slice(data.m5)
+        df_m15 = _slice(data.m15)
+        df_h1 = _slice(data.h1)
+        df_h4 = _slice(data.h4)
+        df_d1 = _slice(data.d1)
 
         # If we iterated on m5, use our precise slice; otherwise use m15
         if base_index is not None:
