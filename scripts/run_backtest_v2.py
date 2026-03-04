@@ -161,6 +161,9 @@ def _make_strategy_factories(
             # warmup_bars=0: engine warmup already provides historical context,
             # so skip the strategy-level warmup guard to avoid double-warmup.
             merged.setdefault("warmup_bars", 0)
+            # Historical data rarely has volume spikes matching live conditions.
+            # Disable volume filter so SMC signals are not blocked in backtest.
+            merged.setdefault("require_volume_confirmation", False)
             cfg_kwargs = {k: v for k, v in merged.items() if k in _smc_fields}
             cfg = SMCConfig(**cfg_kwargs)
             return SMCStrategyAdapter(

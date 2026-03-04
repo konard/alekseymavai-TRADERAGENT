@@ -133,15 +133,19 @@ class SMCStrategyAdapter(BaseStrategy):
         """
         Generate signal using SMC strategy.
 
-        Uses cached multi-timeframe data from analyze_market() if available,
-        otherwise uses the provided df as both h1 and m15.
+        Uses cached multi-timeframe data from analyze_market() for H1/H4/D1.
+        Always uses the provided `df` as fresh M5 data (not the stale cache),
+        so signals reflect the current bar's M5 context.
 
-        When M5 data is cached (df_m5 non-empty), uses the two-level H1→M5
-        entry logic (generate_signals_m5).  Falls back to the legacy
-        H1/M15 approach when M5 data is absent.
+        When M5 data is available, uses the two-level H1→M5 entry logic
+        (generate_signals_m5).  Falls back to the legacy H1/M15 approach
+        when M5 data is absent.
         """
         df_h1 = self._cached_dfs.get("h1", df)
-        df_m5 = self._cached_dfs.get("m5", pd.DataFrame())
+        # Always use the passed df as fresh M5 data — never the stale analyze_market cache.
+        # The cache is only updated every smc_analyze_every_n bars (60 bars = 300 sec),
+        # so using it directly would yield signals based on data up to 5 hours old.
+        df_m5 = df if not df.empty else self._cached_dfs.get("m5", pd.DataFrame())
 
         # Two-level M5 entry: H1 context + M5 precision
         if not df_m5.empty and hasattr(self._strategy, "generate_signals_m5"):

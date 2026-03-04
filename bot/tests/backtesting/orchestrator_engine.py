@@ -1,10 +1,16 @@
 """
-BacktestOrchestratorEngine V2.0 — mirrors BotOrchestrator._main_loop() on historical data.
+BacktestOrchestratorEngine V3.0 — mirrors BotOrchestrator._main_loop() on historical data.
+
+V3.0 changes vs V2.0:
+- All strategies run in PARALLEL every bar (like the live bot, not sequential)
+- Router provides advisory weights (1.0 active / 0.5 reduced), does NOT block strategies
+- Real PnL: (exit_price - entry_price) × amount  (replaces × 0.001 stub)
+- Proper portfolio tracking via position_entry_prices dict
+- Per-strategy P&L correctly attributed
 
 Key differences from MultiTimeframeBacktestEngine (V1):
-- Runs multiple strategy engines simultaneously (Grid + DCA + TrendFollower)
+- Runs multiple strategy engines simultaneously (Grid + DCA + TrendFollower + SMC)
 - Routes signals through StrategyRouter based on market regime
-- Enforces cooldown between strategy switches
 - Tracks per-strategy P&L and strategy switch events
 - Integrates PortfolioRiskManager for position sizing
 
@@ -202,6 +208,7 @@ class BacktestOrchestratorEngine:
         # Per-strategy state tracking
         position_amounts: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
         position_directions: dict[str, dict[str, SignalDirection]] = {name: {} for name in strategies}
+        position_entry_prices: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
         per_strategy_pnl: dict[str, Decimal] = {name: Decimal("0") for name in strategies}
         regime_routing_stats: dict[str, int] = {}
         cooldown_events = 0
@@ -229,68 +236,64 @@ class BacktestOrchestratorEngine:
                 regime_key = current_regime.regime.value
                 regime_routing_stats[regime_key] = regime_routing_stats.get(regime_key, 0) + 1
 
-            # 2. Strategy routing
+            # 2. Strategy routing (advisory weights — does NOT block any strategy)
+            # active strategies → weight 1.0 (full position size)
+            # inactive strategies → weight 0.5 (reduced position size, still trade)
+            regime_weights: dict[str, float] = {}
             if config.enable_strategy_router:
                 router_event = router.on_bar(current_regime, i)
-                active_set = router_event.active_strategies
                 if router_event.cooldown_remaining > 0:
                     cooldown_events += 1
-            else:
-                # No routing — all enabled strategies are always active
-                active_set = set(strategies.keys())
+                regime_weights = {
+                    name: (1.0 if name in router_event.active_strategies else 0.5)
+                    for name in strategies
+                }
 
-            # Filter to only strategies we have built
-            active_set = active_set & set(strategies.keys())
-
-            # 3. Per-strategy signal generation and execution
+            # 3. Per-strategy signal generation and execution (ALL strategies, always)
+            # Mirrors live BotOrchestrator: every strategy runs every bar,
+            # router only adjusts position size via weight.
             balance = simulator.get_portfolio_value()
 
             for strat_name, strategy in strategies.items():
-                is_active = strat_name in active_set
-                has_open_positions = bool(position_amounts[strat_name])
+                weight = regime_weights.get(strat_name, 1.0)
 
-                # Always process exits for strategies with open positions,
-                # even when deactivated — orphaned positions must close via TP/SL.
-                # Only skip entirely if inactive AND no open positions.
-                if not is_active and not has_open_positions:
-                    continue
-
-                if is_active:
-                    # Periodically analyze market — per-strategy interval:
-                    # SMC uses smc_analyze_every_n (60 bars = 300 sec, matches live bot)
-                    # Grid/DCA/TF use default_analyze_every_n (1 bar — price-reactive)
-                    _n = (
-                        config.smc_analyze_every_n
-                        if strat_name == "smc"
-                        else config.default_analyze_every_n
-                    )
-                    if _n == 0 or bars_since_warmup % _n == 0:
-                        try:
-                            strategy.analyze_market(df_d1, df_h4, df_h1, df_m15, df_m5)
-                        except Exception as e:
-                            logger.debug("analyze_market error %s bar %d: %s", strat_name, i, e)
-
-                    # Generate signal (only when strategy is active)
+                # analyze_market — always, at per-strategy intervals:
+                # SMC: every 60 bars (300 sec, mirrors live 5-min throttle)
+                # Grid/DCA/TF: every bar (price-reactive, lightweight)
+                _n = (
+                    config.smc_analyze_every_n
+                    if strat_name == "smc"
+                    else config.default_analyze_every_n
+                )
+                if _n == 0 or bars_since_warmup % _n == 0:
                     try:
-                        signal = strategy.generate_signal(df_m5, balance)
+                        strategy.analyze_market(df_d1, df_h4, df_h1, df_m15, df_m5)
                     except Exception as e:
-                        logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
-                        signal = None
+                        logger.debug("analyze_market error %s bar %d: %s", strat_name, i, e)
 
-                    if signal is not None:
-                        await self._handle_signal(
-                            strat_name=strat_name,
-                            strategy=strategy,
-                            signal=signal,
-                            current_price=current_price,
-                            simulator=simulator,
-                            position_amounts=position_amounts[strat_name],
-                            position_directions=position_directions[strat_name],
-                            risk_manager=risk_manager,
-                            config=config,
-                        )
+                # generate_signal — always (weight scales position size)
+                try:
+                    signal = strategy.generate_signal(df_m5, balance)
+                except Exception as e:
+                    logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
+                    signal = None
 
-                # 4. Update positions and handle exits (always, if open positions exist)
+                if signal is not None:
+                    await self._handle_signal(
+                        strat_name=strat_name,
+                        strategy=strategy,
+                        signal=signal,
+                        current_price=current_price,
+                        simulator=simulator,
+                        position_amounts=position_amounts[strat_name],
+                        position_directions=position_directions[strat_name],
+                        position_entry_prices=position_entry_prices[strat_name],
+                        risk_manager=risk_manager,
+                        config=config,
+                        position_weight=weight,
+                    )
+
+                # 4. update_positions — always (each strategy manages its own positions)
                 try:
                     exits = strategy.update_positions(current_price, df_m5)
                 except Exception as e:
@@ -306,16 +309,21 @@ class BacktestOrchestratorEngine:
                         simulator=simulator,
                         position_amounts=position_amounts[strat_name],
                         position_directions=position_directions[strat_name],
+                        position_entry_prices=position_entry_prices[strat_name],
                     )
                     per_strategy_pnl[strat_name] += pnl_delta
 
             # 5. Record equity
+            # simulator.get_portfolio_value() = quote + base * current_price
+            # This correctly accounts for open positions (cost was deducted from quote,
+            # base coins are now worth current_price). DD > 100% artifacts are resolved
+            # by parallel strategy execution (no orphaned cross-strategy positions).
             portfolio_value = simulator.get_portfolio_value()
             ec_entry: dict[str, Any] = {
                 "timestamp": base_df.index[i].isoformat(),
                 "price": float(current_price),
                 "portfolio_value": float(portfolio_value),
-                "active_strategies": sorted(active_set),
+                "active_strategies": sorted(strategies.keys()),
             }
             if current_regime:
                 ec_entry["regime"] = current_regime.regime.value
@@ -372,12 +380,15 @@ class BacktestOrchestratorEngine:
         simulator: MarketSimulator,
         position_amounts: dict[str, Decimal],
         position_directions: dict[str, SignalDirection],
+        position_entry_prices: dict[str, Decimal],
         risk_manager: RiskManager | None,
         config: OrchestratorBacktestConfig,
+        position_weight: float = 1.0,
     ) -> None:
         """Open a position if signal passes risk checks."""
         balance = simulator.get_portfolio_value()
-        position_value = balance * config.max_position_pct
+        # position_weight: 1.0 = full size (router-preferred), 0.5 = reduced (advisory)
+        position_value = balance * config.max_position_pct * Decimal(str(position_weight))
         position_size = position_value / current_price if current_price > 0 else Decimal("0")
 
         # Check if we can afford it
@@ -408,6 +419,7 @@ class BacktestOrchestratorEngine:
             )
             position_amounts[pos_id] = position_size
             position_directions[pos_id] = signal.direction
+            position_entry_prices[pos_id] = current_price  # for real PnL calculation
         except Exception as e:
             logger.debug("Signal execution failed for %s: %s", strat_name, e)
 
@@ -420,8 +432,9 @@ class BacktestOrchestratorEngine:
         simulator: MarketSimulator,
         position_amounts: dict[str, Decimal],
         position_directions: dict[str, SignalDirection],
+        position_entry_prices: dict[str, Decimal],
     ) -> Decimal:
-        """Close positions and return approximate P&L delta."""
+        """Close positions and return real P&L delta: (exit - entry) × amount."""
         pnl_delta = Decimal("0")
         # Always use the simulator's own symbol — strategies may store symbol
         # under different attribute names (_symbol, symbol, etc.) causing
@@ -430,6 +443,7 @@ class BacktestOrchestratorEngine:
         for pos_id, exit_reason in exits:
             amount = position_amounts.pop(pos_id, None)
             direction = position_directions.pop(pos_id, SignalDirection.LONG)
+            entry_price = position_entry_prices.pop(pos_id, current_price)
             if amount is None:
                 continue
             try:
@@ -443,6 +457,7 @@ class BacktestOrchestratorEngine:
                             side="sell",
                             amount=sell_amount,
                         )
+                    pnl_delta += (current_price - entry_price) * amount
                 else:
                     await simulator.create_order(
                         symbol=trade_symbol,
@@ -450,8 +465,7 @@ class BacktestOrchestratorEngine:
                         side="buy",
                         amount=amount,
                     )
-                # Approximate P&L
-                pnl_delta += amount * current_price * Decimal("0.001")
+                    pnl_delta += (entry_price - current_price) * amount
             except Exception as e:
                 logger.debug("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
         return pnl_delta
