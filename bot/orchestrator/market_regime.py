@@ -8,6 +8,8 @@ Market Regimes (v2.0):
 - VOLATILE_TRANSITION: ADX 22-32, ATR>=2% → Reduce exposure
 - BULL_TREND: ADX>32, EMA20>EMA50 → Trend follower / DCA
 - BEAR_TREND: ADX>32, EMA20<EMA50 → DCA
+- ACCUMULATION: SMC CHoCH_BULL detected → SMC strategy (potential reversal up)
+- DISTRIBUTION: SMC CHoCH_BEAR detected → SMC strategy (potential reversal down)
 
 ADX Hysteresis (prevents regime oscillation):
 - Enter trending: ADX must rise above 32
@@ -22,6 +24,7 @@ Strategy Selection Logic (v2.0):
 - BEAR_TREND → DCA Engine
 - QUIET_TRANSITION → Hold
 - VOLATILE_TRANSITION → Reduce exposure
+- ACCUMULATION / DISTRIBUTION → SMC Engine (set via analyze_with_smc())
 
 Indicators:
 - EMA crossover (fast/slow) for trend direction
@@ -32,10 +35,14 @@ Indicators:
 - Volume ratio for regime confirmation
 """
 
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from bot.core.smc.models import SMCContext
 
 import numpy as np
 import pandas as pd
@@ -54,6 +61,8 @@ class MarketRegime(str, Enum):
     VOLATILE_TRANSITION = "volatile_transition"  # ADX 22-32, ATR>=2%
     BULL_TREND = "bull_trend"  # ADX>32, EMA20>EMA50
     BEAR_TREND = "bear_trend"  # ADX>32, EMA20<EMA50
+    ACCUMULATION = "accumulation"  # SMC CHoCH_BULL — smart money accumulating
+    DISTRIBUTION = "distribution"  # SMC CHoCH_BEAR — smart money distributing
     UNKNOWN = "unknown"
 
 
@@ -63,6 +72,7 @@ class RecommendedStrategy(str, Enum):
     GRID = "grid"
     DCA = "dca"
     HYBRID = "hybrid"
+    SMC = "smc"
     REDUCE_EXPOSURE = "reduce_exposure"
     HOLD = "hold"
 
@@ -360,6 +370,70 @@ class MarketRegimeDetector:
 
         return analysis
 
+    def analyze_with_smc(self, df: pd.DataFrame, smc_context: "SMCContext") -> RegimeAnalysis:
+        """
+        Analyze market data and refine regime classification with SMC phase data.
+
+        Calls analyze(df) first, then overrides the regime to ACCUMULATION or
+        DISTRIBUTION when the SMCContext reports those phases (CHoCH signals).
+        The overridden analysis is stored in _last_analysis and history so that
+        subsequent strategy routing picks up the correct recommendation.
+
+        Args:
+            df: OHLCV DataFrame (same requirements as analyze()).
+            smc_context: SMCContext returned by SMCAnalyzer.analyze().
+
+        Returns:
+            RegimeAnalysis — regime may be ACCUMULATION or DISTRIBUTION if
+            SMCContext indicates a phase transition.
+        """
+        from bot.core.smc.models import SMCPhase
+
+        analysis = self.analyze(df)
+
+        smc_regime: MarketRegime | None = None
+        if smc_context.phase == SMCPhase.ACCUMULATION:
+            smc_regime = MarketRegime.ACCUMULATION
+        elif smc_context.phase == SMCPhase.DISTRIBUTION:
+            smc_regime = MarketRegime.DISTRIBUTION
+
+        if smc_regime is None:
+            return analysis
+
+        # Blend base confidence with SMC warmup quality
+        smc_confidence = analysis.confidence * 0.6 + (
+            0.4 if smc_context.warmup_complete else 0.0
+        )
+
+        details = dict(analysis.analysis_details)
+        details["smc_phase"] = smc_context.phase.value
+        details["smc_trend_bias"] = smc_context.trend_bias
+        details["smc_warmup_complete"] = smc_context.warmup_complete
+
+        overridden = dataclasses.replace(
+            analysis,
+            regime=smc_regime,
+            recommended_strategy=RecommendedStrategy.SMC,
+            confidence=smc_confidence,
+            analysis_details=details,
+        )
+
+        # Replace the entry that analyze() stored so history is consistent
+        self._last_analysis = overridden
+        if self._regime_history:
+            self._regime_history[0] = overridden
+
+        logger.info(
+            "smc_regime_override",
+            base_regime=analysis.regime.value,
+            smc_regime=smc_regime.value,
+            smc_phase=smc_context.phase.value,
+            smc_bias=round(smc_context.trend_bias, 3),
+            confidence=round(smc_confidence, 3),
+        )
+
+        return overridden
+
     # =========================================================================
     # Regime Classification
     # =========================================================================
@@ -517,6 +591,9 @@ class MarketRegimeDetector:
         if regime == MarketRegime.BEAR_TREND:
             return RecommendedStrategy.DCA
 
+        if regime in (MarketRegime.ACCUMULATION, MarketRegime.DISTRIBUTION):
+            return RecommendedStrategy.SMC
+
         if regime == MarketRegime.QUIET_TRANSITION:
             return RecommendedStrategy.HOLD
 
@@ -550,6 +627,11 @@ class MarketRegimeDetector:
             trend_conf = min(0.5 + trend_strength * 0.5, 1.0)
             adx_conf = min(adx / 50.0, 1.0)
             return min(trend_conf * 0.6 + adx_conf * 0.4, 1.0)
+
+        if regime in (MarketRegime.ACCUMULATION, MarketRegime.DISTRIBUTION):
+            # Moderate confidence — SMC phase detected but may still evolve
+            adx_conf = min(adx / 40.0, 1.0)
+            return min(0.4 + trend_strength * 0.4 + adx_conf * 0.2, 1.0)
 
         if regime == MarketRegime.VOLATILE_TRANSITION:
             return min(volatility_percentile / 100.0, 1.0)

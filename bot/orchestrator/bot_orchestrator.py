@@ -615,6 +615,7 @@ class BotOrchestrator:
         RecommendedStrategy.GRID: {"grid"},
         RecommendedStrategy.DCA: {"dca"},
         RecommendedStrategy.HYBRID: {"grid", "dca"},
+        RecommendedStrategy.SMC: {"smc"},
         RecommendedStrategy.HOLD: set(),
         RecommendedStrategy.REDUCE_EXPOSURE: set(),
     }
@@ -675,11 +676,13 @@ class BotOrchestrator:
         ):
             strategies.add("trend_follower")
 
-        # SMC runs in trending regimes or volatile transitions
+        # SMC runs in trending regimes, volatile transitions, and SMC phases
         if self._current_regime and self._current_regime.regime.value in (
             "bull_trend",
             "bear_trend",
             "volatile_transition",
+            "accumulation",
+            "distribution",
         ):
             strategies.add("smc")
 
