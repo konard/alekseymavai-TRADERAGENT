@@ -101,6 +101,117 @@ class OrchestratorBacktestConfig:
     taker_fee: Decimal = Decimal("0.00055")   # 0.055 %
     slippage: Decimal = Decimal("0.0003")     # 0.03 % average slippage
 
+    @classmethod
+    def from_yaml_config(cls, path: str, symbol: str) -> "OrchestratorBacktestConfig":
+        """Load backtest config from a live YAML config file.
+
+        Finds all bots for *symbol* and maps ``grid`` / ``dca`` /
+        ``trend_follower`` / ``smc`` YAML sections to the corresponding
+        ``*_params`` dicts so the backtest engine mirrors the live bot's
+        exact settings.
+
+        Example::
+
+            cfg = OrchestratorBacktestConfig.from_yaml_config(
+                "configs/phase7_demo.yaml", "BTC/USDT"
+            )
+            engine = BacktestOrchestratorEngine()
+            result = await engine.run(data, cfg)
+        """
+        import yaml  # optional dep — only needed when calling this helper
+
+        with open(path) as fh:
+            raw = yaml.safe_load(fh)
+
+        bots = raw.get("bots", [])
+        # Only include bots whose auto_start=true (or unset) and symbol matches.
+        # Skip fully-disabled bots such as the _m5 dry-run variant.
+        matching = [
+            b for b in bots
+            if b.get("symbol") == symbol and b.get("auto_start", True)
+        ]
+
+        grid_params: dict = {}
+        dca_params: dict = {}
+        tf_params: dict = {}
+        smc_params: dict = {}
+        risk_per_trade = Decimal("0.02")
+        max_position_pct = Decimal("0.25")
+
+        for bot in matching:
+            rm = bot.get("risk_management") or {}
+
+            # --- grid ---
+            if "grid" in bot and not grid_params:
+                g = bot["grid"]
+                grid_params = {
+                    k: v for k, v in {
+                        "num_levels": g.get("grid_levels"),
+                        "amount_per_grid": Decimal(str(g["amount_per_grid"])) if "amount_per_grid" in g else None,
+                        "profit_per_grid": Decimal(str(g["profit_per_grid"])) if "profit_per_grid" in g else None,
+                    }.items() if v is not None
+                }
+
+            # --- dca ---
+            if "dca" in bot and not dca_params:
+                d = bot["dca"]
+                dca_params = {
+                    k: v for k, v in {
+                        "price_deviation_pct": Decimal(str(d["trigger_percentage"])) if "trigger_percentage" in d else None,
+                        "safety_order_size": Decimal(str(d["amount_per_step"])) if "amount_per_step" in d else None,
+                        "max_safety_orders": d.get("max_steps"),
+                        "take_profit_pct": Decimal(str(d["take_profit_percentage"])) if "take_profit_percentage" in d else None,
+                    }.items() if v is not None
+                }
+
+            # --- trend_follower ---
+            if "trend_follower" in bot and not tf_params:
+                tf = bot["trend_follower"]
+                tf_params = {
+                    k: v for k, v in {
+                        "ema_fast_period": tf.get("ema_fast_period"),
+                        "ema_slow_period": tf.get("ema_slow_period"),
+                        "atr_period": tf.get("atr_period"),
+                        "rsi_period": tf.get("rsi_period"),
+                        "risk_per_trade_pct": Decimal(str(tf["risk_per_trade_pct"])) if "risk_per_trade_pct" in tf else None,
+                        "max_position_size_usd": Decimal(str(tf["max_position_size_usd"])) if "max_position_size_usd" in tf else None,
+                    }.items() if v is not None
+                }
+
+            # --- smc (skip _m5 variant bots) ---
+            if "smc" in bot and bot.get("strategy") == "smc" and not smc_params:
+                if bot.get("name", "").endswith("_m5"):
+                    continue
+                s = bot["smc"]
+                smc_params = {
+                    k: v for k, v in {
+                        "swing_length": s.get("swing_length"),
+                        "risk_per_trade": Decimal(str(s["risk_per_trade"])) if "risk_per_trade" in s else None,
+                        "min_risk_reward": Decimal(str(s["min_risk_reward"])) if "min_risk_reward" in s else None,
+                        "max_position_size": Decimal(str(s["max_position_size"])) if "max_position_size" in s else None,
+                    }.items() if v is not None
+                }
+                if "risk_per_trade" in s:
+                    risk_per_trade = Decimal(str(s["risk_per_trade"]))
+
+            # --- risk_management: derive max_position_pct from USD limit ---
+            if "max_position_size" in rm:
+                max_pos_usd = Decimal(str(rm["max_position_size"]))
+                # Fraction of the default $10,000 initial balance
+                candidate = min(max_pos_usd / Decimal("10000"), Decimal("1.0"))
+                if candidate > max_position_pct:
+                    max_position_pct = candidate
+
+        return cls(
+            symbol=symbol,
+            grid_params=grid_params,
+            dca_params=dca_params,
+            tf_params=tf_params,
+            smc_params=smc_params,
+            risk_per_trade=risk_per_trade,
+            max_position_pct=max_position_pct,
+        )
+
 
 @dataclass
 class OrchestratorBacktestResult(BacktestResult):

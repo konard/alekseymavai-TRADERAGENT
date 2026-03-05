@@ -42,10 +42,10 @@ class DCAAdapter(BaseStrategy):
         symbol: str = "BTC/USDT",
         base_order_size: Decimal = Decimal("100"),
         safety_order_size: Decimal = Decimal("200"),
-        max_safety_orders: int = 5,
-        price_deviation_pct: Decimal = Decimal("0.02"),
-        safety_step_pct: Decimal = Decimal("0.015"),
-        take_profit_pct: Decimal = Decimal("0.015"),
+        max_safety_orders: int = 4,
+        price_deviation_pct: Decimal = Decimal("0.04"),
+        safety_step_pct: Decimal = Decimal("0.02"),
+        take_profit_pct: Decimal = Decimal("0.08"),
         name: str = "dca-default",
     ) -> None:
         self._symbol = symbol

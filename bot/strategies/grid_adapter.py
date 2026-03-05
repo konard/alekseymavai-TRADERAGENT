@@ -41,9 +41,9 @@ class GridAdapter(BaseStrategy):
     def __init__(
         self,
         symbol: str = "BTC/USDT",
-        num_levels: int = 10,
-        amount_per_grid: Decimal = Decimal("100"),
-        profit_per_grid: Decimal = Decimal("0.005"),
+        num_levels: int = 6,
+        amount_per_grid: Decimal = Decimal("150"),
+        profit_per_grid: Decimal = Decimal("0.012"),
         grid_range_pct: Decimal = Decimal("0.05"),
         name: str = "grid-default",
     ) -> None:
