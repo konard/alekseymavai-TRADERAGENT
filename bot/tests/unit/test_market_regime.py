@@ -222,3 +222,38 @@ class TestAnalyzeWithSmc:
         ctx = _smc_ctx(SMCPhase.DISTRIBUTION, warmup=True)
         result = self.det.analyze_with_smc(self.df, ctx)
         assert isinstance(result, RegimeAnalysis)
+
+
+# ---------------------------------------------------------------------------
+# Volatility guard (P1.3)
+# ---------------------------------------------------------------------------
+
+class TestVolatilityGuard:
+    """
+    Tests the volatility guard that blocks strategy expansion during extreme
+    ATR spikes.  We check the constant and set-expansion semantics used in
+    _update_active_strategies.
+    """
+
+    def test_max_volatility_constant_exists(self):
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+        assert hasattr(BotOrchestrator, "_MAX_VOLATILITY_ATR_PCT")
+        assert BotOrchestrator._MAX_VOLATILITY_ATR_PCT > 0
+
+    def test_max_volatility_default_is_3_pct(self):
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+        assert BotOrchestrator._MAX_VOLATILITY_ATR_PCT == 3.0
+
+    def test_set_expansion_semantics(self):
+        """Guard uses `strategies > prev` (proper superset) to detect expansion."""
+        prev = {"grid"}
+        assert {"grid", "smc"} > prev          # adding smc → expansion → blocked
+        assert not ({"grid"} > prev)            # same → not blocked
+        assert not ({"smc"} > prev)             # switch, not superset → not blocked
+        assert not (set() > prev)               # reduction → not blocked
+
+    def test_reduction_not_blocked_by_guard_semantics(self):
+        """Deactivation (prev → subset) is never a proper superset — guard passes."""
+        prev = {"grid", "dca", "smc"}
+        reduced = {"grid"}
+        assert not (reduced > prev)  # reduction is fine

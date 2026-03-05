@@ -630,6 +630,11 @@ class BotOrchestrator:
     # stabilise before we act on it.
     _MIN_REGIME_DURATION_SECONDS: int = 120
 
+    # Maximum ATR-as-%-of-price above which adding new strategies is blocked.
+    # Prevents opening fresh positions during extreme volatility spikes.
+    # Reduction (deactivating strategies) is always allowed.
+    _MAX_VOLATILITY_ATR_PCT: float = 3.0
+
     async def _update_active_strategies(self) -> None:
         """Update which strategies should run based on current regime.
 
@@ -725,6 +730,23 @@ class BotOrchestrator:
                         duration_seconds=self._current_regime.regime_duration_seconds,
                         min_seconds=self._MIN_REGIME_DURATION_SECONDS,
                         current_strategies=sorted(prev),
+                    )
+                    return
+
+                # Volatility guard: don't activate new strategies during extreme
+                # volatility spikes — only allow reductions (deactivations) so
+                # existing positions can still be managed.
+                if (
+                    self._current_regime is not None
+                    and self._current_regime.atr_pct > self._MAX_VOLATILITY_ATR_PCT
+                    and strategies > prev  # expansion only — reductions always pass
+                ):
+                    logger.info(
+                        "strategy_switch_blocked_high_volatility",
+                        atr_pct=round(self._current_regime.atr_pct, 3),
+                        threshold=self._MAX_VOLATILITY_ATR_PCT,
+                        current_strategies=sorted(prev),
+                        blocked_strategies=sorted(strategies - prev),
                     )
                     return
 
@@ -2220,7 +2242,19 @@ class BotOrchestrator:
             )
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
-            analysis = self.market_regime_detector.analyze(df)
+            # Use SMC context from the live SMC strategy when it is warmed up.
+            # This allows the regime detector to recognise ACCUMULATION /
+            # DISTRIBUTION phases (CHoCH signals) that pure ADX/EMA cannot see.
+            smc_ctx = None
+            if self.smc_strategy is not None:
+                ms = getattr(self.smc_strategy._strategy, "market_structure", None)
+                if ms is not None:
+                    smc_ctx = ms.get_smc_context()
+
+            if smc_ctx is not None and smc_ctx.warmup_complete:
+                analysis = self.market_regime_detector.analyze_with_smc(df, smc_ctx)
+            else:
+                analysis = self.market_regime_detector.analyze(df)
 
             # Check for regime change
             old_regime = self._current_regime
