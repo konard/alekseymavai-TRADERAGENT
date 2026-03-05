@@ -755,3 +755,85 @@ class TestLifecycle:
     def test_init_registers_handlers(self, bot):
         # Verify router was included in dispatcher
         assert bot.router in bot.dp.sub_routers
+
+
+# =============================================================================
+# Trades Command Tests
+# =============================================================================
+
+
+class TestTradesCommand:
+    """Tests for /trades."""
+
+    async def test_trades_no_history(self, bot):
+        msg = _make_message("/trades test_bot")
+        await bot._cmd_trades(msg)
+        text = msg.answer.call_args[0][0]
+        assert "No trade history" in text
+
+    async def test_trades_not_found(self, bot):
+        msg = _make_message("/trades nonexistent")
+        await bot._cmd_trades(msg)
+        assert "not found" in msg.answer.call_args[0][0]
+
+    async def test_trades_unauthorized(self, bot):
+        msg = _make_message("/trades test_bot", chat_id=99999)
+        await bot._cmd_trades(msg)
+        assert "Unauthorized" in msg.answer.call_args[0][0]
+
+    async def test_trades_with_grid(self, bot):
+        orch = bot.orchestrators["test_bot"]
+        orch.grid_engine = MagicMock()
+        order = MagicMock()
+        order.side = "buy"
+        order.price = Decimal("49500")
+        order.amount = Decimal("0.01")
+        order.level = 3
+        orch.grid_engine.filled_orders = [order]
+        msg = _make_message("/trades test_bot")
+        await bot._cmd_trades(msg)
+        text = msg.answer.call_args[0][0]
+        assert "Grid" in text
+        assert "BUY" in text
+        assert "49500" in text
+
+    async def test_trades_with_smc(self, bot):
+        orch = bot.orchestrators["test_bot"]
+        orch.smc_strategy = MagicMock()
+        pos = MagicMock()
+        pos.entry_price = Decimal("48000")
+        pos.current_price = Decimal("49000")
+        pos.realized_pnl = Decimal("100")
+        pos.exit_reason = "take_profit"
+        pos.hold_time_hours = 2.5
+        orch.smc_strategy.position_manager.closed_positions = [pos]
+        msg = _make_message("/trades test_bot")
+        await bot._cmd_trades(msg)
+        text = msg.answer.call_args[0][0]
+        assert "SMC" in text
+        assert "48000" in text
+        assert "+100" in text
+        assert "take_profit" in text
+
+    async def test_trades_custom_limit(self, bot):
+        orch = bot.orchestrators["test_bot"]
+        orch.grid_engine = MagicMock()
+        orders = []
+        for i in range(20):
+            o = MagicMock()
+            o.side = "buy"
+            o.price = Decimal(str(49000 + i))
+            o.amount = Decimal("0.01")
+            o.level = i
+            orders.append(o)
+        orch.grid_engine.filled_orders = orders
+        msg = _make_message("/trades test_bot 5")
+        await bot._cmd_trades(msg)
+        text = msg.answer.call_args[0][0]
+        assert "last 5" in text
+
+    async def test_trades_all_bots(self, bot_multi):
+        msg = _make_message("/trades")
+        await bot_multi._cmd_trades(msg)
+        # Should report for each bot (no history for any)
+        assert msg.answer.call_count == 2
