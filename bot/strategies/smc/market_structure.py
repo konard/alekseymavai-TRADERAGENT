@@ -1,13 +1,9 @@
 """
-Market Structure Analysis Module
+Market Structure Analysis Module — v2
 
-Identifies market structure elements:
-- Trend direction (bullish/bearish/ranging)
-- Swing highs and swing lows
-- Break of Structure (BOS)
-- Change of Character (CHoCH)
-
-Uses the smartmoneyconcepts library for swing/BOS/CHoCH detection.
+Backed by bot.core.smc.SMCAnalyzer.
+Public API is identical to v1; the smartmoneyconcepts pip dependency
+has been removed and replaced by our own vectorised detectors.
 """
 
 from dataclasses import dataclass
@@ -16,43 +12,38 @@ from enum import Enum
 from typing import Optional
 
 import pandas as pd
-import smartmoneyconcepts.smc as smc
 
+from bot.core.smc.analyzer import SMCAnalyzer
+from bot.core.smc.models import SMCContext, SMCPhase
+from bot.core.smc.models import StructureEvent as CoreStructureEvent
+from bot.core.smc.models import SwingPoint as CoreSwingPoint
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class TrendDirection(str, Enum):
-    """Market trend direction"""
-
     BULLISH = "bullish"
     BEARISH = "bearish"
     RANGING = "ranging"
 
 
 class StructureBreak(str, Enum):
-    """Type of market structure break"""
-
-    BOS = "break_of_structure"  # Continuation
-    CHOCH = "change_of_character"  # Reversal
+    BOS = "break_of_structure"
+    CHOCH = "change_of_character"
 
 
 @dataclass
 class SwingPoint:
-    """Represents a swing high or swing low"""
-
     index: int
     price: Decimal
     timestamp: pd.Timestamp
-    is_high: bool  # True for swing high, False for swing low
-    strength: int  # Number of candles on each side
+    is_high: bool
+    strength: int
 
 
 @dataclass
 class StructureEvent:
-    """Market structure event (BOS or CHoCH)"""
-
     event_type: StructureBreak
     index: int
     price: Decimal
@@ -63,32 +54,41 @@ class StructureEvent:
 
 class MarketStructureAnalyzer:
     """
-    Analyzes market structure using swing points and structure breaks
+    Market structure analyser backed by bot.core.smc.SMCAnalyzer.
 
-    Based on Smart Money Concepts methodology.
-    Uses smartmoneyconcepts library for detection.
+    Public API is identical to v1; the smartmoneyconcepts pip dependency
+    has been removed and replaced by our own detectors.
     """
 
-    def __init__(self, swing_length: int = 50, trend_period: int = 20, close_break: bool = True):
-        """
-        Initialize Market Structure Analyzer
-
-        Args:
-            swing_length: Number of candles on each side for swing point validation
-            trend_period: Lookback period for trend determination
-            close_break: If True, require candle close beyond level for BOS/CHoCH
-        """
+    def __init__(
+        self,
+        swing_length: int = 5,
+        trend_period: int = 20,
+        close_break: bool = True,
+    ) -> None:
         self.swing_length = swing_length
         self.trend_period = trend_period
         self.close_break = close_break
 
+        # min_impulse_atr respects the close_break flag:
+        # close_break=True → require ≥0.1 ATR impulse (filters wick-only breaks)
+        self._analyzer = SMCAnalyzer(
+            swing_strength=swing_length,
+            min_warmup_bars=max(50, swing_length * 4),
+            min_impulse_atr=0.1 if close_break else 0.0,
+        )
+        self._smc_context: Optional[SMCContext] = None
+
+        # Public state (populated from context after each analyze() call)
         self.swing_highs: list[SwingPoint] = []
         self.swing_lows: list[SwingPoint] = []
         self.structure_events: list[StructureEvent] = []
         self.current_trend: TrendDirection = TrendDirection.RANGING
-        self._swings_df: Optional[pd.DataFrame] = None
 
-        # Log-spam suppression: count warnings, log only first occurrence
+        # Kept for interface compatibility — no longer a real DataFrame
+        self._swings_df: None = None
+
+        # Log-spam suppression
         self._insufficient_data_count: int = 0
 
         logger.info(
@@ -98,57 +98,24 @@ class MarketStructureAnalyzer:
             close_break=close_break,
         )
 
-    @staticmethod
-    def _prepare_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
-        """Cast DataFrame columns to float for the library."""
-        ohlc = df[["open", "high", "low", "close"]].copy()
-        for col in ohlc.columns:
-            ohlc[col] = ohlc[col].astype(float)
-        if "volume" in df.columns:
-            ohlc["volume"] = df["volume"].astype(float)
-        return ohlc
+    # ------------------------------------------------------------------
+    # Public API (unchanged from v1)
+    # ------------------------------------------------------------------
 
     def analyze(self, df: pd.DataFrame) -> dict:
-        """
-        Analyze market structure on given dataframe
-
-        Args:
-            df: DataFrame with OHLCV data
-
-        Returns:
-            Dictionary with structure analysis results
-        """
         required = self.swing_length * 2 + 1
         if len(df) < required:
-            # Adapt swing_length to available data (minimum 2 bars on each side)
-            adapted_swing_length = max(2, (len(df) - 1) // 2)
             self._insufficient_data_count += 1
             if self._insufficient_data_count == 1:
                 logger.warning(
-                    "Insufficient data for structure analysis — adapting swing_length",
+                    "Insufficient data for structure analysis",
                     required=required,
                     available=len(df),
-                    adapted_swing_length=adapted_swing_length,
                 )
-            # Temporarily use adapted swing_length for this call
-            original_swing_length = self.swing_length
-            self.swing_length = adapted_swing_length
-            try:
-                self._detect_swing_points(df)
-                self._determine_trend(df)
-                self._detect_structure_breaks(df)
-            finally:
-                self.swing_length = original_swing_length
             return self.get_current_structure()
 
-        # Detect swing points
-        self._detect_swing_points(df)
-
-        # Determine current trend
-        self._determine_trend(df)
-
-        # Detect structure breaks
-        self._detect_structure_breaks(df)
+        self._smc_context = self._analyzer.analyze(df)
+        self._sync_from_context(df)
 
         logger.debug(
             "Market structure analyzed",
@@ -157,249 +124,40 @@ class MarketStructureAnalyzer:
             trend=self.current_trend,
             events=len(self.structure_events),
         )
-
         return self.get_current_structure()
 
-    def _detect_swing_points(self, df: pd.DataFrame) -> None:
-        """
-        Detect swing highs and swing lows using smartmoneyconcepts library.
-
-        Args:
-            df: DataFrame with OHLCV data
-        """
-        self.swing_highs.clear()
-        self.swing_lows.clear()
-
-        ohlc = self._prepare_ohlc_df(df)
-        self._swings_df = smc.swing_highs_lows(ohlc, swing_length=self.swing_length)
-
-        for i in range(len(self._swings_df)):
-            row = self._swings_df.iloc[i]
-            if pd.isna(row["HighLow"]):
-                continue
-
-            is_high = row["HighLow"] == 1.0
-            price = Decimal(str(row["Level"]))
-            timestamp = (
-                df.index[i]
-                if hasattr(df.index[i], "timestamp") or isinstance(df.index[i], pd.Timestamp)
-                else pd.Timestamp(df.index[i])
-            )
-
-            swing = SwingPoint(
-                index=i,
-                price=price,
-                timestamp=timestamp,
-                is_high=is_high,
-                strength=self.swing_length,
-            )
-
-            if is_high:
-                self.swing_highs.append(swing)
-            else:
-                self.swing_lows.append(swing)
-
-        logger.debug(
-            "Swing points detected",
-            swing_highs=len(self.swing_highs),
-            swing_lows=len(self.swing_lows),
-        )
-
-    def _detect_structure_breaks(self, df: pd.DataFrame) -> None:
-        """
-        Detect Break of Structure (BOS) and Change of Character (CHoCH)
-        using smartmoneyconcepts library.
-
-        Args:
-            df: DataFrame with OHLCV data
-        """
-        self.structure_events.clear()
-
-        if self._swings_df is None or not self.swing_highs and not self.swing_lows:
-            return
-
-        ohlc = self._prepare_ohlc_df(df)
-        bos_choch_df = smc.bos_choch(ohlc, self._swings_df, close_break=self.close_break)
-
-        for i in range(len(bos_choch_df)):
-            row = bos_choch_df.iloc[i]
-            timestamp = (
-                df.index[i] if isinstance(df.index[i], pd.Timestamp) else pd.Timestamp(df.index[i])
-            )
-
-            # Process BOS events
-            if pd.notna(row["BOS"]):
-                is_bullish = row["BOS"] == 1.0
-                event_type = StructureBreak.BOS
-                trend = TrendDirection.BULLISH if is_bullish else TrendDirection.BEARISH
-                price = Decimal(str(row["Level"]))
-
-                broken_idx = int(row["BrokenIndex"]) if pd.notna(row["BrokenIndex"]) else i
-                previous_swing = self._find_nearest_swing(broken_idx, is_high=is_bullish)
-
-                if previous_swing is None:
-                    previous_swing = SwingPoint(
-                        index=broken_idx,
-                        price=price,
-                        timestamp=timestamp,
-                        is_high=is_bullish,
-                        strength=self.swing_length,
-                    )
-
-                event = StructureEvent(
-                    event_type=event_type,
-                    index=i,
-                    price=price,
-                    timestamp=timestamp,
-                    previous_swing=previous_swing,
-                    current_trend=trend,
-                )
-                self.structure_events.append(event)
-
-            # Process CHoCH events
-            if pd.notna(row["CHOCH"]):
-                is_bullish = row["CHOCH"] == 1.0
-                event_type = StructureBreak.CHOCH
-                trend = TrendDirection.BULLISH if is_bullish else TrendDirection.BEARISH
-                price = Decimal(str(row["Level"]))
-
-                broken_idx = int(row["BrokenIndex"]) if pd.notna(row["BrokenIndex"]) else i
-                previous_swing = self._find_nearest_swing(broken_idx, is_high=is_bullish)
-
-                if previous_swing is None:
-                    previous_swing = SwingPoint(
-                        index=broken_idx,
-                        price=price,
-                        timestamp=timestamp,
-                        is_high=is_bullish,
-                        strength=self.swing_length,
-                    )
-
-                event = StructureEvent(
-                    event_type=event_type,
-                    index=i,
-                    price=price,
-                    timestamp=timestamp,
-                    previous_swing=previous_swing,
-                    current_trend=trend,
-                )
-                self.structure_events.append(event)
-
-                # Update trend on CHoCH
-                self.current_trend = trend
-
-        logger.debug(
-            "Structure breaks detected",
-            bos=[e for e in self.structure_events if e.event_type == StructureBreak.BOS].__len__(),
-            choch=[
-                e for e in self.structure_events if e.event_type == StructureBreak.CHOCH
-            ].__len__(),
-        )
-
-    def _find_nearest_swing(self, target_index: int, is_high: bool) -> Optional[SwingPoint]:
-        """Find the closest SwingPoint to a given index."""
-        swings = self.swing_highs if is_high else self.swing_lows
-        if not swings:
-            return None
-
-        best = None
-        best_dist = float("inf")
-        for s in swings:
-            dist = abs(s.index - target_index)
-            if dist < best_dist:
-                best_dist = dist
-                best = s
-        return best
-
-    def get_swings_df(self) -> Optional[pd.DataFrame]:
-        """Return raw swings DataFrame for downstream consumers (OB, liquidity)."""
-        return self._swings_df
-
-    def _determine_trend(self, df: pd.DataFrame) -> None:
-        """
-        Determine current market trend based on swing points
-
-        Bullish: Higher highs and higher lows
-        Bearish: Lower highs and lower lows
-        Ranging: Mixed or unclear pattern
-
-        Args:
-            df: DataFrame with OHLCV data
-        """
-        if len(self.swing_highs) < 2 or len(self.swing_lows) < 2:
-            self.current_trend = TrendDirection.RANGING
-            return
-
-        # Get last two swing highs and lows
-        last_high = self.swing_highs[-1]
-        prev_high = self.swing_highs[-2]
-        last_low = self.swing_lows[-1]
-        prev_low = self.swing_lows[-2]
-
-        # Check for bullish trend (higher highs and higher lows)
-        higher_highs = last_high.price > prev_high.price
-        higher_lows = last_low.price > prev_low.price
-
-        # Check for bearish trend (lower highs and lower lows)
-        lower_highs = last_high.price < prev_high.price
-        lower_lows = last_low.price < prev_low.price
-
-        if higher_highs and higher_lows:
-            self.current_trend = TrendDirection.BULLISH
-        elif lower_highs and lower_lows:
-            self.current_trend = TrendDirection.BEARISH
-        else:
-            self.current_trend = TrendDirection.RANGING
-
-        logger.debug("Trend determined", trend=self.current_trend)
-
     def analyze_trend(self, df_d1: pd.DataFrame, df_h4: pd.DataFrame) -> dict:
-        """
-        Analyze trend across multiple timeframes
-
-        Args:
-            df_d1: Daily timeframe data for global trend
-            df_h4: 4-hour timeframe data for market structure
-
-        Returns:
-            Dictionary with multi-timeframe trend analysis
-        """
-        result = {
+        result: dict = {
             "d1_trend": TrendDirection.RANGING,
             "h4_trend": TrendDirection.RANGING,
             "trend_strength": 0.0,
             "trend_aligned": False,
         }
 
-        # Analyze D1 trend (scaled swing_length: ~10 candles = 2 weeks of daily data)
-        d1_swing_length = max(10, self.swing_length // 5)
+        d1_swing = max(5, self.swing_length // 5)
         if len(df_d1) >= self.trend_period:
-            d1_analyzer = MarketStructureAnalyzer(
-                swing_length=d1_swing_length,
+            d1_ana = MarketStructureAnalyzer(
+                swing_length=d1_swing,
                 trend_period=self.trend_period,
                 close_break=self.close_break,
             )
-            d1_analyzer.analyze(df_d1)
-            result["d1_trend"] = d1_analyzer.current_trend
+            d1_ana.analyze(df_d1)
+            result["d1_trend"] = d1_ana.current_trend
 
-        # Analyze H4 trend (scaled swing_length: ~25 candles)
-        h4_swing_length = max(15, self.swing_length // 2)
+        h4_swing = max(5, self.swing_length // 2)
         if len(df_h4) >= self.trend_period:
-            h4_analyzer = MarketStructureAnalyzer(
-                swing_length=h4_swing_length,
+            h4_ana = MarketStructureAnalyzer(
+                swing_length=h4_swing,
                 trend_period=self.trend_period,
                 close_break=self.close_break,
             )
-            h4_analyzer.analyze(df_h4)
-            result["h4_trend"] = h4_analyzer.current_trend
+            h4_ana.analyze(df_h4)
+            result["h4_trend"] = h4_ana.current_trend
 
-        # Check if trends are aligned
         result["trend_aligned"] = (
             result["d1_trend"] == result["h4_trend"]
             and result["d1_trend"] != TrendDirection.RANGING
         )
-
-        # Calculate trend strength (0.0 to 1.0)
         if result["trend_aligned"]:
             result["trend_strength"] = 1.0
         elif (
@@ -417,11 +175,20 @@ class MarketStructureAnalyzer:
             strength=result["trend_strength"],
             aligned=result["trend_aligned"],
         )
-
         return result
 
+    def get_swings_df(self) -> None:
+        """
+        Kept for interface compatibility.
+        Returns None — confluence_zones now reads from get_smc_context().
+        """
+        return None
+
+    def get_smc_context(self) -> Optional[SMCContext]:
+        """Return the most recently computed SMCContext."""
+        return self._smc_context
+
     def get_current_structure(self) -> dict:
-        """Get current market structure summary"""
         return {
             "swing_highs_count": len(self.swing_highs),
             "swing_lows_count": len(self.swing_lows),
@@ -433,21 +200,118 @@ class MarketStructureAnalyzer:
         }
 
     def get_recent_swing_high(self) -> Optional[SwingPoint]:
-        """Get most recent swing high"""
         return self.swing_highs[-1] if self.swing_highs else None
 
     def get_recent_swing_low(self) -> Optional[SwingPoint]:
-        """Get most recent swing low"""
         return self.swing_lows[-1] if self.swing_lows else None
 
     def get_structure_events(self, limit: int = 10) -> list[StructureEvent]:
-        """
-        Get recent structure events
-
-        Args:
-            limit: Maximum number of events to return
-
-        Returns:
-            List of recent StructureEvent objects
-        """
         return self.structure_events[-limit:] if self.structure_events else []
+
+    def _find_nearest_swing(self, target_index: int, is_high: bool) -> Optional[SwingPoint]:
+        swings = self.swing_highs if is_high else self.swing_lows
+        if not swings:
+            return None
+        return min(swings, key=lambda s: abs(s.index - target_index))
+
+    # ------------------------------------------------------------------
+    # Internal: sync state from SMCContext
+    # ------------------------------------------------------------------
+
+    def _sync_from_context(self, df: pd.DataFrame) -> None:
+        ctx = self._smc_context
+        if ctx is None:
+            return
+
+        self.swing_highs = [self._to_swing(s, df) for s in ctx.swing_highs]
+        self.swing_lows  = [self._to_swing(s, df) for s in ctx.swing_lows]
+
+        # ctx stores most-recent-first; restore chronological order
+        self.structure_events = [
+            self._to_event(e, df) for e in reversed(ctx.structure_events)
+        ]
+
+        self.current_trend = _phase_to_trend(ctx.phase, ctx.trend_bias)
+
+        # Fallback: derive trend from swing HH/HL or LH/LL pattern
+        if self.current_trend == TrendDirection.RANGING:
+            self._determine_trend_from_swings()
+
+    def _to_swing(self, s: CoreSwingPoint, df: pd.DataFrame) -> SwingPoint:
+        idx = min(s.index, len(df) - 1)
+        ts = _to_ts(df.index[idx])
+        return SwingPoint(
+            index=s.index,
+            price=Decimal(str(round(s.price, 8))),
+            timestamp=ts,
+            is_high=s.is_high,
+            strength=s.strength,
+        )
+
+    def _to_event(self, e: CoreStructureEvent, df: pd.DataFrame) -> StructureEvent:
+        idx = min(e.index, len(df) - 1)
+        ts = _to_ts(df.index[idx])
+        is_choch = e.is_choch
+        event_type = StructureBreak.CHOCH if is_choch else StructureBreak.BOS
+        trend = TrendDirection.BULLISH if e.is_bullish else TrendDirection.BEARISH
+        broken = e.broken_swing
+        prev_swing = SwingPoint(
+            index=broken.index,
+            price=Decimal(str(round(broken.price, 8))),
+            timestamp=ts,
+            is_high=broken.is_high,
+            strength=broken.strength,
+        )
+        return StructureEvent(
+            event_type=event_type,
+            index=e.index,
+            price=Decimal(str(round(e.break_price, 8))),
+            timestamp=ts,
+            previous_swing=prev_swing,
+            current_trend=trend,
+        )
+
+    def _determine_trend_from_swings(self) -> None:
+        if len(self.swing_highs) < 2 or len(self.swing_lows) < 2:
+            self.current_trend = TrendDirection.RANGING
+            return
+        last_h, prev_h = self.swing_highs[-1], self.swing_highs[-2]
+        last_l, prev_l = self.swing_lows[-1], self.swing_lows[-2]
+        if last_h.price > prev_h.price and last_l.price > prev_l.price:
+            self.current_trend = TrendDirection.BULLISH
+        elif last_h.price < prev_h.price and last_l.price < prev_l.price:
+            self.current_trend = TrendDirection.BEARISH
+        else:
+            self.current_trend = TrendDirection.RANGING
+
+    @staticmethod
+    def _prepare_ohlc_df(df: pd.DataFrame) -> pd.DataFrame:
+        """Kept for compatibility; not used internally any more."""
+        ohlc = df[["open", "high", "low", "close"]].copy()
+        for col in ohlc.columns:
+            ohlc[col] = ohlc[col].astype(float)
+        if "volume" in df.columns:
+            ohlc["volume"] = df["volume"].astype(float)
+        return ohlc
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _to_ts(val) -> pd.Timestamp:
+    if isinstance(val, pd.Timestamp):
+        return val
+    return pd.Timestamp(val)
+
+
+def _phase_to_trend(phase: SMCPhase, bias: float = 0.0) -> TrendDirection:
+    if phase == SMCPhase.BULL_TREND:
+        return TrendDirection.BULLISH
+    if phase == SMCPhase.BEAR_TREND:
+        return TrendDirection.BEARISH
+    if phase == SMCPhase.ACCUMULATION:
+        return TrendDirection.BULLISH if bias >= 0 else TrendDirection.RANGING
+    if phase == SMCPhase.DISTRIBUTION:
+        return TrendDirection.BEARISH if bias <= 0 else TrendDirection.RANGING
+    return TrendDirection.RANGING

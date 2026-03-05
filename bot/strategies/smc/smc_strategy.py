@@ -287,14 +287,20 @@ class SMCStrategy:
             sl_buffer_pct=0.5,
         )
 
-        # 3. Detect M5 entry signals
+        # 3. Populate M5 structure + confluence zones before signal generation.
+        # Without this, EntrySignalGenerator sees empty OB/FVG lists and
+        # all signals get zero confluence score.
+        m5_analyzer.analyze(df_m5)
+        m5_confluence.analyze(df_m5)
+
+        # 4. Detect M5 entry signals
         try:
             m5_signals_raw = m5_signal_gen.analyze(df_m5)
         except Exception as e:
             logger.warning("m5_signal_gen_error", error=str(e))
             return []
 
-        # 4. Filter: only keep signals aligned with H1 trend
+        # 5. Filter: only keep signals aligned with H1 trend
         aligned: list[SMCSignal] = []
         for sig in m5_signals_raw:
             if h1_trend == TrendDirection.BULLISH and sig.direction == SMCSignalDirection.LONG:
