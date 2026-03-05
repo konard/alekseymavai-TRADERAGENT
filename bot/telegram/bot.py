@@ -812,8 +812,8 @@ class TelegramBot:
             await callback.answer("⛔ Unauthorized", show_alert=True)
             return
         await callback.message.edit_text(
-            "🤖 *TRADERAGENT Bot Manager*\n\nВыберите раздел:",
-            parse_mode="Markdown",
+            "🤖 <b>TRADERAGENT Bot Manager</b>\n\nВыберите раздел:",
+            parse_mode="HTML",
             reply_markup=keyboards.main_menu(),
         )
         await callback.answer()
@@ -823,8 +823,8 @@ class TelegramBot:
             await callback.answer("⛔ Unauthorized", show_alert=True)
             return
         await callback.message.edit_text(
-            "🤖 *Управление ботами*\n\nВыберите бота:",
-            parse_mode="Markdown",
+            "🤖 <b>Управление ботами</b>\n\nВыберите бота:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_selector(list(self.orchestrators.keys()), "ctl"),
         )
         await callback.answer()
@@ -834,8 +834,8 @@ class TelegramBot:
             await callback.answer("⛔ Unauthorized", show_alert=True)
             return
         await callback.message.edit_text(
-            "📊 *Мониторинг*\n\nВыберите бота:",
-            parse_mode="Markdown",
+            "📊 <b>Мониторинг</b>\n\nВыберите бота:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_selector(list(self.orchestrators.keys()), "mon"),
         )
         await callback.answer()
@@ -845,8 +845,8 @@ class TelegramBot:
             await callback.answer("⛔ Unauthorized", show_alert=True)
             return
         await callback.message.edit_text(
-            "⚙️ *Стратегии*\n\nВыберите бота:",
-            parse_mode="Markdown",
+            "⚙️ <b>Стратегии</b>\n\nВыберите бота:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_selector(list(self.orchestrators.keys()), "strat"),
         )
         await callback.answer()
@@ -856,8 +856,8 @@ class TelegramBot:
             await callback.answer("⛔ Unauthorized", show_alert=True)
             return
         await callback.message.edit_text(
-            "📈 *Портфель*",
-            parse_mode="Markdown",
+            "📈 <b>Портфель</b>",
+            parse_mode="HTML",
             reply_markup=keyboards.portfolio_menu(),
         )
         await callback.answer()
@@ -873,8 +873,8 @@ class TelegramBot:
         orch = self.orchestrators[bot_name]
         se = get_state_emoji(orch.state)
         await callback.message.edit_text(
-            f"{se} *{bot_name}*\nState: {orch.state.value}\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
-            parse_mode="Markdown",
+            f"{se} <b>{bot_name}</b>\nState: {orch.state.value}\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_control(bot_name),
         )
         await callback.answer()
@@ -904,8 +904,8 @@ class TelegramBot:
             await callback.answer(f"{label} {bot_name}")
             se = get_state_emoji(orch.state)
             await callback.message.edit_text(
-                f"{se} *{bot_name}*\nState: {orch.state.value}\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
-                parse_mode="Markdown",
+                f"{se} <b>{bot_name}</b>\nState: {orch.state.value}\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
+                parse_mode="HTML",
                 reply_markup=keyboards.bot_control(bot_name),
             )
         except Exception as e:
@@ -923,8 +923,8 @@ class TelegramBot:
         orch = self.orchestrators[bot_name]
         se = get_state_emoji(orch.state)
         await callback.message.edit_text(
-            f"{se} *{bot_name}*\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
-            parse_mode="Markdown",
+            f"{se} <b>{bot_name}</b>\nSymbol: {orch.config.symbol}\n\nВыберите действие:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_monitoring(bot_name),
         )
         await callback.answer()
@@ -967,8 +967,8 @@ class TelegramBot:
             await callback.answer("Bot not found", show_alert=True)
             return
         await callback.message.edit_text(
-            f"⚙️ *Стратегии: {bot_name}*\n\nВыберите стратегию:",
-            parse_mode="Markdown",
+            f"⚙️ <b>Стратегии: {bot_name}</b>\n\nВыберите стратегию:",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_strategy(bot_name),
         )
         await callback.answer()
@@ -991,8 +991,8 @@ class TelegramBot:
             await orch.start_strategy(strategy_id)
             await callback.answer(f"✅ Switched to {strategy_id}")
             await callback.message.edit_text(
-                f"✅ Bot *{bot_name}* → strategy *{strategy_id}*",
-                parse_mode="Markdown",
+                f"✅ Bot <b>{bot_name}</b> → strategy <b>{strategy_id}</b>",
+                parse_mode="HTML",
                 reply_markup=keyboards.bot_strategy(bot_name),
             )
         except Exception as e:
@@ -1010,8 +1010,8 @@ class TelegramBot:
         self.orchestrators[bot_name].unlock_strategy()
         await callback.answer("🔓 Unlocked")
         await callback.message.edit_text(
-            f"🔓 Bot *{bot_name}* unlocked — auto mode",
-            parse_mode="Markdown",
+            f"🔓 Bot <b>{bot_name}</b> unlocked — auto mode",
+            parse_mode="HTML",
             reply_markup=keyboards.bot_strategy(bot_name),
         )
 
@@ -1065,7 +1065,7 @@ class TelegramBot:
         notification = format_event_notification(event)
         for chat_id in self.allowed_chat_ids:
             try:
-                await self.bot.send_message(chat_id=chat_id, text=notification, parse_mode="Markdown")
+                await self.bot.send_message(chat_id=chat_id, text=notification, parse_mode="HTML")
             except Exception:
                 try:
                     await self.bot.send_message(chat_id=chat_id, text=notification)
