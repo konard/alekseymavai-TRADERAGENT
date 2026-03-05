@@ -1541,6 +1541,10 @@ class BotOrchestrator:
                     if not self.config.dry_run and position:
                         await self._execute_trend_follower_exit(position)
 
+                    self.trend_follower_strategy.close_position(
+                        position_id, exit_reason, self.current_price
+                    )
+
                     await self._publish_event(
                         EventType.ORDER_FILLED,
                         {
