@@ -13,89 +13,83 @@
 
 ---
 
-## Последняя сессия (2026-03-05) — Session 46: bot/core/smc/ + MarketRegimeDetector интеграция
+## Последняя сессия (2026-03-05) — Session 46: bot/core/smc/ + Адаптивное переключение стратегий
 
 ### Задача
-Реализовать собственный SMC-модуль (`bot/core/smc/`), заменив внешнюю зависимость `smartmoneyconcepts` (Вариант A), и интегрировать SMC-фазы в `MarketRegimeDetector`.
+1. Реализовать собственный SMC-модуль `bot/core/smc/`, заменив внешний pip-пакет `smartmoneyconcepts` (Вариант A).
+2. Интегрировать SMC-фазы в `MarketRegimeDetector` (новые режимы ACCUMULATION/DISTRIBUTION).
+3. Подключить всё к live боту — Направление 4 плана (Адаптивное переключение стратегий) закрыть полностью.
 
 ### Сделано в сессии 46
 
-#### 1. Новый модуль `bot/core/smc/` — собственный SMC-движок (коммит `c266393`)
+#### 1. Новый модуль `bot/core/smc/` (коммит `c266393`)
 
-Заменяет pip-пакет `smartmoneyconcepts`. Единственный источник правды для всей SMC-логики в проекте.
+Заменяет pip-пакет `smartmoneyconcepts`. Единственный источник правды для всей SMC-логики.
 
 | Файл | Назначение |
 |------|-----------|
-| `models.py` | Pydantic frozen models: `SwingPoint`, `StructureEvent`, `OrderBlock`, `FairValueGap`, `LiquidityLevel`, `SMCContext`; enums: `SMCPhase` (BULL_TREND, BEAR_TREND, ACCUMULATION, DISTRIBUTION, RANGING, UNKNOWN) |
+| `models.py` | Pydantic frozen models: `SwingPoint`, `StructureEvent`, `OrderBlock`, `FairValueGap`, `LiquidityLevel`, `SMCContext`; enum `SMCPhase` (BULL_TREND, BEAR_TREND, ACCUMULATION, DISTRIBUTION, RANGING, UNKNOWN) |
 | `swing_detector.py` | O(n) свинг-детектор через `numpy.sliding_window_view` |
 | `structural_detector.py` | BOS/CHoCH детектор — state-машина (BULL/BEAR/UNKNOWN), фильтр по `min_impulse_atr` |
 | `imbalance_detector.py` | FVG (3-свечной паттерн) + Order Block (последняя противоположная свеча перед структурным событием) |
 | `supply_demand_detector.py` | EQH/EQL кластеризация (tolerance_pct=0.2%), Supply/Demand из OB |
 | `analyzer.py` | Оркестратор: `SMCAnalyzer.analyze(df) → SMCContext`, ATR через Wilder's smoothing |
-| `configs/smc.yaml` | Конфиг параметров: swing_strength, min_warmup_bars, min_impulse_atr, min_fvg_atr и др. |
+| `configs/smc.yaml` | Конфиг: swing_strength, min_warmup_bars, min_impulse_atr, min_fvg_atr и др. |
 
 **52 теста** — все зелёные (`bot/tests/unit/smc/`).
 
-#### 2. Замена `smartmoneyconcepts` в стратегии (Вариант A) (коммит `26626c3`)
+#### 2. Замена `smartmoneyconcepts` в стратегии — Вариант A (коммит `26626c3`)
 
-`bot/strategies/smc/market_structure.py` и `confluence_zones.py` переписаны изнутри. Публичный API сохранён полностью — `smc_adapter.py` и `smc_strategy.py` изменений не потребовали.
+`market_structure.py` и `confluence_zones.py` переписаны изнутри на `bot.core.smc`. Публичный API сохранён полностью — `smc_adapter.py` и `smc_strategy.py` не потребовали изменений.
 
 | Файл | Было | Стало |
 |------|------|-------|
 | `market_structure.py` | `import smartmoneyconcepts.smc as smc` | `SMCAnalyzer` + `SMCContext` из `bot.core.smc` |
 | `confluence_zones.py` | `import smartmoneyconcepts.smc as smc` | читает из `market_structure.get_smc_context()` |
 
-**Исправлен pre-existing баг:** в `smc_strategy.py` метод `generate_signals_m5` не вызывал `m5_confluence.analyze()` перед `m5_signal_gen.analyze()` → OB/FVG зоны всегда были пустыми → confluence score всех сигналов = 0.
+**Исправлен pre-existing баг:** `generate_signals_m5` не вызывал `m5_confluence.analyze()` → OB/FVG зоны всегда были пустыми → confluence score всех SMC-сигналов = 0. Это могло быть одной из причин SMC=0 сделок в Phase 1.
 
-Добавлен `get_smc_context() → Optional[SMCContext]` — позволяет другим компонентам читать SMC-контекст без повторного анализа.
+Добавлен `MarketStructureAnalyzer.get_smc_context() → Optional[SMCContext]` — позволяет оркестратору читать контекст без повторного анализа.
 
-#### 3. Интеграция с MarketRegimeDetector (коммит `7113ee4`)
+#### 3. Новые режимы рынка + `analyze_with_smc()` (коммит `7113ee4`)
 
 **`bot/orchestrator/market_regime.py`:**
 
 | Изменение | Детали |
 |-----------|--------|
-| `MarketRegime.ACCUMULATION` | Новый режим: CHoCH_BULL — smart money накапливает (потенциальный разворот вверх) |
-| `MarketRegime.DISTRIBUTION` | Новый режим: CHoCH_BEAR — smart money распределяет (потенциальный разворот вниз) |
-| `RecommendedStrategy.SMC` | Новый тип рекомендации стратегии |
-| `analyze_with_smc(df, ctx)` | Новый метод: объединяет ADX-классификацию с SMC-фазой. При ACCUMULATION/DISTRIBUTION переопределяет режим, обновляет `_last_analysis` и историю. Confidence = `base × 0.6 + 0.4` (если warmup завершён) |
+| `MarketRegime.ACCUMULATION` | CHoCH_BULL — smart money накапливает, потенциальный разворот вверх |
+| `MarketRegime.DISTRIBUTION` | CHoCH_BEAR — smart money распределяет, потенциальный разворот вниз |
+| `RecommendedStrategy.SMC` | Новый тип рекомендации |
+| `analyze_with_smc(df, ctx)` | Новый метод: берёт базовый ADX-анализ и переопределяет режим на ACCUMULATION/DISTRIBUTION если `SMCContext.phase` это указывает. Confidence = `base × 0.6 + 0.4` (если warmup завершён). Обновляет `_last_analysis` и историю |
 | `_recommend_strategy` | ACCUMULATION/DISTRIBUTION → `RecommendedStrategy.SMC` |
-| `_calculate_confidence` | Обработка новых режимов: ADX + trend_strength blend |
+| `_calculate_confidence` | Обрабатывает новые режимы: ADX + trend_strength blend |
 
 **`bot/orchestrator/bot_orchestrator.py`:**
-- `_REGIME_TO_STRATEGIES`: добавлен `RecommendedStrategy.SMC → {"smc"}`
-- `_update_active_strategies`: `"accumulation"` и `"distribution"` включают smc-стратегию
+- `_REGIME_TO_STRATEGIES[RecommendedStrategy.SMC] = {"smc"}`
+- `_update_active_strategies`: режимы `"accumulation"` и `"distribution"` добавляют `"smc"` в активный набор
 
-**22 теста** (`bot/tests/unit/test_market_regime.py`) — все зелёные.
+**22 теста** (`bot/tests/unit/test_market_regime.py`).
 
-#### 4. Деплой
+#### 4. SMC-оверлей + volatility guard в live боте (коммит `f646fc3`)
 
-```
-git push → docker compose restart bot → бот запущен, ошибок нет
-total_requests=9482 (ETH grid), balance=102416 USDT
-```
+**P1.1 — `detect_market_regime()`:** заменён вызов `analyze(df)` на `analyze_with_smc(df, smc_ctx)` когда SMC стратегия прогрета. Контекст: `smc_strategy._strategy.market_structure.get_smc_context()`. Fallback на `analyze(df)` если контекст недоступен или warmup не завершён.
+
+**P1.3 — volatility guard:** четвёртый gate в `_update_active_strategies()` — блокирует *добавление* новых стратегий когда `atr_pct > 3%`. Сокращение (деактивация) всегда разрешено. Константа: `BotOrchestrator._MAX_VOLATILITY_ATR_PCT = 3.0`.
+
+**+4 теста** для новых guard-ов.
 
 ### Итог сессии 46
 
 | | До | После |
 |--|----|----|
 | SMC зависимость | `pip install smartmoneyconcepts` | собственный `bot/core/smc/` |
-| Unit tests | 0 | **74** (52 SMC + 22 regime) |
+| Unit tests | 0 | **78** (52 SMC + 26 market regime) |
 | Режимы рынка | 6 | **8** (+ACCUMULATION, +DISTRIBUTION) |
-| SMC → MarketRegime | нет связи | `analyze_with_smc()` |
+| SMC → MarketRegime live | нет | `analyze_with_smc()` подключён |
 | SMC confluence bug | confluence всегда 0 | исправлено |
-| Прод | — | ✅ задеплоено |
-
-#### 4. Подключение SMC-оверлея + volatility guard к live боту (коммит `f646fc3`)
-
-**P1.1 — `detect_market_regime()`:** теперь вызывает `analyze_with_smc(df, smc_ctx)` вместо `analyze(df)` когда SMC стратегия прогрета. Контекст извлекается из `smc_strategy._strategy.market_structure.get_smc_context()`. При недоступности — fallback на `analyze(df)`.
-
-**P1.3 — volatility guard в `_update_active_strategies()`:** блокирует *расширение* набора активных стратегий когда `atr_pct > 3%`. Сокращение (деактивация) всегда разрешено — открытые позиции продолжают управляться. Добавлена константа `BotOrchestrator._MAX_VOLATILITY_ATR_PCT = 3.0`.
-
-**Итог Направления 4:** live бот теперь:
-- Видит ACCUMULATION/DISTRIBUTION режимы (через SMC CHoCH)
-- Активирует SMC-стратегию при этих режимах
-- Не открывает новые позиции во время ATR > 3% спайков
+| Volatility guard | нет | ATR > 3% блокирует расширение |
+| Прод | — | ✅ задеплоено, ошибок нет |
+| **Направление 4 плана** | ⏳ | ✅ **Закрыто** |
 
 ### Коммиты Session 46
 
@@ -105,6 +99,7 @@ total_requests=9482 (ETH grid), balance=102416 USDT
 | `26626c3` | refactor(smc): replace smartmoneyconcepts lib with bot.core.smc (Variant A) |
 | `7113ee4` | feat(regime): add ACCUMULATION/DISTRIBUTION regimes + analyze_with_smc() |
 | `f646fc3` | feat(regime): complete P1 adaptive switching — SMC overlay + volatility guard |
+| `dc61e69` | docs: update SESSION_CONTEXT.md |
 
 ---
 
