@@ -1,15 +1,110 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-04)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-05)
 
 ## Текущий статус проекта
 
-**Дата:** 4 марта 2026
-**Статус:** v2.0.0 + **BacktestOrchestratorEngine V3.0 — Phase 1 завершён (37 пар, Session 45)**
-**Pass Rate:** 1352+ tests passing
+**Дата:** 5 марта 2026
+**Статус:** v2.0.0 + **bot/core/smc/ модуль завершён + MarketRegimeDetector интеграция (Session 46)**
+**Pass Rate:** 74 unit tests passing (52 SMC + 22 market regime)
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `276d0dd` (perf(backtest): fix O(n) bottleneck in get_context_at + throttle SMC signals)
-**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Все стратегии активны.
-**Backtest V2.0 Status:** ✅ Phase 1 завершён (37 пар, 50k баров, 35 мин). Движок V3.0 работает. Phase 2 (оптимизация) — следующий шаг после расследования SMC=0.
+**Последний коммит:** `7113ee4` (feat(regime): add ACCUMULATION/DISTRIBUTION regimes + analyze_with_smc())
+**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Задеплоено, ошибок нет.
+**Backtest V2.0 Status:** ✅ Phase 1 завершён (37 пар, 50k баров, 35 мин). Phase 2 (оптимизация) — следующий шаг. SMC=0 расследование — P0.
 **Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа Session 45 завершена.
+
+---
+
+## Последняя сессия (2026-03-05) — Session 46: bot/core/smc/ + MarketRegimeDetector интеграция
+
+### Задача
+Реализовать собственный SMC-модуль (`bot/core/smc/`), заменив внешнюю зависимость `smartmoneyconcepts` (Вариант A), и интегрировать SMC-фазы в `MarketRegimeDetector`.
+
+### Сделано в сессии 46
+
+#### 1. Новый модуль `bot/core/smc/` — собственный SMC-движок (коммит `c266393`)
+
+Заменяет pip-пакет `smartmoneyconcepts`. Единственный источник правды для всей SMC-логики в проекте.
+
+| Файл | Назначение |
+|------|-----------|
+| `models.py` | Pydantic frozen models: `SwingPoint`, `StructureEvent`, `OrderBlock`, `FairValueGap`, `LiquidityLevel`, `SMCContext`; enums: `SMCPhase` (BULL_TREND, BEAR_TREND, ACCUMULATION, DISTRIBUTION, RANGING, UNKNOWN) |
+| `swing_detector.py` | O(n) свинг-детектор через `numpy.sliding_window_view` |
+| `structural_detector.py` | BOS/CHoCH детектор — state-машина (BULL/BEAR/UNKNOWN), фильтр по `min_impulse_atr` |
+| `imbalance_detector.py` | FVG (3-свечной паттерн) + Order Block (последняя противоположная свеча перед структурным событием) |
+| `supply_demand_detector.py` | EQH/EQL кластеризация (tolerance_pct=0.2%), Supply/Demand из OB |
+| `analyzer.py` | Оркестратор: `SMCAnalyzer.analyze(df) → SMCContext`, ATR через Wilder's smoothing |
+| `configs/smc.yaml` | Конфиг параметров: swing_strength, min_warmup_bars, min_impulse_atr, min_fvg_atr и др. |
+
+**52 теста** — все зелёные (`bot/tests/unit/smc/`).
+
+#### 2. Замена `smartmoneyconcepts` в стратегии (Вариант A) (коммит `26626c3`)
+
+`bot/strategies/smc/market_structure.py` и `confluence_zones.py` переписаны изнутри. Публичный API сохранён полностью — `smc_adapter.py` и `smc_strategy.py` изменений не потребовали.
+
+| Файл | Было | Стало |
+|------|------|-------|
+| `market_structure.py` | `import smartmoneyconcepts.smc as smc` | `SMCAnalyzer` + `SMCContext` из `bot.core.smc` |
+| `confluence_zones.py` | `import smartmoneyconcepts.smc as smc` | читает из `market_structure.get_smc_context()` |
+
+**Исправлен pre-existing баг:** в `smc_strategy.py` метод `generate_signals_m5` не вызывал `m5_confluence.analyze()` перед `m5_signal_gen.analyze()` → OB/FVG зоны всегда были пустыми → confluence score всех сигналов = 0.
+
+Добавлен `get_smc_context() → Optional[SMCContext]` — позволяет другим компонентам читать SMC-контекст без повторного анализа.
+
+#### 3. Интеграция с MarketRegimeDetector (коммит `7113ee4`)
+
+**`bot/orchestrator/market_regime.py`:**
+
+| Изменение | Детали |
+|-----------|--------|
+| `MarketRegime.ACCUMULATION` | Новый режим: CHoCH_BULL — smart money накапливает (потенциальный разворот вверх) |
+| `MarketRegime.DISTRIBUTION` | Новый режим: CHoCH_BEAR — smart money распределяет (потенциальный разворот вниз) |
+| `RecommendedStrategy.SMC` | Новый тип рекомендации стратегии |
+| `analyze_with_smc(df, ctx)` | Новый метод: объединяет ADX-классификацию с SMC-фазой. При ACCUMULATION/DISTRIBUTION переопределяет режим, обновляет `_last_analysis` и историю. Confidence = `base × 0.6 + 0.4` (если warmup завершён) |
+| `_recommend_strategy` | ACCUMULATION/DISTRIBUTION → `RecommendedStrategy.SMC` |
+| `_calculate_confidence` | Обработка новых режимов: ADX + trend_strength blend |
+
+**`bot/orchestrator/bot_orchestrator.py`:**
+- `_REGIME_TO_STRATEGIES`: добавлен `RecommendedStrategy.SMC → {"smc"}`
+- `_update_active_strategies`: `"accumulation"` и `"distribution"` включают smc-стратегию
+
+**22 теста** (`bot/tests/unit/test_market_regime.py`) — все зелёные.
+
+#### 4. Деплой
+
+```
+git push → docker compose restart bot → бот запущен, ошибок нет
+total_requests=9482 (ETH grid), balance=102416 USDT
+```
+
+### Итог сессии 46
+
+| | До | После |
+|--|----|----|
+| SMC зависимость | `pip install smartmoneyconcepts` | собственный `bot/core/smc/` |
+| Unit tests | 0 | **74** (52 SMC + 22 regime) |
+| Режимы рынка | 6 | **8** (+ACCUMULATION, +DISTRIBUTION) |
+| SMC → MarketRegime | нет связи | `analyze_with_smc()` |
+| SMC confluence bug | confluence всегда 0 | исправлено |
+| Прод | — | ✅ задеплоено |
+
+### Коммиты Session 46
+
+| Коммит | Описание |
+|--------|----------|
+| `c266393` | feat(smc): add SMC analysis module with 52 unit tests |
+| `26626c3` | refactor(smc): replace smartmoneyconcepts lib with bot.core.smc (Variant A) |
+| `7113ee4` | feat(regime): add ACCUMULATION/DISTRIBUTION regimes + analyze_with_smc() |
+
+---
+
+## Следующие шаги (план)
+
+| Приоритет | Задача | Статус |
+|-----------|--------|--------|
+| **P0** | Расследование SMC = 0 сделок в Phase 1 (smoke test: только SMC, без Grid/DCA) | 🔴 Открыт |
+| **P0** | Синхронизация Live↔Backtest: `from_yaml_config()`, синхронизация adapter дефолтов | 🔴 Открыт |
+| **P1** | Оптимизация DCA: `price_deviation_pct=3-5%`, `max_safety_orders=3`, SHORT при BEAR | ⏳ После P0 |
+| **P1** | Phase 2 backtest: 37 пар с новыми параметрами | ⏳ После P1 |
+| **P2** | TrendFollower SHORT режим при BEAR_TREND | ⏳ Планируется |
 
 ---
 
