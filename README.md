@@ -1,1496 +1,208 @@
-# TRADERAGENT - Algorithmic Trading Platform
+# TRADERAGENT v2.0
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Tests: 1531 passing](https://img.shields.io/badge/tests-1531%20passing-brightgreen.svg)]()
+[![Tests: 1352+ passing](https://img.shields.io/badge/tests-1352%20passing-brightgreen.svg)]()
 [![Version: 2.0.0](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
 
-Платформа алгоритмической торговли криптовалютами с 5 стратегиями, мульти-таймфреймовым анализом, веб-дашбордом и Telegram-управлением. 1,531 тест, 83K+ LOC, production-ready.
+Платформа алгоритмической торговли криптовалютами с 4 стратегиями, мультитаймфреймовым анализом и BacktestOrchestratorEngine V3.0.
 
-Algorithmic cryptocurrency trading platform with 5 strategies, multi-timeframe analysis, web dashboard and Telegram control. 1,531 tests, 83K+ LOC, production-ready.
-
----
-
-## 📋 Table of Contents / Содержание
-
-- [Features / Возможности](#-features--возможности)
-- [Current Status / Текущее состояние](#-current-status--текущее-состояние)
-- [Web UI / Веб-интерфейс](#web-ui--веб-интерфейс)
-- [Architecture / Архитектура](#️-architecture--архитектура)
-- [Quick Start / Быстрый старт](#-quick-start--быстрый-старт)
-- [Installation / Установка](#-installation--установка)
-- [Configuration / Конфигурация](#️-configuration--конфигурация)
-- [Trading Strategies / Торговые стратегии](#-trading-strategies--торговые-стратегии)
-- [Documentation / Документация](#-documentation--документация)
-- [Testing / Тестирование](#-testing--тестирование)
-- [Deployment / Развертывание](#-deployment--развертывание)
-- [Monitoring / Мониторинг](#-monitoring--мониторинг)
-- [Roadmap / План развития](#️-roadmap--план-развития)
-- [FAQ / Часто задаваемые вопросы](#-faq--часто-задаваемые-вопросы)
-- [Contributing / Участие в разработке](#-contributing--участие-в-разработке)
-- [License / Лицензия](#-license--лицензия)
-- [Disclaimer / Отказ от ответственности](#️-disclaimer--отказ-от-ответственности)
-
-**Project Documents / Документы проекта:**
-- [Analysis / Анализ проекта](docs/analysis.md) — сильные и слабые стороны, технический долг, оценка безопасности
-- [Development Plan / План развития](docs/plan.md) — 7 направлений, приоритизированные задачи, roadmap по фазам
+Algorithmic cryptocurrency trading platform with 4 strategies, multi-timeframe analysis and BacktestOrchestratorEngine V3.0.
 
 ---
 
-## 🎯 Features / Возможности
+## Содержание / Table of Contents
 
-### Core Features / Основные возможности
-
-✅ **Multi-Strategy Support / Поддержка нескольких стратегий**
-- Grid Trading - сеточная торговля в заданном диапазоне
-- DCA (Dollar Cost Averaging) - усреднение позиции при просадках
-- Hybrid - комбинированная стратегия Grid + DCA
-- Trend Follower - адаптивное следование за трендом с динамическими TP/SL
-- SMC (Smart Money Concepts) - институциональный анализ с Order Blocks, FVG, BOS/CHoCH
-
-✅ **Exchange Integration / Интеграция с биржами**
-- Поддержка всех бирж через CCXT (Binance, Bybit, OKX, и др.)
-- Testnet/Sandbox режим для безопасного тестирования
-- WebSocket соединения для real-time данных
-- Автоматическое управление rate limits
-
-✅ **Risk Management / Управление рисками**
-- Настраиваемые stop-loss уровни
-- Ограничение максимального размера позиции
-- Ограничение максимальной дневной потери
-- Проверка минимального размера ордера
-
-✅ **Persistence & Reliability / Надежность**
-- PostgreSQL база данных для хранения состояния
-- Восстановление состояния после перезапуска
-- История всех сделок и ордеров
-- Асинхронная архитектура для высокой производительности
-
-✅ **Configuration Management / Управление конфигурацией**
-- YAML конфигурационные файлы
-- Hot reload конфигурации
-- Валидация всех параметров
-- Шифрование API ключей (AES-256)
-
-✅ **Logging & Monitoring / Логирование и мониторинг**
-- Структурированное логирование (JSON поддержка)
-- Ротация лог-файлов
-- Prometheus метрики
-- Grafana дашборды
-
-✅ **Notifications / Уведомления**
-- Telegram бот для управления и уведомлений
-- Уведомления о сделках
-- Уведомления об ошибках
-- Отчеты о состоянии портфеля
-
-✅ **Testing Infrastructure / Инфраструктура тестирования**
-- 1,531 тест (100% pass rate): unit, integration, load, backtesting, e2e
-- Backtesting framework с multi-timeframe анализом и 5-фазным pipeline
-- Testnet testing suite (Bybit Demo Trading)
-- CI/CD: GitHub Actions (black + ruff + mypy + pytest + Docker + Trivy)
+- [Статус / Status](#статус--status)
+- [Стратегии / Strategies](#стратегии--strategies)
+- [Архитектура / Architecture](#архитектура--architecture)
+- [Быстрый старт / Quick Start](#быстрый-старт--quick-start)
+- [Конфигурация / Configuration](#конфигурация--configuration)
+- [Бэктестирование / Backtesting](#бэктестирование--backtesting)
+- [Документация / Documentation](#документация--documentation)
 
 ---
 
-## Current Status / Текущее состояние
+## Статус / Status
 
-> Version 2.0.0 | February 2026
+| Компонент | Состояние |
+|-----------|-----------|
+| Production боты (5 шт.) | ✅ Работают — 185.233.200.13 |
+| BacktestOrchestratorEngine | ✅ V3.0 (Phase 1: 37 пар, 50k баров) |
+| Тестовый сервер | ⏸️ Выключен |
+| Telegram уведомления | ❌ Сеть недоступна на продакшн-сервере |
 
-| Metric / Метрика | Value / Значение |
-|-------------------|------------------|
-| **Strategies / Стратегии** | 5 (Grid, DCA, Hybrid, Trend Follower, SMC) |
-| **Tests / Тесты** | 1,531 passing, 25 skipped (100% pass rate) |
-| **Codebase / Код** | 83,600+ LOC, 300+ files, 512 commits |
-| **Production Bots / Боты** | 3 active (BTC Hybrid, ETH Grid, SOL DCA) |
-| **Exchange / Биржа** | Bybit Demo Trading (api-demo.bybit.com) |
-| **Server / Сервер** | Ubuntu 24.04, Docker Compose (PostgreSQL + Redis + Bot) |
-
-**Active Bots / Активные боты:**
-- `demo_btc_hybrid` — BTC/USDT, Grid + DCA, auto-start
-- `demo_eth_grid` — ETH/USDT, Grid (6 open orders), auto-start
-- `demo_sol_dca` — SOL/USDT, DCA, auto-start
-- `demo_btc_smc` — BTC/USDT, SMC (dry_run), auto-start
-
-**Recent Updates / Последние обновления:**
-- Bybit order status normalization fix (`filled` → `closed`)
-- SMC stale signal 2% price threshold filter
-- Pipeline logging optimization (4.4 GB → 180 KB)
-- Multi-symbol backtesting pipeline (45 pairs, 3 strategies)
+**Phase 1 Backtest Results (2026-03-04):** 5/37 pairs profitable, avg return -11.68% (bearish market Aug 2025 – Feb 2026)
 
 ---
 
-## Web UI / Веб-интерфейс
+## Стратегии / Strategies
 
-TRADERAGENT включает полноценный веб-интерфейс для управления ботами, стратегиями, портфелем и бэктестингом.
+| Стратегия | Описание | Статус |
+|-----------|----------|--------|
+| **Grid** | Сетка limit-ордеров в диапазоне цен | ✅ Production |
+| **DCA** | Усреднение позиции при падении цены | ✅ Production |
+| **Trend Follower** | EMA/ATR/RSI trend-following с trailing stop | ✅ Production |
+| **SMC (Smart Money Concepts)** | H1 структура + M5 вход, Order Blocks | ✅ Production |
 
-**Stack:** React + TypeScript + Vite (Frontend) | FastAPI + JWT Auth (Backend)
+Все стратегии реализуют единый интерфейс `BaseStrategy` и работают как в live-боте, так и в бэктесте.
 
-### Screenshots / Скриншоты
-
-| Login | Dashboard |
-|:-----:|:---------:|
-| ![Login](docs/screenshots/01-login.png) | ![Dashboard](docs/screenshots/02-dashboard.png) |
-
-| Bots | Strategies |
-|:----:|:----------:|
-| ![Bots](docs/screenshots/03-bots.png) | ![Strategies](docs/screenshots/04-strategies.png) |
-
-| Portfolio | Backtesting |
-|:---------:|:-----------:|
-| ![Portfolio](docs/screenshots/05-portfolio.png) | ![Backtesting](docs/screenshots/06-backtesting.png) |
-
-| Settings | Settings (full) |
-|:--------:|:---------------:|
-| ![Settings](docs/screenshots/07-settings.png) | ![Settings Full](docs/screenshots/08-settings-full.png) |
-
-**Pages / Страницы:**
-- **Login** — JWT-авторизация (bcrypt + refresh token rotation)
-- **Dashboard** — Active Bots, Total PNL, Total Trades, System Status
-- **Bots** — управление торговыми ботами
-- **Strategies** — маркетплейс стратегий (Grid, DCA, Trend Follower) + шаблоны
-- **Portfolio** — баланс, Realized/Unrealized PNL, Asset Allocation
-- **Backtesting** — запуск бэктестов (Grid) с выбором символа и таймфрейма
-- **Settings** — профиль, уведомления, Exchange API Keys, System Configuration
+All strategies implement a unified `BaseStrategy` interface and work both in the live bot and backtesting engine.
 
 ---
 
-## 🏗️ Architecture / Архитектура
-
-### High-Level Architecture / Высокоуровневая архитектура
+## Архитектура / Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│              BotApplication (main.py)                  │
-│       Config + Database + Redis + Telegram             │
-└─────────────────────┬────────────────────────────────┘
-                      │
-┌─────────────────────▼────────────────────────────────┐
-│              BotOrchestrator (1,710 LOC)               │
-│  Main loop + Health Monitor + State Persistence        │
-├────────────────┬─────────────────────────────────────┤
-│ MarketRegime   │        Strategy Registry              │
-│ Detector       │  ┌──────┬──────┬──────┬──────┐       │
-│ (6 режимов)    │  │ Grid │ DCA  │ TF   │ SMC  │       │
-│                │  │      │      │      │      │       │
-│ TIGHT_RANGE    │  │ Buy/ │ Avg  │ EMA/ │ OB/  │       │
-│ WIDE_RANGE     │  │ Sell │ Down │ ATR/ │ FVG/ │       │
-│ BULL_TREND     │  │ Grid │ TP   │ RSI  │ BOS  │       │
-│ BEAR_TREND     │  └──┬───┴──┬───┴──┬───┴──┬───┘       │
-│ QUIET_TRANS    │     │      │      │      │            │
-│ VOLATILE_TRANS │     └──────┴──────┴──────┘            │
-└────────────────┴──────────────┬───────────────────────┘
-                                │
-              ┌─────────────────┼─────────────────┐
-              │                 │                 │
-    ┌─────────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
-    │  Risk Manager  │  │  Exchange   │  │  Database   │
-    │  (4 уровня)    │  │  Client     │  │  Manager    │
-    │  Global→Strat  │  │  CCXT +     │  │  PostgreSQL │
-    │  →Entry→Orch   │  │  ByBit V5   │  │  + Redis    │
-    └────────────────┘  └─────────────┘  └─────────────┘
+bot/
+├── orchestrator/
+│   ├── bot_orchestrator.py          # Live bot orchestrator
+│   ├── market_regime.py             # 6-mode market regime detector
+│   └── strategy_selector.py         # Strategy routing
+├── strategies/
+│   ├── base.py                      # Unified BaseStrategy interface
+│   ├── grid/ + grid_adapter.py
+│   ├── dca/ + dca_adapter.py
+│   ├── trend_follower/ + trend_follower_adapter.py
+│   └── smc/ + smc_adapter.py        # Multi-timeframe H1+M5
+└── tests/backtesting/
+    ├── orchestrator_engine.py        # BacktestOrchestratorEngine V3.0
+    ├── multi_tf_data_loader.py       # O(log n) data loader
+    └── strategy_router.py            # Advisory regime-based routing
 ```
 
-### Key Components / Ключевые компоненты
+Подробнее: [Анализ проекта](docs/analysis.md) · [План развития](docs/plan.md)
 
-- **BotOrchestrator** - координация всех компонентов, главный торговый цикл
-- **MarketRegimeDetector** - 6-режимный классификатор рынка с ADX-гистерезисом
-- **GridAdapter/DCAAdapter/TrendFollowerAdapter/SMCAdapter** - 5 стратегий с единым интерфейсом
-- **HybridStrategy** - комбинация Grid + DCA с адаптивным переключением
-- **RiskManager** - 4-уровневая система рисков (глобальный → стратегия → вход → оркестратор)
-- **ExchangeClient** - CCXT wrapper (150+ бирж) + ByBit Direct Client (Demo Trading)
-- **DatabaseManager** - PostgreSQL (async) + Alembic миграции + State Persistence
-- **ConfigManager** - YAML + Pydantic + hot reload через watchdog
-- **TelegramBot** - 15+ команд управления + real-time уведомления через Redis Pub/Sub
-- **Web UI** - FastAPI + React/TypeScript (JWT auth, WebSocket, 20+ endpoints)
+For details: [Project Analysis](docs/analysis.md) · [Development Plan](docs/plan.md)
 
 ---
 
-## 🚀 Quick Start / Быстрый старт
-
-### Prerequisites / Предварительные требования
-
-- Python 3.10 или выше
-- PostgreSQL 13+ (или используйте Docker)
-- Аккаунт на криптобирже с API ключами
-- (Опционально) Telegram бот для уведомлений
-
-### Installation via Docker (Recommended) / Установка через Docker (Рекомендуется)
+## Быстрый старт / Quick Start
 
 ```bash
-# 1. Clone repository / Клонируйте репозиторий
+# 1. Clone and install
 git clone https://github.com/alekseymavai/TRADERAGENT.git
 cd TRADERAGENT
-
-# 2. Configure environment / Настройте окружение
-cp .env.example .env
-nano .env  # Edit with your values / Отредактируйте своими значениями
-
-# 3. Configure bot / Настройте бота
-cp configs/example.yaml configs/production.yaml
-nano configs/production.yaml  # Configure trading parameters / Настройте параметры торговли
-
-# 4. Deploy / Разверните
-chmod +x deploy.sh
-./deploy.sh
-```
-
-### Manual Installation / Ручная установка
-
-```bash
-# 1. Clone repository / Клонируйте репозиторий
-git clone https://github.com/alekseymavai/TRADERAGENT.git
-cd TRADERAGENT
-
-# 2. Create virtual environment / Создайте виртуальное окружение
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# 3. Install dependencies / Установите зависимости
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Setup database / Настройте базу данных
-cp alembic.ini.example alembic.ini
-# Edit database URL in alembic.ini
-alembic upgrade head
+# 2. Configure
+cp configs/example.yaml configs/my_config.yaml
+# Edit: api_key, api_secret, strategy params
 
-# 5. Configure bot / Настройте бота
-cp configs/example.yaml configs/production.yaml
-nano configs/production.yaml
+# 3. Run (demo mode)
+python -m bot.main --config configs/my_config.yaml
+```
 
-# 6. Run bot / Запустите бота
-python -m bot.main --config configs/production.yaml
+### Docker (Production)
+
+```bash
+docker compose up -d
+docker compose logs -f bot
 ```
 
 ---
 
-## 📦 Installation / Установка
+## Конфигурация / Configuration
 
-### System Requirements / Системные требования
+Пример конфига: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
 
-**Minimum / Минимальные:**
-- CPU: 2 cores / ядра
-- RAM: 2 GB
-- Storage / Хранилище: 10 GB
-- OS: Ubuntu 20.04+, Debian 11+, или любой Linux с Docker
-
-**Recommended / Рекомендуемые:**
-- CPU: 4 cores / ядра
-- RAM: 4 GB
-- Storage / Хранилище: 20 GB
-- SSD для базы данных
-
-### Docker Installation / Установка Docker
-
-```bash
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Install Docker Compose
-sudo apt-get install docker-compose-plugin
-
-# Add user to docker group
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-### Python Installation / Установка Python
-
-```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install python3.11 python3.11-venv python3-pip
-
-# Check Python version
-python3.11 --version
-```
-
-### Database Setup / Настройка базы данных
-
-#### With Docker (Recommended) / С Docker (Рекомендуется)
-
-Docker Compose автоматически настроит PostgreSQL и Redis.
-
-#### Manual PostgreSQL Setup / Ручная настройка PostgreSQL
-
-```bash
-# Install PostgreSQL
-sudo apt-get install postgresql postgresql-contrib
-
-# Create database and user
-sudo -u postgres psql
-```
-
-```sql
-CREATE DATABASE traderagent;
-CREATE USER traderagent WITH ENCRYPTED PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE traderagent TO traderagent;
-\q
-```
-
-### Database Migrations / Миграции базы данных
-
-Проект использует **Alembic** для управления версиями схемы базы данных. Alembic позволяет отслеживать изменения в структуре БД и применять их автоматически.
-
-#### Running Migrations with Docker / Запуск миграций с Docker
-
-При использовании Docker Compose миграции выполняются автоматически перед запуском бота:
-
-```bash
-# Automatic migration during deployment
-./deploy.sh
-
-# Or manually run migrations
-docker-compose --profile migration up migrations
-
-# The migrations service will run and exit automatically
-```
-
-**Что происходит:**
-1. Docker создает контейнер `traderagent-migrations`
-2. Ждет готовности PostgreSQL (healthcheck)
-3. Выполняет `alembic upgrade head`
-4. Применяет все pending migrations
-5. Завершает работу (exit code 0 = success)
-
-#### Manual Migration Setup / Ручная настройка миграций
-
-Если вы используете локальную установку без Docker:
-
-```bash
-# 1. Configure Alembic
-cp alembic.ini.example alembic.ini
-nano alembic.ini  # Edit sqlalchemy.url with your database credentials
-
-# Example database URL:
-# sqlalchemy.url = postgresql+asyncpg://traderagent:password@localhost:5432/traderagent
-
-# 2. Run migrations
-alembic upgrade head
-
-# 3. Verify migration status
-alembic current
-alembic history
-```
-
-#### Common Migration Commands / Основные команды миграций
-
-```bash
-# Check current migration version
-alembic current
-
-# View migration history
-alembic history --verbose
-
-# Upgrade to latest version
-alembic upgrade head
-
-# Upgrade to specific version
-alembic upgrade <revision_id>
-
-# Downgrade one revision
-alembic downgrade -1
-
-# Downgrade to specific version
-alembic downgrade <revision_id>
-
-# Create new migration (auto-generate from models)
-alembic revision --autogenerate -m "Description of changes"
-
-# Create empty migration
-alembic revision -m "Description of changes"
-```
-
-#### Migration Files / Файлы миграций
-
-Миграции находятся в директории `alembic/versions/`:
-
-```
-alembic/
-├── versions/
-│   └── 20260213084501_initial_schema.py  # Initial database schema
-├── env.py                                 # Alembic environment configuration
-└── script.py.mako                         # Migration template
-```
-
-**Initial Migration (20260213084501_initial_schema.py)** создает следующие таблицы:
-- `exchange_credentials` - зашифрованные API ключи бирж
-- `bots` - конфигурация и состояние ботов
-- `orders` - история ордеров
-- `trades` - история сделок
-- `grid_levels` - состояние Grid Trading
-- `dca_history` - история DCA усреднений
-- `bot_logs` - логи работы ботов
-
-#### Troubleshooting / Решение проблем
-
-**Ошибка: "Can't locate revision identified by..."**
-```bash
-# Reset migration state (ВНИМАНИЕ: потеря данных!)
-alembic stamp head
-```
-
-**Ошибка: "Target database is not up to date"**
-```bash
-# Apply pending migrations
-alembic upgrade head
-```
-
-**Проверка подключения к БД:**
-```bash
-# Test PostgreSQL connection
-psql -h localhost -U traderagent -d traderagent -c "SELECT version();"
-```
-
-**Просмотр текущей схемы:**
-```bash
-# List all tables
-psql -h localhost -U traderagent -d traderagent -c "\dt"
-
-# Describe specific table
-psql -h localhost -U traderagent -d traderagent -c "\d bots"
-```
-
-#### Environment Variables for Migrations / Переменные окружения
-
-Alembic использует переменные из `.env` при запуске через Docker:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-```
-
-Для ручного запуска можно переопределить через environment:
-```bash
-export DATABASE_URL="postgresql+asyncpg://user:password@host:5432/database"
-alembic upgrade head
-```
-
----
-
-## ⚙️ Configuration / Конфигурация
-
-### Environment Variables / Переменные окружения
-
-Создайте файл `.env` на основе `.env.example`:
-
-```bash
-# Database
-DB_USER=traderagent
-DB_PASSWORD=your_secure_password
-DB_NAME=traderagent
-DB_PORT=5432
-
-# Redis
-REDIS_PORT=6379
-
-# Bot
-CONFIG_FILE=production.yaml
-LOG_LEVEL=INFO
-
-# Telegram
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-TELEGRAM_ALLOWED_CHAT_IDS=123456789
-
-# Security - Generate with: python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
-ENCRYPTION_KEY=your_base64_encoded_32_byte_key
-```
-
-### Bot Configuration / Конфигурация бота
-
-Создайте `configs/production.yaml` на основе `configs/example.yaml`. См. [CONFIGURATION.md](docs/CONFIGURATION.md) для детального описания всех параметров.
-
-**Example Grid Bot / Пример Grid бота:**
+Example config: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
 
 ```yaml
-bots:
-  - name: btc_grid_bot
-    symbol: BTC/USDT
-    strategy: grid
+name: demo_btc_hybrid
+exchange: bybit
+sandbox: true              # api-demo.bybit.com
+symbol: BTC/USDT
+strategy: hybrid           # grid + dca
 
-    exchange:
-      exchange_id: binance
-      credentials_name: binance_main
-      sandbox: true  # Use testnet for testing!
+grid:
+  upper_price: "74000"
+  lower_price: "64000"
+  grid_levels: 6
+  amount_per_grid: "150"
+  profit_per_grid: "0.012"
 
-    grid:
-      upper_price: "50000"
-      lower_price: "40000"
-      grid_levels: 10
-      amount_per_grid: "100"
-      profit_per_grid: "0.01"  # 1% profit per level
-
-    risk_management:
-      max_position_size: "10000"
-      stop_loss_percentage: "0.15"  # 15% stop loss
-
-    dry_run: true  # Simulation mode - no real orders!
-```
-
-**Example DCA Bot / Пример DCA бота:**
-
-```yaml
-bots:
-  - name: eth_dca_bot
-    symbol: ETH/USDT
-    strategy: dca
-
-    exchange:
-      exchange_id: binance
-      credentials_name: binance_main
-      sandbox: true
-
-    dca:
-      trigger_percentage: "0.05"  # Buy when price drops 5%
-      amount_per_step: "100"
-      max_steps: 5
-      take_profit_percentage: "0.1"  # Take profit at 10%
-
-    risk_management:
-      max_position_size: "5000"
-      stop_loss_percentage: "0.20"
-
-    dry_run: true
-```
-
-**Example Hybrid Bot / Пример Hybrid бота:**
-
-```yaml
-bots:
-  - name: btc_hybrid_bot
-    symbol: BTC/USDT
-    strategy: hybrid
-
-    exchange:
-      exchange_id: binance
-      credentials_name: binance_main
-      sandbox: true
-
-    grid:
-      upper_price: "50000"
-      lower_price: "45000"
-      grid_levels: 5
-      amount_per_grid: "200"
-      profit_per_grid: "0.015"
-
-    dca:
-      trigger_percentage: "0.03"  # DCA when price drops 3% below grid
-      amount_per_step: "150"
-      max_steps: 3
-      take_profit_percentage: "0.08"
-
-    risk_management:
-      max_position_size: "15000"
-      stop_loss_percentage: "0.25"
-
-    dry_run: true
+dca:
+  trigger_percentage: "0.02"
+  amount_per_step: "150"
+  max_steps: 5
+  take_profit_percentage: "0.10"
 ```
 
 ---
 
-## 📊 Trading Strategies / Торговые стратегии
+## Бэктестирование / Backtesting
 
-### Grid Trading / Сеточная торговля
+### Phase 1 (завершён / completed)
 
-**Описание:** Размещение сетки ордеров на покупку и продажу в заданном ценовом диапазоне. При исполнении ордера на покупку автоматически создается ордер на продажу с прибылью, и наоборот.
-
-**Когда использовать:**
-- Рынок находится в боковом движении (флэт)
-- Известен диапазон колебаний цены
-- Нужен пассивный доход от волатильности
-
-**Параметры:**
-- `upper_price` - верхняя граница сетки
-- `lower_price` - нижняя граница сетки
-- `grid_levels` - количество уровней (2-100)
-- `amount_per_grid` - объем на каждый уровень
-- `profit_per_grid` - процент прибыли на уровень
-
-**Пример работы:**
-```
-Price Range: 40,000 - 50,000 USDT
-Grid Levels: 10
-Amount per Grid: 100 USDT
-
-Grid будет размещать ордера на:
-Level 1: 41,000 (buy) → 41,410 (sell, +1% profit)
-Level 2: 42,000 (buy) → 42,420 (sell, +1% profit)
-...
-Level 10: 50,000 (buy) → 50,500 (sell, +1% profit)
-```
-
-### DCA (Dollar Cost Averaging) / Усреднение
-
-**Описание:** Постепенное наращивание позиции при падении цены для снижения средней цены входа. При достижении take profit - продажа всей позиции.
-
-**Когда использовать:**
-- Вера в долгосрочный рост актива
-- Готовность к просадкам
-- Хочется снизить риск неудачного входа
-
-**Параметры:**
-- `trigger_percentage` - процент падения для входа
-- `amount_per_step` - объем каждого шага усреднения
-- `max_steps` - максимальное количество шагов (1-20)
-- `take_profit_percentage` - процент для выхода в прибыль
-
-**Пример работы:**
-```
-Initial Price: 45,000 USDT
-Trigger: 5% drop
-Amount per step: 100 USDT
-Max steps: 5
-
-Entry 1: 45,000 (initial position)
-Entry 2: 42,750 (-5%, average: 43,875)
-Entry 3: 40,612 (-5%, average: 42,787)
-...
-Take Profit: 47,076 (+10% from average)
-```
-
-### Hybrid Strategy / Гибридная стратегия
-
-**Описание:** Комбинация Grid и DCA. Grid работает в основном диапазоне, DCA активируется при выходе цены ниже нижней границы grid.
-
-**Когда использовать:**
-- Нужна защита от сильных просадок
-- Хочется совместить преимущества обеих стратегий
-- Неопределенность направления рынка
-
-**Логика работы:**
-1. Grid торгует в диапазоне `lower_price` - `upper_price`
-2. Если цена падает ниже `lower_price` на `trigger_percentage` - активируется DCA
-3. DCA усредняет позицию до `max_steps`
-4. При восстановлении цены выше средней на `take_profit_percentage` - продажа DCA позиции
-5. Grid продолжает работать в своем диапазоне
-
-### 🚀 Trend-Follower Strategy / Адаптивное следование за трендом
-
-**⚠️ Статус:** ✅ Production Ready (v1.1.0)
-
-**Описание:** Адаптивная стратегия следования за трендом с автоматическим определением фазы рынка и динамическими Take Profit / Stop Loss уровнями на основе ATR (Average True Range). Стратегия использует EMA, RSI и анализ объема для генерации высококачественных сигналов входа.
-
-**🎯 Назначение:** Trend-Follower предназначена для **автономной торговли** на трендовых рынках. Стратегия автоматически адаптирует параметры TP/SL под текущую фазу рынка, обеспечивая оптимальное соотношение риск/прибыль.
-
-**Когда использовать:**
-- Рынок находится в тренде (бычий или медвежий)
-- Требуется автоматическая адаптация к волатильности
-- Нужны динамические TP/SL без ручной настройки
-- Важна фильтрация ложных сигналов через объем и RSI
-
-**Ключевые возможности:**
-- ✅ **Автоматическое определение фазы рынка:** Bullish Trend, Bearish Trend, Sideways
-- ✅ **Динамические TP/SL:** ATR-based multipliers адаптируются под волатильность
-- ✅ **Multi-indicator подтверждение:** EMA crossover + RSI + Volume
-- ✅ **Adaptive position sizing:** Риск-менеджмент на основе процента от баланса
-- ✅ **Trade logging & statistics:** Полный трекинг всех сделок и метрик
-
-**Фазы рынка и логика входа:**
-
-| Фаза рынка | Условие | LONG вход | SHORT вход |
-|------------|---------|-----------|------------|
-| **Bullish Trend** | EMA20 > EMA50, divergence > 0.5% | Pullback к EMA20/support + RSI > 30 | - |
-| **Bearish Trend** | EMA20 < EMA50, divergence > 0.5% | - | Pullback к EMA20/resistance + RSI < 70 |
-| **Sideways** | Divergence < 0.5% | RSI exit oversold (<30) или breakout вверх | RSI exit overbought (>70) или breakout вниз |
-
-**Динамические TP/SL множители (ATR-based):**
-
-| Фаза рынка | Take Profit | Stop Loss | Описание |
-|------------|-------------|-----------|----------|
-| **Sideways** | 1.2x ATR | 0.7x ATR | Консервативные настройки из-за низкой волатильности |
-| **Weak Trend** | 1.8x ATR | 1.0x ATR | Умеренные настройки для слабых трендов |
-| **Strong Trend** | 2.5x ATR | 1.0x ATR | Агрессивные TP для захвата сильных движений |
-
-**Параметры конфигурации:**
-```yaml
-trend_follower:
-  # Market analysis
-  ema_fast_period: 20          # Fast EMA для определения тренда
-  ema_slow_period: 50          # Slow EMA для определения тренда
-  atr_period: 14               # ATR для волатильности
-  rsi_period: 14               # RSI для momentum
-
-  # Entry filters
-  volume_multiplier: "1.5"     # Объем должен быть > 150% от средне��о
-  atr_filter_threshold: "0.05" # Минимум 5% ATR для фильтрации
-
-  # Dynamic TP/SL
-  tp_atr_multiplier_sideways: "1.2"
-  tp_atr_multiplier_weak: "1.8"
-  tp_atr_multiplier_strong: "2.5"
-  sl_atr_multiplier_sideways: "0.7"
-  sl_atr_multiplier_trend: "1.0"
-
-  # Risk management
-  risk_per_trade_pct: "0.02"    # 2% риск на сделку
-  max_position_size_usd: "5000"
-  max_daily_loss_usd: "500"
-  max_positions: 3
-```
-
-**Пример использования:**
-См. `configs/trend_follower_production.yaml` для production-ready конфигурации.
-
-**Метрики производительности:**
-- Win Rate: Зависит от рыночных условий (50-65% на трендовых рынках)
-- Risk/Reward: 1:1.5 - 1:2.5 в зависимости от фазы рынка
-- Max Drawdown: Контролируется через max_daily_loss_usd
-
----
-
-### 🎓 SMC Strategy (Smart Money Concepts) / Стратегия Smart Money
-
-**⚠️ Статус:** ✅ Production Ready (v1.0.0)
-
-**Описание:** Институциональная торговая стратегия, основанная на анализе структуры рынка и поведения "умных денег" (Smart Money). SMC использует мультитаймфреймовый анализ для выявления зон институциональных ордеров и определения точек входа на основе паттернов Price Action.
-
-**🎯 Назначение:** SMC Strategy служит **вспомогательным инструментом** для принятия решений о запуске DCA-Grid ботов. Стратегия анализирует рыночную структуру и предоставляет сигналы высокого качества для оптимального момента входа автономных торговых ботов.
-
-**Когда использовать:**
-- Нужен высокоточный анализ рынка перед запуском DCA/Grid ботов
-- Требуется определение институциональных зон поддержки/сопротивления
-- Важна уверенность в направлении тренда перед входом
-- Необходимо выявление оптимальных точек входа по паттернам Price Action
-
-**Компоненты стратегии:**
-- ✅ **Market Structure Analyzer** - анализ структуры рынка (BOS/CHoCH, тренд)
-- ✅ **Confluence Zones** - определение Order Blocks и Fair Value Gaps
-- ✅ **Entry Signal Generator** - генерация сигналов по паттернам (Engulfing, Pin Bar, Inside Bar)
-- ✅ **Position Manager** - Kelly Criterion sizing + динамический SL/TP
-- ✅ **Multi-Timeframe Analysis** - анализ на D1, H4, H1, M15 таймфреймах
-
-**Ключевые концепции:**
-- **Order Blocks (OB)** - зоны институциональных ордеров (последняя противоположная свеча перед структурным сдвигом)
-- **Fair Value Gaps (FVG)** - ценовые дисбалансы (гэпы), часто служащие магнитами цены
-- **Break of Structure (BOS)** - пробой структуры, подтверждающий тренд
-- **Change of Character (CHoCH)** - изменение характера рынка, сигнал возможного разворота
-- **Kelly Criterion** - оптимальный расчет размера позиции (fractional 0.25x)
-
-**Параметры конфигурации:**
-```python
-from bot.strategies.smc import SMCStrategy, SMCConfig
-
-config = SMCConfig(
-    # Market Structure
-    swing_lookback=10,           # Период для определения swing high/low
-    structure_break_buffer=0.002, # Буфер для подтверждения пробоя (0.2%)
-
-    # Confluence Zones
-    zone_merge_threshold=0.01,    # Порог объединения зон (1%)
-    zone_invalidation_penetration=0.5, # Проникновение для инвалидации зоны (50%)
-
-    # Entry Signals
-    min_pattern_quality=0.7,      # Минимальное качество паттерна (0-1)
-    min_confluence_score=0.6,     # Минимальный confluence score (0-1)
-
-    # Position Management (Kelly Criterion)
-    use_kelly=True,               # Использовать Kelly Criterion
-    kelly_fraction=0.25,          # Fractional Kelly (0.25 = консервативно)
-    fixed_risk_percentage=0.02,   # Фиксированный риск (2% если Kelly отключен)
-
-    # Dynamic SL/TP
-    enable_breakeven=True,        # Передвигать SL в breakeven
-    breakeven_rr_ratio=1.0,       # После 1:1 RR
-    enable_trailing=True,         # Trailing SL по структуре
-    partial_tp_enabled=True,      # Частичные exits
-    partial_tp_levels=[           # 50% @ 1.5:1, 30% @ 2.5:1, 20% runner
-        (1.5, 0.5),
-        (2.5, 0.3),
-    ],
-
-    # Risk Management
-    max_position_size_usd=10000,  # Максимальный размер позиции
-    max_daily_loss_usd=500,       # Максимальная дневная потеря
-    max_positions=3,              # Максимум одновременных позиций
-)
-
-smc = SMCStrategy(config)
-```
-
-**Пример работы (Multi-Timeframe Analysis):**
-```
-Timeframes:
-- D1: Общий тренд → BULLISH (восходящий)
-- H4: Структура → BOS detected, trend confirmed
-- H1: Confluence Zones → Order Block @ 42,500, FVG @ 42,800
-- M15: Entry Signal → Bullish Engulfing @ 42,550 (confluence с OB)
-
-Сигнал:
-→ LONG @ 42,550
-→ SL: 42,200 (ниже OB, 0.82% риск)
-→ TP: 43,600 (FVG fill, 2.5:1 RR)
-→ Position Size: 0.05 BTC (Kelly 0.25x)
-
-Управление позицией:
-1. Entry @ 42,550
-2. Breakeven @ 42,900 (после +1:1 RR)
-3. Partial TP 50% @ 43,200 (+1.5:1)
-4. Partial TP 30% @ 43,600 (+2.5:1)
-5. Runner 20% с trailing SL
-```
-
-**Интеграция с DCA-Grid ботами:**
-```python
-from bot.strategies.smc import SMCStrategy, SMCConfig
-
-class SMCGridAdvisor:
-    """Советник для запуска DCA-Grid ботов на основе SMC сигналов"""
-
-    def __init__(self):
-        self.smc = SMCStrategy(SMCConfig())
-
-    def should_launch_grid_bot(self, symbol: str) -> dict:
-        """Проверить, стоит ли запускать Grid бота"""
-        # Получить multi-timeframe данные
-        df_d1, df_h4, df_h1, df_m15 = self.fetch_data(symbol)
-
-        # Анализ рынка
-        analysis = self.smc.analyze_market(df_d1, df_h4, df_h1, df_m15)
-
-        # Генерация сигналов
-        signals = self.smc.generate_signals(df_h1, df_m15)
-
-        if signals and analysis['trend'] == 'BULLISH':
-            signal = signals[0]
-            return {
-                'launch': True,
-                'grid_lower': signal.stop_loss,  # Нижняя граница grid
-                'grid_upper': signal.take_profit, # Верхняя граница grid
-                'entry_price': signal.entry_price,
-                'confidence': signal.confidence,
-                'zones': analysis['confluence_zones'],
-            }
-
-        return {'launch': False}
-```
-
-**Производительность (Backtesting Results):**
-```
-Период: 6 месяцев (BTC/USDT)
-Profit Factor: 1.8
-Max Drawdown: 12%
-Sharpe Ratio: 1.3
-Win Rate: 52%
-Average Hold Time: 36 часов
-Total Trades: 145
-```
-
-**Файлы компонентов:**
-- `bot/strategies/smc/smc_strategy.py` - главный класс стратегии (361 lines)
-- `bot/strategies/smc/market_structure.py` - анализ структуры рынка (498 lines)
-- `bot/strategies/smc/confluence_zones.py` - Order Blocks & FVG (587 lines)
-- `bot/strategies/smc/entry_signals.py` - паттерны Price Action (534 lines)
-- `bot/strategies/smc/position_manager.py` - Kelly + динамический SL/TP (565 lines)
-- `bot/strategies/smc/config.py` - конфигурация (410 lines)
-
-**Тестирование:**
-```bash
-# Запустить все тесты SMC
-pytest bot/tests/strategies/smc/ -v
-
-# Запустить конкретный компонент
-pytest bot/tests/strategies/smc/test_market_structure.py -v
-
-# Coverage
-pytest bot/tests/strategies/smc/ --cov=bot.strategies.smc --cov-report=html
-```
-
-**Статистика кода:**
-- 📊 Всего строк: **2,945** production lines
-- 🧪 Тестов: **60+** comprehensive tests
-- 📁 Компонентов: **6** модулей
-- 📝 Покрытие: **>80%** test coverage
-
-**Документация:**
-- 📘 [SMC Strategy README](bot/strategies/smc/README_old.md) - полное руководство
-- 🎓 Inline документация в каждом модуле
-- 🧪 Unit tests как примеры использования
-
-**Roadmap:**
-- ✅ v1.0.0: Полная реализация SMC Strategy (Released 2026-02-12)
-- 🔄 v1.1.0: Backtesting framework интеграция (Q1 2026)
-- 🔄 v1.2.0: Web UI для визуализации зон и сигналов (Q2 2026)
-- 🔄 v2.0.0: Auto-optimization параметров через ML (Q3 2026)
-
-**📦 Release:** [v1.0.0 - SMC Strategy Production Release](https://github.com/alekseymavai/TRADERAGENT/releases/tag/v1.0.0)
-
-### 📈 Trend-Follower Strategy (Adaptive Trend-Following)
-
-**⚠️ Статус:** ✅ Production Ready (v1.0.0)
-
-**Описание:** Адаптивная стратегия следования за трендом с комплексным управлением рисками и определением фазы рынка. Реализует алгоритм из Issue #124 для торгового бота с адаптивной стратегией "Тренд-фолловер".
-
-**Когда использовать:**
-- Нужна стратегия с автоматической адаптацией к различным фазам рынка
-- Требуется строгое управление рисками с защитой от просадок
-- Важно сочетание трендового следования и торговли в боковике
-- Необходима детальная журналирование сделок для анализа
-
-**Ключевые компоненты:**
-- ✅ **Market Analyzer** - анализ рынка (EMA, ATR, RSI) и определение фазы
-- ✅ **Entry Logic** - генерация сигналов входа с подтверждением объемами
-- ✅ **Position Manager** - динамическое управление TP/SL, трейлинг-стоп, частичное закрытие
-- ✅ **Risk Manager** - расчет размера позиций, защита от просадок, дневные лимиты
-- ✅ **Trade Logger** - полное журналирование сделок с причинами входа/выхода
-
-**Основные концепции:**
-- **EMA(20) & EMA(50)** - определение направления и силы тренда
-- **ATR(14)** - динамическая адаптация стопов к волатильности
-- **RSI(14)** - выявление перепроданности/перекупленности в боковике
-- **Market Phase Detection** - автоматическое распознавание Bullish/Bearish/Sideways
-- **Adaptive TP/SL** - множители зависят от фазы рынка (Sideways=1.2, Weak=1.8, Strong=2.5)
-- **Capital Management** - 2% риск на сделку, защита от серий убытков
-
-**Параметры конфигурации:**
-```python
-from bot.strategies.trend_follower import TrendFollowerStrategy, TrendFollowerConfig
-
-config = TrendFollowerConfig(
-    # Market Analysis
-    ema_fast_period=20,           # Быстрая EMA
-    ema_slow_period=50,           # Медленная EMA
-    atr_period=14,                # Период ATR
-    rsi_period=14,                # Период RSI
-
-    # Market Phase Detection
-    ema_divergence_threshold=0.005,  # 0.5% для определения тренда
-
-    # Entry Logic
-    require_volume_confirmation=True,  # Требовать подтверждение объемом
-    volume_multiplier=1.5,            # 1.5x средний объем
-    max_atr_filter_pct=0.05,          # Не торговать если ATR > 5%
-
-    # Position Management (dynamic TP/SL based on phase)
-    tp_multipliers=(1.2, 1.8, 2.5),   # Sideways, Weak, Strong
-    sl_multipliers=(0.7, 1.0, 1.0),   # Множители SL
-    enable_trailing_stop=True,         # Трейлинг-стоп
-    trailing_activation_atr=1.5,       # Активация после 1.5 × ATR
-    enable_partial_close=True,         # Частичное закрытие
-    partial_close_percentage=0.50,     # Закрыть 50% на 70% TP
-
-    # Risk Management
-    risk_per_trade_pct=0.02,          # 2% риска на сделку
-    max_risk_per_trade_pct=0.01,      # Макс просадка 1%
-    max_consecutive_losses=3,          # Уменьшить размер после 3 убытков
-    size_reduction_factor=0.5,         # Уменьшить на 50%
-    max_daily_loss_usd=500,           # Макс дневной убыток $500
-    max_positions=3,                   # Макс одновременных позиций
-)
-
-strategy = TrendFollowerStrategy(config=config, initial_capital=10000)
-```
-
-**Пример работы (Multi-Phase Adaptation):**
-```
-Phase 1: Bullish Trend Detection
-- EMA(20): 45,200 > EMA(50): 44,500
-- Price: 45,400 > EMA(20)
-- Divergence: 1.6% > 0.5% threshold
-→ Phase: BULLISH_TREND (Weak)
-
-Phase 2: Entry Signal
-- Pullback to EMA(20): 45,210
-- Volume spike: 1.8x average
-- RSI: 52 (neutral)
-→ LONG @ 45,210
-
-Phase 3: Position Management
-- Entry: 45,210
-- SL: 44,750 (1.0 × ATR = 460)
-- TP: 46,038 (1.8 × ATR, Weak Trend)
-→ Partial TP @ 45,789 (70% of TP): Close 50%
-→ Breakeven move @ 45,670 (after 1 × ATR profit)
-→ Trailing activated @ 45,900 (after 1.5 × ATR profit)
-
-Phase 4: Exit
-→ Trailing Stop hit @ 45,980
-→ Final profit: +1.7% (+$170 on $10k position)
-```
-
-**Логика входа:**
-
-*Для LONG позиций:*
-- **Тренд:** Откат к EMA(20) или поддержке с отбоем
-- **Боковик:** Выход RSI из перепроданности (<30) или пробой диапазона вверх
-- **Фильтр:** Требуется повышенный объем (1.5x)
-
-*Для SHORT позиций:*
-- Обратная логика (откат к EMA/сопротивлению, RSI >70, пробой вниз)
-
-**Управление позицией:**
-- **Динамические TP/SL** на основе ATR и фазы рынка
-- **Трейлинг-стоп:** Активируется при прибыли > 1.5 × ATR, следует на 0.5 × ATR
-- **Безубыток:** Перенос SL в точку входа при прибыли > 1 × ATR
-- **Частичное закрытие:** 50% позиции на 70% от TP, остаток с трейлингом
-
-**Управление капиталом:**
-- Размер позиции: 2% капитала на сделку
-- Макс. просадка: ≤ 1% капитала на сделку
-- Защита от серий убытков: Уменьшение размера на 50% после 3 подряд убытков
-- Дневные лимиты: Стоп при достижении $500 убытка
-
-**Логирование:**
-- Полный журнал сделок с причинами входа/выхода
-- Метрики производительности (Sharpe Ratio, макс. просадка, profit factor)
-- Экспорт в CSV/JSON для анализа
-- Автоматическая валидация по критериям эффективности
-
-**Критерии эффективности (Validation):**
-```
-Целевые метрики из Issue #124:
-✓ Sharpe Ratio > 1.0
-✓ Max Drawdown < 20%
-✓ Profit Factor > 1.5
-✓ Win Rate > 45%
-✓ Profit/Loss Ratio > 1.5
-```
-
-**Производительность (Expected):**
-```
-На основе требований бэктестинга (Issue #124):
-Sharpe Ratio: > 1.0 (target: 1.3)
-Max Drawdown: < 20% (target: 12-15%)
-Profit Factor: > 1.5 (target: 1.8)
-Win Rate: > 45% (target: 52%)
-Hold Time: ~36 часов (адаптивно)
-```
-
-**Файлы компонентов:**
-- `bot/strategies/trend_follower/trend_follower_strategy.py` - главный класс стратегии (462 lines)
-- `bot/strategies/trend_follower/market_analyzer.py` - анализ рынка и индикаторы (322 lines)
-- `bot/strategies/trend_follower/entry_logic.py` - логика входов (465 lines)
-- `bot/strategies/trend_follower/position_manager.py` - управление позициями (398 lines)
-- `bot/strategies/trend_follower/risk_manager.py` - управление рисками (287 lines)
-- `bot/strategies/trend_follower/trade_logger.py` - журналирование (310 lines)
-- `bot/strategies/trend_follower/config.py` - конфигурация (146 lines)
-
-**Тестирование:**
-```bash
-# Запустить все тесты Trend-Follower
-pytest tests/strategies/trend_follower/ -v
-
-# Запустить конкретный компонент
-pytest tests/strategies/trend_follower/test_market_analyzer.py -v
-pytest tests/strategies/trend_follower/test_entry_logic.py -v
-
-# Пример использования
-python examples/trend_follower_example.py
-
-# Бэктестинг
-python -m bot.tests.backtesting.backtesting_engine \
-    --strategy trend_follower \
-    --symbol BTC/USDT \
-    --start-date 2024-01-01 \
-    --end-date 2024-12-31
-```
-
-**Статистика кода:**
-- 📊 Всего строк: **~2,400** production lines
-- 🧪 Тестов: **Planned** (comprehensive test suite)
-- 📁 Компонентов: **7** модулей
-- 📝 Документация: Полная с примерами
-
-**Документация:**
-- 📘 [Trend-Follower Strategy README](bot/strategies/trend_follower/README.md) - полное руководство
-- 📝 [Configuration Guide](bot/strategies/trend_follower/config.py) - все параметры
-- 🧪 [Example Usage](examples/trend_follower_example.py) - пример использования
-- 📊 Issue #124 - исходные требования и спецификация
-
-**Интеграция с DCA-Grid:**
-Как и SMC, Trend-Follower может служить советником для запуска DCA-Grid ботов:
-```python
-# Использовать сигналы Trend-Follower для оптимизации запуска Grid ботов
-if trend_signal.confidence > 0.7 and trend_signal.signal_type == 'long':
-    launch_grid_bot(
-        lower_price=trend_signal.entry_price * 0.95,
-        upper_price=trend_signal.entry_price * 1.05,
-        market_phase=market_conditions.phase
-    )
-```
-
-**Roadmap:**
-- ✅ v1.0.0: Полная реализация Trend-Follower Strategy (Released 2026-02-12)
-- 🔄 v1.1.0: Unit tests и backtesting integration (Q1 2026)
-- 🔄 v1.2.0: Advanced pattern recognition (Q2 2026)
-- 🔄 v2.0.0: ML-based parameter optimization (Q3 2026)
-
----
-
-## 📚 Documentation / Документация
-
-### Project Analysis & Planning / Анализ и планирование
-
-- **[Project Analysis / Анализ проекта](docs/analysis.md)** — сильные и слабые стороны, технический долг, оценка безопасности и тестирования
-- **[Development Plan / План развития](docs/plan.md)** — 7 направлений развития, приоритизированные задачи, roadmap по фазам, KPI
-
-### Core Documentation / Основная документация
-
-- [Configuration Guide / Руководство по конфигурации](docs/CONFIGURATION.md) - подробное описание всех параметров
-- [Deployment Guide / Руководство по развертыванию](docs/DEPLOYMENT.md) - развертывание на VPS
-- [Testing Guide / Руководство по тестированию](docs/TESTING.md) - запуск тестов и бэктестинга
-- [Monitoring Guide / Руководство по мониторингу](monitoring/README.md) - настройка Prometheus и Grafana
-- [FAQ / Часто задаваемые вопросы](docs/FAQ.md) - ответы на распространенные вопросы
-- [Troubleshooting / Решение проблем](docs/TROUBLESHOOTING.md) - диагностика и устранение проблем
-- [Roadmap / План развития](docs/ROADMAP.md) - планы на будущие версии
-- [Session Context / Контекст сессий](docs/SESSION_CONTEXT.md) - история разработки по сессиям
-
-### Module Documentation / Документация модулей
-
-- [Bot Module README](bot/README.md) - основная документация модуля бота
-- [ExchangeClient API](bot/api/exchange_client.py) - работа с биржами
-- [Database Models](bot/database/models.py) - схема базы данных
-- [Configuration Schemas](bot/config/schemas.py) - схемы валидации конфигов
-
-### Testnet Testing / Тестирование на testnet
-
-- [Testnet Testing Guide](bot/tests/testnet/README.md) - полное руководство по testnet тестированию
-
----
-
-## 🧪 Testing / Тестирование
-
-### Unit Tests / Модульные тесты
+37 пар × 50k M5 баров × 14 CPU = 35 минут
 
 ```bash
-# Run all unit tests
+cd bot/tests/backtesting
+python run_multi_pair.py --config phase1.yaml --pairs all --workers 14
+```
+
+### Ключевые находки / Key Findings
+
+- **DCA катастрофичен при даунтренде** — avg -$10k/pair
+- **SMC = 0 сделок** — требует расследования (throttle + risk manager)
+- **Grid + DCA**: 77-80% win rate, но отрицательный итог
+
+### BacktestOrchestratorEngine V3.0
+
+- Параллельный запуск всех 4 стратегий на каждом баре
+- Реальный P&L: `(exit - entry) × amount`
+- Advisory routing по режиму рынка (MarketRegimeDetector)
+- O(log n) поиск данных в multi-TF loader
+
+---
+
+## Документация / Documentation
+
+| Документ | Описание |
+|----------|----------|
+| [docs/analysis.md](docs/analysis.md) | Анализ проекта: сильные/слабые стороны, расхождения Live vs Backtest |
+| [docs/plan.md](docs/plan.md) | План развития по приоритетам (P0-P3) |
+| [docs/SESSION_CONTEXT.md](docs/SESSION_CONTEXT.md) | Контекст последних сессий разработки |
+| [docs/architecture_bot.md](docs/architecture_bot.md) | Архитектура живого бота |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Справочник по конфигурации |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Деплой на сервер |
+| [docs/case-studies/](docs/case-studies/) | Разбор критических багов |
+
+---
+
+## Тестирование / Testing
+
+```bash
+# Все тесты
+pytest bot/tests/ -v
+
+# Только unit
 pytest bot/tests/unit/ -v
 
-# Run with coverage
-pytest bot/tests/unit/ --cov=bot --cov-report=html
-
-# Run specific test
-pytest bot/tests/unit/test_grid_engine.py -v
-```
-
-### Integration Tests / Интеграционные тесты
-
-```bash
-# Run integration tests
+# Только интеграционные
 pytest bot/tests/integration/ -v
+
+# Backtest smoke test (один бот, 3000 баров)
+pytest bot/tests/backtesting/test_orchestrator_engine.py -v
 ```
 
-### Backtesting / Бэктестинг
+---
 
-```bash
-# Run backtesting tests
-pytest bot/tests/backtesting/ -v
+## Инфраструктура / Infrastructure
 
-# Run custom backtest
-python -m bot.tests.backtesting.backtesting_engine \
-    --symbol BTC/USDT \
-    --strategy grid \
-    --start-date 2024-01-01 \
-    --end-date 2024-01-31
-```
+| Сервер | IP | Роль | Статус |
+|--------|----|------|--------|
+| Production | 185.233.200.13 | 5 live ботов | ✅ Работает |
+| Testing | 158.160.215.57 | Бэктесты | ⏸️ Выключен |
 
-### Testnet Testing / Тестирование на testnet
+SSH: `ssh ai-agent@185.233.200.13`
 
-⚠️ **ВАЖНО:** Всегда тестируйте на testnet перед real trading!
-
-```bash
-# Setup testnet credentials (see bot/tests/testnet/README.md)
-# Run testnet tests
-pytest bot/tests/testnet/ --testnet -v
-```
-
-См. [TESTING.md](docs/TESTING.md) для подробного руководства по тестированию.
+Docker: `docker compose restart bot`
 
 ---
 
-## 🚢 Deployment / Развертывание
+## Лицензия / License
 
-### Docker Deployment (Recommended) / Развертывание через Docker (Рекомендуется)
-
-```bash
-# Automatic deployment
-./deploy.sh
-
-# Or manual deployment
-docker-compose build
-docker-compose up -d postgres redis
-docker-compose run --rm migrations
-docker-compose up -d bot
-```
-
-### Manual Deployment / Ручное развертывание
-
-```bash
-# Setup virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run migrations
-alembic upgrade head
-
-# Start bot
-python -m bot.main --config configs/production.yaml
-```
-
-### Production Deployment Checklist / Чеклист production развертывания
-
-- [ ] Testnet тестирование завершено успешно
-- [ ] Все тесты проходят (`pytest`)
-- [ ] Конфигурация проверена и валидна
-- [ ] Безопасное хранение API ключей (шифрование включено)
-- [ ] `.env` файл настроен с production значениями
-- [ ] `dry_run: false` в конфигурации бота
-- [ ] `sandbox: false` для real trading
-- [ ] Backup стратегия настроена
-- [ ] Мониторинг настроен (Prometheus + Grafana)
-- [ ] Уведомления Telegram настроены
-- [ ] Логирование настроено и работает
-- [ ] Начинайте с малых сумм для проверки
-
-См. [DEPLOYMENT.md](docs/DEPLOYMENT.md) для детального руководства.
-
----
-
-## 📈 Monitoring / Мониторинг
-
-### Monitoring Stack / Стек мониторинга
-
-Бот включает полноценный monitoring stack:
-
-- **Prometheus** - сбор метрик
-- **Grafana** - визуализация и дашборды
-- **AlertManager** - уведомления о проблемах
-- **Exporters** - метрики бота, PostgreSQL, Redis, системы
-
-### Starting Monitoring / Запуск мониторинга
-
-```bash
-# Start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
-
-# Access dashboards
-# Grafana: http://localhost:3000 (admin/admin)
-# Prometheus: http://localhost:9090
-# AlertManager: http://localhost:9093
-```
-
-### Key Metrics / Ключевые метрики
-
-**Trading Metrics / Торговые метрики:**
-- Portfolio value (USDT) / Стоимость портфеля
-- Total return (%) / Общая доходность
-- Drawdown (%) / Просадка
-- Number of trades / Количество сделок
-- Win rate / Процент прибыльных сделок
-
-**System Metrics / Системные метрики:**
-- CPU/Memory usage / Использование CPU/памяти
-- Database connections / Соединения с БД
-- Exchange API latency / Задержка API биржи
-- Error rate / Частота ошибок
-
-**Alerts / Алерты:**
-- Bot down / Бот не работает
-- Critical drawdown / Критическая просадка
-- High error rate / Высокая частота ошибок
-- Database issues / Проблемы с БД
-- Rate limit approaching / Приближение к лимиту API
-
-См. [monitoring/README.md](monitoring/README.md) для подробной настройки мониторинга.
-
----
-
-## 🗺️ Roadmap / План развития
-
-### v1.0.0 — Core Platform (Released)
-
-✅ **Stage 1:** Core Infrastructure — Database, Config, Logging
-✅ **Stage 2:** Trading Modules — Grid, DCA, Risk Manager
-✅ **Stage 3:** Integration & Orchestration — BotOrchestrator, Exchange Client
-✅ **Stage 4:** Testing & Deployment — pytest, Docker, CI/CD
-✅ **Stage 5:** Documentation — README, guides, inline docs
-
-### v2.0.0 — Advanced Strategies & Web UI (Released February 2026)
-
-✅ **Trend Follower Strategy** — EMA/ATR/RSI, adaptive TP/SL, trailing stop
-✅ **SMC Strategy** — Order Blocks, FVG, BOS/CHoCH, multi-timeframe (D1→M15)
-✅ **Market Regime Detector** — 6-regime classifier with ADX hysteresis
-✅ **Web UI** — React + FastAPI dashboard (JWT auth, WebSocket, 20+ endpoints)
-✅ **Backtesting Pipeline** — 5-phase multi-symbol framework (45 pairs, 3 strategies)
-✅ **Prometheus + Grafana** — 30+ metrics, AlertManager, critical/warning alerts
-
-### v2.1 — Adaptive Trading & Scanner Bot (In Progress)
-
-🔄 Connect MarketRegimeDetector to main trading loop
-🔄 Scanner Bot — automatic pair/strategy selection
-🔄 Complete backtesting pipeline (Phase 2-5 results)
-🔄 Capital Allocator & Correlation Monitor
-
-### v3.0 — ML/AI & Multi-Exchange (Planned)
-
-🔄 Bayesian optimization for strategy parameters
-🔄 ML-based regime classification
-🔄 Binance DirectClient + cross-exchange portfolio
-🔄 TradingView webhook integration
-
-Подробный план: **[docs/plan.md](docs/plan.md)** — 7 направлений, приоритизированные задачи, KPI.
-
-Detailed plan: **[docs/plan.md](docs/plan.md)** — 7 directions, prioritized tasks, KPIs.
-
-См. также [ROADMAP.md](docs/ROADMAP.md) для технической дорожной карты.
-
----
-
-## ❓ FAQ / Часто задаваемые вопросы
-
-### Общие вопросы / General Questions
-
-**Q: Безопасно ли использовать бота?**
-A: Бот использует шифрование API ключей (AES-256) и не отправляет данные на внешние сервера. Всегда начинайте с testnet и малых сумм.
-
-**Q: Какие биржи поддерживаются?**
-A: Все биржи, поддерживаемые CCXT (150+). Тестировалось на Binance, Bybit, OKX.
-
-**Q: Нужен ли VPS для запуска?**
-A: Рекомендуется для 24/7 работы, но можно запустить на домашнем компьютере.
-
-**Q: Можно ли запустить несколько ботов одновременно?**
-A: Да, в одном конфиге можно указать несколько ботов на разных парах/стратегиях.
-
-**Q: Как часто обновляются цены?**
-A: Через WebSocket в real-time или polling каждые 5-10 секунд.
-
-### Технические вопросы / Technical Questions
-
-**Q: Какая база данных используется?**
-A: PostgreSQL для production, SQLite для тестов.
-
-**Q: Какой язык программирования?**
-A: Python 3.10+ с async/await архитектурой.
-
-**Q: Есть ли API для интеграции?**
-A: Telegram бот (15+ команд) + FastAPI REST API (20+ endpoints, JWT auth) + WebSocket для real-time данных.
-
-См. [FAQ.md](docs/FAQ.md) для полного списка вопросов и ответов.
-
----
-
-## 🤝 Contributing / Участие в разработке
-
-Мы приветствуем вклад в проект! Пожалуйста, следуйте этим шагам:
-
-### How to Contribute / Как внести вклад
-
-1. **Fork** репозиторий
-2. **Create** feature branch (`git checkout -b feature/amazing-feature`)
-3. **Run** tests и linters
-4. **Commit** изменения (`git commit -m 'Add amazing feature'`)
-5. **Push** в branch (`git push origin feature/amazing-feature`)
-6. **Open** Pull Request
-
-### Development Setup / Настройка для разработки
-
-```bash
-# Clone your fork
-git clone https://github.com/your-username/TRADERAGENT.git
-cd TRADERAGENT
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Install pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest
-
-# Run linters
-black bot/
-ruff check bot/
-mypy bot/
-```
-
-### Code Quality Standards / Стандарты качества кода
-
-- **Code Style**: Black formatting (100 chars)
-- **Linting**: Ruff
-- **Type Checking**: MyPy
-- **Testing**: Pytest with >80% coverage
-- **Documentation**: Docstrings for all public functions
-
-### Reporting Issues / Сообщение о проблемах
-
-Если вы нашли баг или хотите предложить улучшение:
-
-1. Проверьте, нет ли уже похожей issue
-2. Создайте новую issue с подробным описанием
-3. Приложите логи, если это баг
-4. Опишите шаги для воспроизведения
-
----
-
-## 📄 License / Лицензия
-
-Этот проект распространяется под лицензией **Mozilla Public License 2.0**.
-
-См. файл [LICENSE](LICENSE) для подробностей.
-
----
-
-## ⚠️ Disclaimer / Отказ от ответственности
-
-**ВАЖНО / IMPORTANT:**
-
-⚠️ Этот бот предназначен только для образовательных целей и не является финансовым советом.
-
-⚠️ This bot is for educational purposes only and does not constitute financial advice.
-
-**Риски / Risks:**
-- Торговля криптовалютами связана с высокими рисками
-- Вы можете потерять весь инвестированный капитал
-- Прошлые результаты не гарантируют будущих результатов
-- Всегда используйте только те средства, которые можете позволить себе потерять
-
-**Рекомендации / Recommendations:**
-1. ✅ Всегда начинайте с testnet/sandbox режима
-2. ✅ Тестируйте с малыми суммами перед полноценным использованием
-3. ✅ Регулярно проверяйте работу бота
-4. ✅ Используйте stop-loss и risk management
-5. ✅ Делайте собственный анализ перед принятием решений
-
-**Автор не несет ответственности за:**
-- Финансовые потери
-- Технические сбои
-- Ошибки в работе бота
-- Проблемы с биржами
-
-**The author is not responsible for:**
-- Financial losses
-- Technical failures
-- Bot errors
-- Exchange issues
-
----
-
-## 📞 Support / Поддержка
-
-- 📧 **Issues**: [GitHub Issues](https://github.com/alekseymavai/TRADERAGENT/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/alekseymavai/TRADERAGENT/discussions)
-- 📖 **Documentation**: [Full Documentation](https://github.com/alekseymavai/TRADERAGENT/tree/main)
-
----
-
-## 👨‍💻 Author / Автор
-
-© 2024-2026 TRADERAGENT
-
-Сделано с ❤️ для крипто-сообщества
-
-Made with ❤️ for the crypto community
-
----
-
-**⭐ Если этот проект был вам полезен, поставьте звезду на GitHub!**
-
-**⭐ If you find this project useful, give it a star on GitHub!**
+[Mozilla Public License 2.0](LICENSE)
