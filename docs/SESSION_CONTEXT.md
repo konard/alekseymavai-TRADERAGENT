@@ -3,10 +3,10 @@
 ## Текущий статус проекта
 
 **Дата:** 5 марта 2026
-**Статус:** v2.0.0 + **bot/core/smc/ модуль завершён + MarketRegimeDetector интеграция (Session 46)**
-**Pass Rate:** 74 unit tests passing (52 SMC + 22 market regime)
+**Статус:** v2.0.0 + **Направление 4 (Адаптивное переключение) завершено (Session 46)**
+**Pass Rate:** 78 unit tests passing (52 SMC + 26 market regime)
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `7113ee4` (feat(regime): add ACCUMULATION/DISTRIBUTION regimes + analyze_with_smc())
+**Последний коммит:** `f646fc3` (feat(regime): complete P1 adaptive switching — SMC overlay + volatility guard)
 **Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Задеплоено, ошибок нет.
 **Backtest V2.0 Status:** ✅ Phase 1 завершён (37 пар, 50k баров, 35 мин). Phase 2 (оптимизация) — следующий шаг. SMC=0 расследование — P0.
 **Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа Session 45 завершена.
@@ -86,6 +86,17 @@ total_requests=9482 (ETH grid), balance=102416 USDT
 | SMC confluence bug | confluence всегда 0 | исправлено |
 | Прод | — | ✅ задеплоено |
 
+#### 4. Подключение SMC-оверлея + volatility guard к live боту (коммит `f646fc3`)
+
+**P1.1 — `detect_market_regime()`:** теперь вызывает `analyze_with_smc(df, smc_ctx)` вместо `analyze(df)` когда SMC стратегия прогрета. Контекст извлекается из `smc_strategy._strategy.market_structure.get_smc_context()`. При недоступности — fallback на `analyze(df)`.
+
+**P1.3 — volatility guard в `_update_active_strategies()`:** блокирует *расширение* набора активных стратегий когда `atr_pct > 3%`. Сокращение (деактивация) всегда разрешено — открытые позиции продолжают управляться. Добавлена константа `BotOrchestrator._MAX_VOLATILITY_ATR_PCT = 3.0`.
+
+**Итог Направления 4:** live бот теперь:
+- Видит ACCUMULATION/DISTRIBUTION режимы (через SMC CHoCH)
+- Активирует SMC-стратегию при этих режимах
+- Не открывает новые позиции во время ATR > 3% спайков
+
 ### Коммиты Session 46
 
 | Коммит | Описание |
@@ -93,6 +104,7 @@ total_requests=9482 (ETH grid), balance=102416 USDT
 | `c266393` | feat(smc): add SMC analysis module with 52 unit tests |
 | `26626c3` | refactor(smc): replace smartmoneyconcepts lib with bot.core.smc (Variant A) |
 | `7113ee4` | feat(regime): add ACCUMULATION/DISTRIBUTION regimes + analyze_with_smc() |
+| `f646fc3` | feat(regime): complete P1 adaptive switching — SMC overlay + volatility guard |
 
 ---
 
@@ -104,6 +116,7 @@ total_requests=9482 (ETH grid), balance=102416 USDT
 | **P0** | Синхронизация Live↔Backtest: `from_yaml_config()`, синхронизация adapter дефолтов | 🔴 Открыт |
 | **P1** | Оптимизация DCA: `price_deviation_pct=3-5%`, `max_safety_orders=3`, SHORT при BEAR | ⏳ После P0 |
 | **P1** | Phase 2 backtest: 37 пар с новыми параметрами | ⏳ После P1 |
+| **~~P1~~** | ~~Адаптивное переключение стратегий~~ | ✅ **Готово** |
 | **P2** | TrendFollower SHORT режим при BEAR_TREND | ⏳ Планируется |
 
 ---
