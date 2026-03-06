@@ -9,10 +9,9 @@ Covers:
 - _cfg_from_yaml() helper: success, missing file, bad symbol
 - run_backtest_v2 script: --live-config propagates params to factories
 """
+
 from decimal import Decimal
 from pathlib import Path
-
-import pytest
 
 from bot.tests.backtesting.orchestrator_engine import OrchestratorBacktestConfig
 
@@ -23,6 +22,7 @@ _YAML = str(Path(__file__).parents[3] / "configs" / "phase7_demo.yaml")
 # ---------------------------------------------------------------------------
 # from_yaml_config — BTC/USDT
 # ---------------------------------------------------------------------------
+
 
 class TestFromYamlConfigBTC:
     def setup_method(self):
@@ -102,6 +102,7 @@ class TestFromYamlConfigBTC:
 # from_yaml_config — ETH/USDT (grid only)
 # ---------------------------------------------------------------------------
 
+
 class TestFromYamlConfigETH:
     def setup_method(self):
         self.cfg = OrchestratorBacktestConfig.from_yaml_config(_YAML, "ETH/USDT")
@@ -125,6 +126,7 @@ class TestFromYamlConfigETH:
 # ---------------------------------------------------------------------------
 # from_yaml_config — SOL/USDT (dca only)
 # ---------------------------------------------------------------------------
+
 
 class TestFromYamlConfigSOL:
     def setup_method(self):
@@ -150,6 +152,7 @@ class TestFromYamlConfigSOL:
 # from_yaml_config — unknown symbol returns empty params
 # ---------------------------------------------------------------------------
 
+
 class TestFromYamlConfigUnknown:
     def test_unknown_symbol_empty_params(self):
         cfg = OrchestratorBacktestConfig.from_yaml_config(_YAML, "XYZ/USDT")
@@ -168,9 +171,11 @@ class TestFromYamlConfigUnknown:
 # Adapter constructor defaults match live YAML values
 # ---------------------------------------------------------------------------
 
+
 class TestAdapterDefaults:
     def test_grid_adapter_defaults_match_live(self):
         from bot.strategies.grid_adapter import GridAdapter
+
         a = GridAdapter()
         assert a._num_levels == 6
         assert a._amount_per_grid == Decimal("150")
@@ -178,6 +183,7 @@ class TestAdapterDefaults:
 
     def test_dca_adapter_defaults_match_live(self):
         from bot.strategies.dca_adapter import DCAAdapter
+
         a = DCAAdapter()
         assert a._max_safety_orders == 4
         assert a._price_deviation_pct == Decimal("0.04")
@@ -188,12 +194,14 @@ class TestAdapterDefaults:
 # _cfg_from_yaml helper (from run_backtest_v2 script)
 # ---------------------------------------------------------------------------
 
+
 class TestCfgFromYaml:
     """Tests for the _cfg_from_yaml() helper in run_backtest_v2."""
 
     def _import_helper(self):
-        import importlib.util, sys
+        import importlib.util
         from pathlib import Path as _P
+
         script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
         spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
         mod = importlib.util.module_from_spec(spec)
@@ -251,12 +259,14 @@ class TestCfgFromYaml:
 # Integration: run_backtest_v2 propagates live params to factories
 # ---------------------------------------------------------------------------
 
+
 class TestScriptFactoryIntegration:
     """Verify that _make_strategy_factories receives live params from the script."""
 
     def _load_script(self):
         import importlib.util
         from pathlib import Path as _P
+
         script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
         spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
         mod = importlib.util.module_from_spec(spec)

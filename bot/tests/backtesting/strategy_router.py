@@ -14,7 +14,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from bot.orchestrator.market_regime import (
@@ -46,11 +46,11 @@ class StrategyRouterEvent:
     """Result of processing one bar through the router."""
 
     active_strategies: set[str]
-    activated: set[str]        # newly activated this bar
-    deactivated: set[str]      # newly deactivated this bar
-    cooldown_remaining: int    # bars left in cooldown (0 if not cooling down)
-    regime_value: str          # regime name for logging
-    recommendation: str        # recommended strategy name
+    activated: set[str]  # newly activated this bar
+    deactivated: set[str]  # newly deactivated this bar
+    cooldown_remaining: int  # bars left in cooldown (0 if not cooling down)
+    regime_value: str  # regime name for logging
+    recommendation: str  # recommended strategy name
 
 
 class StrategyRouter:
@@ -208,9 +208,7 @@ class StrategyRouter:
         2. Add trend_follower for trending regimes (if enabled).
         3. Add smc for trending/volatile regimes (if enabled).
         """
-        strategies = _REGIME_TO_STRATEGIES.get(
-            regime.recommended_strategy, set()
-        ).copy()
+        strategies = _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
 
         if self.enable_trend_follower and regime.regime.value in _TREND_REGIMES:
             strategies.add("trend_follower")

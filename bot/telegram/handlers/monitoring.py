@@ -4,7 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from bot.orchestrator.bot_orchestrator import BotOrchestrator, BotState
+from bot.orchestrator.bot_orchestrator import BotOrchestrator
 from bot.telegram import keyboards
 from bot.telegram.formatting import format_status, get_state_emoji
 from bot.utils.logger import get_logger

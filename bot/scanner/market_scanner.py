@@ -37,9 +37,15 @@ logger = get_logger(__name__)
 class ScannerConfig:
     """Configuration for MarketScanner."""
 
-    pairs: list[str] = field(default_factory=lambda: [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT",
-    ])
+    pairs: list[str] = field(
+        default_factory=lambda: [
+            "BTC/USDT",
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "DOGE/USDT",
+        ]
+    )
     interval_minutes: int = 15
     timeframe: str = "1h"
     ohlcv_limit: int = 200

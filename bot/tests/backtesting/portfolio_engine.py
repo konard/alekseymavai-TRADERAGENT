@@ -45,9 +45,7 @@ class PortfolioBacktestConfig:
     portfolio_stop_loss_pct: float = 0.15
 
     # Per-pair config template (symbol-specific overrides go in per_pair_overrides)
-    per_pair_config: OrchestratorBacktestConfig = field(
-        default_factory=OrchestratorBacktestConfig
-    )
+    per_pair_config: OrchestratorBacktestConfig = field(default_factory=OrchestratorBacktestConfig)
 
     # Optional per-symbol overrides for grid_params, dca_params, etc.
     per_pair_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -184,7 +182,7 @@ class PortfolioBacktestEngine:
 
         # Collect results, skip failed pairs
         per_pair_results: dict[str, OrchestratorBacktestResult] = {}
-        for symbol, result in zip(symbols, pair_result_list):
+        for symbol, result in zip(symbols, pair_result_list, strict=False):
             if isinstance(result, Exception):
                 logger.error("Backtest failed for %s: %s", symbol, result)
                 continue
@@ -195,18 +193,13 @@ class PortfolioBacktestEngine:
 
         # Portfolio-level analytics
         portfolio_equity = self._merge_equity_curves(per_pair_results)
-        total_return_pct = self._portfolio_total_return(
-            per_pair_results, config.initial_capital
-        )
+        total_return_pct = self._portfolio_total_return(per_pair_results, config.initial_capital)
         portfolio_sharpe = self._portfolio_sharpe(portfolio_equity)
         max_dd_pct = self._portfolio_max_drawdown(portfolio_equity)
         corr_matrix = self._compute_correlation_matrix(per_pair_results)
         avg_corr = self._avg_correlation(corr_matrix)
 
-        pair_returns = {
-            sym: float(r.total_return_pct)
-            for sym, r in per_pair_results.items()
-        }
+        pair_returns = {sym: float(r.total_return_pct) for sym, r in per_pair_results.items()}
         best_pair = max(pair_returns, key=pair_returns.__getitem__) if pair_returns else ""
         worst_pair = min(pair_returns, key=pair_returns.__getitem__) if pair_returns else ""
         pairs_profitable = sum(1 for v in pair_returns.values() if v > 0)
@@ -256,10 +249,7 @@ class PortfolioBacktestEngine:
                 ts = entry["timestamp"]
                 ts_map[ts] += entry["portfolio_value"]
 
-        return [
-            {"timestamp": ts, "portfolio_value": val}
-            for ts, val in sorted(ts_map.items())
-        ]
+        return [{"timestamp": ts, "portfolio_value": val} for ts, val in sorted(ts_map.items())]
 
     def _portfolio_total_return(
         self,
@@ -324,7 +314,7 @@ class PortfolioBacktestEngine:
             return_series[sym] = rets
 
         matrix: dict[str, dict[str, float]] = {s: {} for s in symbols}
-        for i, sym_a in enumerate(symbols):
+        for _i, sym_a in enumerate(symbols):
             for sym_b in symbols:
                 if sym_a == sym_b:
                     matrix[sym_a][sym_b] = 1.0
@@ -343,7 +333,7 @@ class PortfolioBacktestEngine:
         a, b = a[:n], b[:n]
         mean_a = sum(a) / n
         mean_b = sum(b) / n
-        cov = sum((ai - mean_a) * (bi - mean_b) for ai, bi in zip(a, b)) / n
+        cov = sum((ai - mean_a) * (bi - mean_b) for ai, bi in zip(a, b, strict=False)) / n
         std_a = math.sqrt(sum((ai - mean_a) ** 2 for ai in a) / n)
         std_b = math.sqrt(sum((bi - mean_b) ** 2 for bi in b) / n)
         if std_a > 0 and std_b > 0:
@@ -355,7 +345,7 @@ class PortfolioBacktestEngine:
         """Average off-diagonal correlation."""
         values = []
         symbols = list(matrix.keys())
-        for i, sym_a in enumerate(symbols):
+        for _i, sym_a in enumerate(symbols):
             for sym_b in symbols:
                 if sym_a != sym_b:
                     values.append(matrix[sym_a][sym_b])

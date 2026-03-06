@@ -19,7 +19,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, ROUND_SIGNIFICANT_DIGITS
+from decimal import Decimal
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ def _round_price(price: Decimal, sig_digits: int = 4) -> Decimal:
     if price <= 0:
         return price
     from decimal import ROUND_HALF_UP
+
     magnitude = price.log10().to_integral_value(rounding=ROUND_HALF_UP)
     quantum = Decimal("10") ** (int(magnitude) - sig_digits + 1)
     return price.quantize(quantum)
@@ -86,9 +87,7 @@ class PairTemplateManager:
         # Lazy import to avoid circular dependency at module load time
         from bot.config.schemas import (
             BotConfig,
-            DCAConfig,
             ExchangeConfig,
-            GridConfig,
             RiskManagementConfig,
             StrategyType,
             TrendFollowerConfig,

@@ -16,12 +16,13 @@ import pandas as pd
 import redis.asyncio as redis
 
 from bot.config.schemas import BotConfig, StrategyType
-from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
-from bot.data.history_manager import HistoryManager
-from bot.data.candle_ws_feed import CandleWSFeed
 from bot.core.dca_engine import DCAEngine
 from bot.core.grid_engine import GridEngine, GridType
+from bot.core.portfolio_risk_manager import PortfolioRiskManager
 from bot.core.risk_manager import RiskManager
+from bot.core.trading_core import TradingCore, TradingCoreConfig
+from bot.data.candle_ws_feed import CandleWSFeed
+from bot.data.history_manager import HistoryManager
 from bot.database.manager import DatabaseManager
 from bot.database.models import BotStateSnapshot
 from bot.orchestrator import state_persistence as sp
@@ -38,10 +39,9 @@ from bot.orchestrator.strategy_registry import (
 )
 from bot.strategies.base import SignalDirection as BaseSignalDirection
 from bot.strategies.dca.dca_signal_generator import MarketState
+from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
 from bot.strategies.grid.grid_risk_manager import GridRiskManager
-from bot.core.portfolio_risk_manager import PortfolioRiskManager
-from bot.core.trading_core import HybridCoordinator, TradingCore, TradingCoreConfig
-from bot.strategies.hybrid.hybrid_config import HybridConfig, HybridMode
+from bot.strategies.hybrid.hybrid_config import HybridConfig
 from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc_adapter import SMCStrategyAdapter
@@ -151,9 +151,7 @@ class BotOrchestrator:
         self._trading_core: TradingCore = TradingCore.from_config(
             TradingCoreConfig(
                 symbol=str(getattr(bot_config, "symbol", "BTC/USDT")),
-                cooldown_seconds=int(
-                    getattr(bot_config, "strategy_switch_cooldown_seconds", 600)
-                ),
+                cooldown_seconds=int(getattr(bot_config, "strategy_switch_cooldown_seconds", 600)),
                 regime_check_interval_seconds=int(
                     getattr(bot_config, "regime_check_interval_seconds", 60)
                 ),
@@ -173,15 +171,13 @@ class BotOrchestrator:
         self._regime_check_interval: float = float(
             self._trading_core.config.regime_check_interval_seconds
         )
-        self._last_regime_update_at: float = 0.0   # monotonic ts of last successful regime update
+        self._last_regime_update_at: float = 0.0  # monotonic ts of last successful regime update
         self._regime_stale_threshold: float = 2.0 * self._regime_check_interval
         self._active_strategies: set[str] = set()  # strategies active for current regime
         self._last_strategy_switch_at: float = 0.0  # monotonic timestamp of last switch
         self._last_active_strategies_update_at: float = 0.0  # throttle _update_active_strategies
         # Cooldown also sourced from TradingCore (single source of truth with backtest).
-        self._strategy_switch_cooldown: float = float(
-            self._trading_core.config.cooldown_seconds
-        )
+        self._strategy_switch_cooldown: float = float(self._trading_core.config.cooldown_seconds)
 
         # Manual strategy lock (prevents auto-switching when locked)
         self._strategy_locked: bool = False
@@ -456,7 +452,8 @@ class BotOrchestrator:
 
                 # Start HistoryManager backfill + WebSocket feed for SMC / TrendFollower
                 if self.history_manager and self.config.strategy in (
-                    StrategyType.SMC, StrategyType.TREND_FOLLOWER
+                    StrategyType.SMC,
+                    StrategyType.TREND_FOLLOWER,
                 ):
                     await self._start_history_feed()
 
@@ -787,9 +784,7 @@ class BotOrchestrator:
             {},
         )
 
-    async def _graceful_transition(
-        self, deactivated: set[str], new_strategies: set[str]
-    ) -> None:
+    async def _graceful_transition(self, deactivated: set[str], new_strategies: set[str]) -> None:
         """Handle graceful cleanup when strategies are deactivated.
 
         1. Cancel open orders for deactivated strategies
@@ -867,9 +862,7 @@ class BotOrchestrator:
                                 base_amount = float(
                                     Decimal(str(pos.get("size", 0))) / self.current_price
                                 )
-                                side = (
-                                    "sell" if pos.get("direction") == "long" else "buy"
-                                )
+                                side = "sell" if pos.get("direction") == "long" else "buy"
                                 await self.exchange.create_order(
                                     symbol=self.config.symbol,
                                     order_type="market",
@@ -929,9 +922,7 @@ class BotOrchestrator:
                 # Process Grid + DCA (hybrid coordination or independent)
                 grid_active = self.grid_engine and self._is_strategy_active("grid")
                 dca_active = (
-                    self.dca_engine
-                    and self.current_price
-                    and self._is_strategy_active("dca")
+                    self.dca_engine and self.current_price and self._is_strategy_active("dca")
                 )
 
                 if grid_active and dca_active and self.hybrid_strategy:
@@ -1167,7 +1158,11 @@ class BotOrchestrator:
             return
 
         dca_cfg = self.config.dca
-        min_order_size = Decimal(str(self.config.risk_management.min_order_size)) if self.config.risk_management else Decimal("10")
+        min_order_size = (
+            Decimal(str(self.config.risk_management.min_order_size))
+            if self.config.risk_management
+            else Decimal("10")
+        )
 
         try:
             # 1. Fetch historical OHLCV (1h) for reference-price analysis
@@ -1469,9 +1464,7 @@ class BotOrchestrator:
         try:
             # Fetch OHLCV data — HistoryManager (DB-first) when available
             if self.history_manager:
-                df = await self.history_manager.get_candles(
-                    self.config.symbol, "1h", limit=100
-                )
+                df = await self.history_manager.get_candles(self.config.symbol, "1h", limit=100)
                 if "time" in df.columns:
                     df = df.rename(columns={"time": "timestamp"})
             else:
@@ -1712,8 +1705,12 @@ class BotOrchestrator:
                 ohlcv_d1, ohlcv_h4, ohlcv_h1, ohlcv_m15 = await asyncio.gather(
                     self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1d", limit=200),
                     self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="4h", limit=200),
-                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="1h", limit=h1_limit),
-                    self.exchange.fetch_ohlcv(symbol=self.config.symbol, timeframe="5m", limit=m5_limit),
+                    self.exchange.fetch_ohlcv(
+                        symbol=self.config.symbol, timeframe="1h", limit=h1_limit
+                    ),
+                    self.exchange.fetch_ohlcv(
+                        symbol=self.config.symbol, timeframe="5m", limit=m5_limit
+                    ),
                 )
                 df_d1 = _to_df(ohlcv_d1)
                 df_h4 = _to_df(ohlcv_h4)

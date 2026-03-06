@@ -224,12 +224,10 @@ class MarketStructureAnalyzer:
             return
 
         self.swing_highs = [self._to_swing(s, df) for s in ctx.swing_highs]
-        self.swing_lows  = [self._to_swing(s, df) for s in ctx.swing_lows]
+        self.swing_lows = [self._to_swing(s, df) for s in ctx.swing_lows]
 
         # ctx stores most-recent-first; restore chronological order
-        self.structure_events = [
-            self._to_event(e, df) for e in reversed(ctx.structure_events)
-        ]
+        self.structure_events = [self._to_event(e, df) for e in reversed(ctx.structure_events)]
 
         self.current_trend = _phase_to_trend(ctx.phase, ctx.trend_bias)
 
@@ -298,6 +296,7 @@ class MarketStructureAnalyzer:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_ts(val) -> pd.Timestamp:
     if isinstance(val, pd.Timestamp):

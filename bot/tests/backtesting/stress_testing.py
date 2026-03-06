@@ -16,10 +16,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal
-from typing import Any
 
-from bot.strategies.base import BaseStrategy
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 from bot.tests.backtesting.multi_tf_engine import (
@@ -66,9 +63,7 @@ class StressTestResult:
         """Average return across stress periods."""
         if not self.periods:
             return 0.0
-        return sum(float(p.result.total_return_pct) for p in self.periods) / len(
-            self.periods
-        )
+        return sum(float(p.result.total_return_pct) for p in self.periods) / len(self.periods)
 
 
 class StressTester:
@@ -124,9 +119,7 @@ class StressTester:
         # Select top N non-overlapping windows
         selected: list[tuple[int, int, float]] = []
         for start, end, vol in windows:
-            overlaps = any(
-                not (end <= s or start >= e) for s, e, _ in selected
-            )
+            overlaps = any(not (end <= s or start >= e) for s, e, _ in selected)
             if not overlaps:
                 selected.append((start, end, vol))
             if len(selected) >= config.num_periods:

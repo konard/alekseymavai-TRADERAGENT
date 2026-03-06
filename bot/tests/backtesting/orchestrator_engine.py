@@ -59,23 +59,23 @@ class OrchestratorBacktestConfig:
     # analyze_every_n — per-strategy intervals (mirrors live bot behaviour):
     #   Grid/DCA/TF: called every bar (price-reactive, lightweight)
     #   SMC:         called every 60 M5 bars = 300 sec (mirrors live bot 5-min throttle)
-    default_analyze_every_n: int = 1   # Grid, DCA, TrendFollower — every M5 bar
-    smc_analyze_every_n: int = 60      # SMC — every 300 sec (60 × 5 min bars)
+    default_analyze_every_n: int = 1  # Grid, DCA, TrendFollower — every M5 bar
+    smc_analyze_every_n: int = 60  # SMC — every 300 sec (60 × 5 min bars)
     # SMC generate_signal frequency: matches live bot (every M5 bar).
     # Note: if performance is a concern, set to 12 (hourly) via OrchestratorBacktestConfig
     # override — but default must mirror live to ensure signal count parity.
-    smc_generate_signal_every_n: int = 1    # SMC signal check every M5 bar (live parity)
+    smc_generate_signal_every_n: int = 1  # SMC signal check every M5 bar (live parity)
 
     # Strategies to include
     enable_grid: bool = True
     enable_dca: bool = True
     enable_trend_follower: bool = True
-    enable_smc: bool = True   # enabled by default — mirrors live bot (demo_btc_smc)
+    enable_smc: bool = True  # enabled by default — mirrors live bot (demo_btc_smc)
 
     # Regime-based routing (key differentiator from V1)
     enable_strategy_router: bool = True
-    router_cooldown_bars: int = 120   # 600 sec / 5-min bars = 120 bars (matches live bot)
-    regime_check_every_n: int = 12    # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
+    router_cooldown_bars: int = 120  # 600 sec / 5-min bars = 120 bars (matches live bot)
+    regime_check_every_n: int = 12  # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
 
     # Per-strategy parameters (passed to strategy factories)
     grid_params: dict[str, Any] = field(default_factory=dict)
@@ -88,8 +88,8 @@ class OrchestratorBacktestConfig:
     # RiskManager.update_balance(), so set generously to avoid false halts
     # from normal intraday price oscillations.
     enable_risk_manager: bool = True
-    max_position_size_pct: float = 0.25   # 25% per trade (TradingCoreConfig default)
-    max_daily_loss_pct: float = 0.25      # 25% — generous to avoid false halts in backtest
+    max_position_size_pct: float = 0.25  # 25% per trade (TradingCoreConfig default)
+    max_daily_loss_pct: float = 0.25  # 25% — generous to avoid false halts in backtest
     portfolio_stop_loss_pct: float = 0.15
 
     # Position sizing (fraction of balance per signal)
@@ -97,9 +97,9 @@ class OrchestratorBacktestConfig:
     max_position_pct: Decimal = Decimal("0.25")
 
     # Exchange fee simulation — aligned with TradingCoreConfig defaults (Bybit VIP0)
-    maker_fee: Decimal = Decimal("0.0002")    # 0.02 % (was 0.1 % in old MarketSimulator default)
-    taker_fee: Decimal = Decimal("0.00055")   # 0.055 %
-    slippage: Decimal = Decimal("0.0003")     # 0.03 % average slippage
+    maker_fee: Decimal = Decimal("0.0002")  # 0.02 % (was 0.1 % in old MarketSimulator default)
+    taker_fee: Decimal = Decimal("0.00055")  # 0.055 %
+    slippage: Decimal = Decimal("0.0003")  # 0.03 % average slippage
 
     @classmethod
     def from_yaml_config(
@@ -107,7 +107,7 @@ class OrchestratorBacktestConfig:
         path: str,
         symbol: str,
         initial_balance: Decimal = Decimal("10000"),
-    ) -> "OrchestratorBacktestConfig":
+    ) -> OrchestratorBacktestConfig:
         """Load backtest config from a live YAML config file.
 
         Finds all bots for *symbol* and maps ``grid`` / ``dca`` /
@@ -137,10 +137,7 @@ class OrchestratorBacktestConfig:
         bots = raw.get("bots", [])
         # Only include bots whose auto_start=true (or unset) and symbol matches.
         # Skip fully-disabled bots such as the _m5 dry-run variant.
-        matching = [
-            b for b in bots
-            if b.get("symbol") == symbol and b.get("auto_start", True)
-        ]
+        matching = [b for b in bots if b.get("symbol") == symbol and b.get("auto_start", True)]
 
         grid_params: dict = {}
         dca_params: dict = {}
@@ -158,37 +155,65 @@ class OrchestratorBacktestConfig:
             if "grid" in bot and not grid_params:
                 g = bot["grid"]
                 grid_params = {
-                    k: v for k, v in {
+                    k: v
+                    for k, v in {
                         "num_levels": g.get("grid_levels"),
-                        "amount_per_grid": Decimal(str(g["amount_per_grid"])) if "amount_per_grid" in g else None,
-                        "profit_per_grid": Decimal(str(g["profit_per_grid"])) if "profit_per_grid" in g else None,
-                    }.items() if v is not None
+                        "amount_per_grid": (
+                            Decimal(str(g["amount_per_grid"])) if "amount_per_grid" in g else None
+                        ),
+                        "profit_per_grid": (
+                            Decimal(str(g["profit_per_grid"])) if "profit_per_grid" in g else None
+                        ),
+                    }.items()
+                    if v is not None
                 }
 
             # --- dca ---
             if "dca" in bot and not dca_params:
                 d = bot["dca"]
                 dca_params = {
-                    k: v for k, v in {
-                        "price_deviation_pct": Decimal(str(d["trigger_percentage"])) if "trigger_percentage" in d else None,
-                        "safety_order_size": Decimal(str(d["amount_per_step"])) if "amount_per_step" in d else None,
+                    k: v
+                    for k, v in {
+                        "price_deviation_pct": (
+                            Decimal(str(d["trigger_percentage"]))
+                            if "trigger_percentage" in d
+                            else None
+                        ),
+                        "safety_order_size": (
+                            Decimal(str(d["amount_per_step"])) if "amount_per_step" in d else None
+                        ),
                         "max_safety_orders": d.get("max_steps"),
-                        "take_profit_pct": Decimal(str(d["take_profit_percentage"])) if "take_profit_percentage" in d else None,
-                    }.items() if v is not None
+                        "take_profit_pct": (
+                            Decimal(str(d["take_profit_percentage"]))
+                            if "take_profit_percentage" in d
+                            else None
+                        ),
+                    }.items()
+                    if v is not None
                 }
 
             # --- trend_follower ---
             if "trend_follower" in bot and not tf_params:
                 tf = bot["trend_follower"]
                 tf_params = {
-                    k: v for k, v in {
+                    k: v
+                    for k, v in {
                         "ema_fast_period": tf.get("ema_fast_period"),
                         "ema_slow_period": tf.get("ema_slow_period"),
                         "atr_period": tf.get("atr_period"),
                         "rsi_period": tf.get("rsi_period"),
-                        "risk_per_trade_pct": Decimal(str(tf["risk_per_trade_pct"])) if "risk_per_trade_pct" in tf else None,
-                        "max_position_size_usd": Decimal(str(tf["max_position_size_usd"])) if "max_position_size_usd" in tf else None,
-                    }.items() if v is not None
+                        "risk_per_trade_pct": (
+                            Decimal(str(tf["risk_per_trade_pct"]))
+                            if "risk_per_trade_pct" in tf
+                            else None
+                        ),
+                        "max_position_size_usd": (
+                            Decimal(str(tf["max_position_size_usd"]))
+                            if "max_position_size_usd" in tf
+                            else None
+                        ),
+                    }.items()
+                    if v is not None
                 }
 
             # --- smc (skip _m5 variant bots) ---
@@ -197,16 +222,24 @@ class OrchestratorBacktestConfig:
                     continue
                 s = bot["smc"]
                 # Support both new unified key (risk_per_trade_pct) and legacy key (risk_per_trade)
-                _smc_risk = (
-                    s.get("risk_per_trade_pct") or s.get("risk_per_trade")
-                )
+                _smc_risk = s.get("risk_per_trade_pct") or s.get("risk_per_trade")
                 smc_params = {
-                    k: v for k, v in {
+                    k: v
+                    for k, v in {
                         "swing_length": s.get("swing_length"),
-                        "risk_per_trade_pct": Decimal(str(_smc_risk)) if _smc_risk is not None else None,
-                        "min_risk_reward": Decimal(str(s["min_risk_reward"])) if "min_risk_reward" in s else None,
-                        "max_position_size": Decimal(str(s["max_position_size"])) if "max_position_size" in s else None,
-                    }.items() if v is not None
+                        "risk_per_trade_pct": (
+                            Decimal(str(_smc_risk)) if _smc_risk is not None else None
+                        ),
+                        "min_risk_reward": (
+                            Decimal(str(s["min_risk_reward"])) if "min_risk_reward" in s else None
+                        ),
+                        "max_position_size": (
+                            Decimal(str(s["max_position_size"]))
+                            if "max_position_size" in s
+                            else None
+                        ),
+                    }.items()
+                    if v is not None
                 }
                 if _smc_risk is not None:
                     risk_per_trade = Decimal(str(_smc_risk))
@@ -224,9 +257,7 @@ class OrchestratorBacktestConfig:
                 for key in ("max_daily_loss", "max_daily_loss_usd"):
                     if key in rm:
                         live_daily_loss_usd = float(str(rm[key]))
-                        max_daily_loss_pct = min(
-                            live_daily_loss_usd / float(_ib), 0.25
-                        )
+                        max_daily_loss_pct = min(live_daily_loss_usd / float(_ib), 0.25)
                         break
 
         return cls(
@@ -353,7 +384,9 @@ class BacktestOrchestratorEngine:
 
         # Per-strategy state tracking
         position_amounts: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
-        position_directions: dict[str, dict[str, SignalDirection]] = {name: {} for name in strategies}
+        position_directions: dict[str, dict[str, SignalDirection]] = {
+            name: {} for name in strategies
+        }
         position_entry_prices: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
         per_strategy_pnl: dict[str, Decimal] = {name: Decimal("0") for name in strategies}
         regime_routing_stats: dict[str, int] = {}
@@ -441,11 +474,7 @@ class BacktestOrchestratorEngine:
                 if weight == 0.0:
                     signal = None
                 else:
-                    _gen_n = (
-                        config.smc_generate_signal_every_n
-                        if strat_name == "smc"
-                        else 1
-                    )
+                    _gen_n = config.smc_generate_signal_every_n if strat_name == "smc" else 1
                     if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
                         try:
                             signal = strategy.generate_signal(df_m5, balance)
@@ -532,9 +561,11 @@ class BacktestOrchestratorEngine:
             simulator=simulator,
             equity_curve=equity_curve,
             max_drawdown=max_drawdown,
-            start_time=base_df.index[config.warmup_bars].to_pydatetime()
-            if len(base_df) > config.warmup_bars
-            else base_df.index[0].to_pydatetime(),
+            start_time=(
+                base_df.index[config.warmup_bars].to_pydatetime()
+                if len(base_df) > config.warmup_bars
+                else base_df.index[0].to_pydatetime()
+            ),
             end_time=base_df.index[-1].to_pydatetime(),
             per_strategy_pnl=per_strategy_pnl,
             regime_routing_stats=regime_routing_stats,
@@ -575,9 +606,7 @@ class BacktestOrchestratorEngine:
 
         # Risk manager gate
         if risk_manager:
-            current_pos_val = sum(
-                amt * current_price for amt in position_amounts.values()
-            )
+            current_pos_val = sum(amt * current_price for amt in position_amounts.values())
             if not risk_manager.check_trade(
                 order_value=cost,
                 current_position=current_pos_val,
@@ -656,7 +685,7 @@ class BacktestOrchestratorEngine:
         dca_strategy: Any,
         base_df: Any,
         warmup_bars: int,
-        config: "OrchestratorBacktestConfig",
+        config: OrchestratorBacktestConfig,
         simulator: MarketSimulator,
         position_amounts: dict[str, Decimal],
         position_directions: dict[str, SignalDirection],
@@ -671,7 +700,6 @@ class BacktestOrchestratorEngine:
         threshold from the recent high, pre-open DCA positions that would have
         been placed during the warmup period.
         """
-        import pandas as pd
 
         warmup_df = base_df.iloc[:warmup_bars]
         if warmup_df.empty:
@@ -689,9 +717,11 @@ class BacktestOrchestratorEngine:
 
         # Step 2: simulate catch-up orders using DCAStartupAnalyzer
         try:
-            from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
-            from bot.strategies.base import BaseSignal, SignalDirection as _SD
             from datetime import timezone
+
+            from bot.strategies.base import BaseSignal
+            from bot.strategies.base import SignalDirection as _SD
+            from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
 
             if not (
                 hasattr(dca_strategy, "_price_deviation_pct")
@@ -762,7 +792,9 @@ class BacktestOrchestratorEngine:
                     position_entry_prices[pos_id] = level.price
                     logger.debug(
                         "DCA warmup catchup: level %d @ %.4f, cost=%.2f",
-                        level.level_num, float(level.price), float(cost),
+                        level.level_num,
+                        float(level.price),
+                        float(cost),
                     )
                 except Exception as e:
                     logger.debug("DCA warmup catchup order failed: %s", e)
@@ -776,9 +808,7 @@ class BacktestOrchestratorEngine:
     # Strategy construction
     # ------------------------------------------------------------------
 
-    def _build_strategies(
-        self, config: OrchestratorBacktestConfig
-    ) -> dict[str, BaseStrategy]:
+    def _build_strategies(self, config: OrchestratorBacktestConfig) -> dict[str, BaseStrategy]:
         """Build strategy instances from registered factories."""
         strategies: dict[str, BaseStrategy] = {}
 
@@ -833,16 +863,14 @@ class BacktestOrchestratorEngine:
         total_return_pct = (
             (total_return / initial) * Decimal("100") if initial > 0 else Decimal("0")
         )
-        max_dd_pct = (
-            (max_drawdown / initial) * Decimal("100") if initial > 0 else Decimal("0")
-        )
+        max_dd_pct = (max_drawdown / initial) * Decimal("100") if initial > 0 else Decimal("0")
 
         buy_orders = [t for t in trade_history if t["side"] == "buy"]
         sell_orders = [t for t in trade_history if t["side"] == "sell"]
         winning_trades = losing_trades = 0
         gross_profit = gross_loss = Decimal("0")
 
-        for b, s in zip(buy_orders, sell_orders):
+        for b, s in zip(buy_orders, sell_orders, strict=False):
             bp = Decimal(str(b["price"]))
             sp = Decimal(str(s["price"]))
             amt = Decimal(str(b["amount"]))

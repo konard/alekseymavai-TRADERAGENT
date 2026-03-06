@@ -74,29 +74,45 @@ class BugDetector:
         base = self._exchange._base_balance
 
         if free < 0:
-            self._record("CRITICAL", "balance_negative_free", {
-                "free_balance": str(free),
-                "used_balance": str(used),
-            })
+            self._record(
+                "CRITICAL",
+                "balance_negative_free",
+                {
+                    "free_balance": str(free),
+                    "used_balance": str(used),
+                },
+            )
 
         if used < 0:
-            self._record("CRITICAL", "balance_negative_used", {
-                "free_balance": str(free),
-                "used_balance": str(used),
-            })
+            self._record(
+                "CRITICAL",
+                "balance_negative_used",
+                {
+                    "free_balance": str(free),
+                    "used_balance": str(used),
+                },
+            )
 
         if base < 0:
-            self._record("CRITICAL", "balance_negative_base", {
-                "base_balance": str(base),
-            })
+            self._record(
+                "CRITICAL",
+                "balance_negative_base",
+                {
+                    "base_balance": str(base),
+                },
+            )
 
         # Sanity: total USDT should not exceed 10x initial (could indicate a bug)
         total = free + used
         if total > self._initial_balance * 10:
-            self._record("WARNING", "balance_suspiciously_high", {
-                "total_usdt": str(total),
-                "initial": str(self._initial_balance),
-            })
+            self._record(
+                "WARNING",
+                "balance_suspiciously_high",
+                {
+                    "total_usdt": str(total),
+                    "initial": str(self._initial_balance),
+                },
+            )
 
     def check_orphaned_orders(self, max_candles: int = 500) -> None:
         """Flag limit orders that have been open for too many candles."""
@@ -106,12 +122,16 @@ class BugDetector:
             # 5-min candles → each candle = 300_000 ms
             age_candles = (current_ts - order_ts) / 300_000
             if age_candles > max_candles:
-                self._record("WARNING", "orphaned_order", {
-                    "order_id": oid,
-                    "side": order.get("side"),
-                    "price": order.get("price"),
-                    "age_candles": int(age_candles),
-                })
+                self._record(
+                    "WARNING",
+                    "orphaned_order",
+                    {
+                        "order_id": oid,
+                        "side": order.get("side"),
+                        "price": order.get("price"),
+                        "age_candles": int(age_candles),
+                    },
+                )
 
     def check_state_consistency(self, orchestrator: Any) -> None:
         """
@@ -134,11 +154,15 @@ class BugDetector:
                 ghost_ids.discard(gid)
 
         if ghost_ids:
-            self._record("WARNING", "grid_exchange_mismatch", {
-                "ghost_order_ids": list(ghost_ids),
-                "grid_count": len(grid_ids),
-                "exchange_open_count": len(exchange_open_ids),
-            })
+            self._record(
+                "WARNING",
+                "grid_exchange_mismatch",
+                {
+                    "ghost_order_ids": list(ghost_ids),
+                    "grid_count": len(grid_ids),
+                    "exchange_open_count": len(exchange_open_ids),
+                },
+            )
 
     # =====================================================================
     # Exception capture

@@ -11,7 +11,6 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 
 class SimulatedClock:
@@ -74,9 +73,7 @@ def _make_fake_datetime_class(clock: SimulatedClock):
 
         @classmethod
         def utcnow(cls):
-            return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(
-                tzinfo=None
-            )
+            return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(tzinfo=None)
 
     return FakeDatetime
 
@@ -138,8 +135,8 @@ def patch_time(clock: SimulatedClock):
     for modname in _DATETIME_MODULES:
         mod = sys.modules.get(modname)
         if mod is not None and hasattr(mod, "datetime"):
-            _saved[modname] = getattr(mod, "datetime")
-            setattr(mod, "datetime", FakeDatetime)
+            _saved[modname] = mod.datetime
+            mod.datetime = FakeDatetime
 
     try:
         yield clock
@@ -152,4 +149,4 @@ def patch_time(clock: SimulatedClock):
         for modname, original in _saved.items():
             mod = sys.modules.get(modname)
             if mod is not None:
-                setattr(mod, "datetime", original)
+                mod.datetime = original

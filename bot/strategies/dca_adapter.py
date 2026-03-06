@@ -195,8 +195,12 @@ class DCAAdapter(BaseStrategy):
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
 
-            # Check take profit (based on average price)
-            tp_price = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
+            # Check take profit: use explicit TP from signal if set, else use pct-based calc
+            signal_tp = pos.get("take_profit")
+            if signal_tp is not None:
+                tp_price = signal_tp
+            else:
+                tp_price = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
             if current_price >= tp_price:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
                 continue

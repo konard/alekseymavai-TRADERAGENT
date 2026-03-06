@@ -13,7 +13,6 @@ Write path:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -145,15 +144,15 @@ class HistoryManager:
                 await session.execute(
                     stmt,
                     {
-                        "time":     candle["time"],
+                        "time": candle["time"],
                         "exchange": candle.get("exchange", self._exchange_name),
-                        "symbol":   candle["symbol"],
+                        "symbol": candle["symbol"],
                         "interval": candle["interval"],
-                        "open":     float(candle["open"]),
-                        "high":     float(candle["high"]),
-                        "low":      float(candle["low"]),
-                        "close":    float(candle["close"]),
-                        "volume":   float(candle["volume"]),
+                        "open": float(candle["open"]),
+                        "high": float(candle["high"]),
+                        "low": float(candle["low"]),
+                        "close": float(candle["close"]),
+                        "volume": float(candle["volume"]),
                     },
                 )
             await session.commit()
@@ -230,15 +229,15 @@ class HistoryManager:
 
             candles = [
                 {
-                    "time":     datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc),
+                    "time": datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc),
                     "exchange": self._exchange_name,
-                    "symbol":   symbol,
+                    "symbol": symbol,
                     "interval": interval,
-                    "open":     row[1],
-                    "high":     row[2],
-                    "low":      row[3],
-                    "close":    row[4],
-                    "volume":   row[5],
+                    "open": row[1],
+                    "high": row[2],
+                    "low": row[3],
+                    "close": row[4],
+                    "volume": row[5],
                 }
                 for row in raw
             ]
@@ -277,7 +276,7 @@ class HistoryManager:
                 stmt,
                 {
                     "exchange": self._exchange_name,
-                    "symbol":   symbol,
+                    "symbol": symbol,
                     "interval": interval,
                 },
             )
@@ -309,10 +308,10 @@ class HistoryManager:
             )
             params: dict = {
                 "exchange": self._exchange_name,
-                "symbol":   symbol,
+                "symbol": symbol,
                 "interval": interval,
-                "since":    since,
-                "limit":    limit,
+                "since": since,
+                "limit": limit,
             }
         else:
             stmt = text(
@@ -326,9 +325,9 @@ class HistoryManager:
             )
             params = {
                 "exchange": self._exchange_name,
-                "symbol":   symbol,
+                "symbol": symbol,
                 "interval": interval,
-                "limit":    limit,
+                "limit": limit,
             }
 
         async with self._session_factory() as session:
@@ -348,7 +347,7 @@ class HistoryManager:
                 stmt,
                 {
                     "exchange": self._exchange_name,
-                    "symbol":   symbol,
+                    "symbol": symbol,
                     "interval": interval,
                 },
             )

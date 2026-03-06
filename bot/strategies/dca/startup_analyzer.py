@@ -32,8 +32,8 @@ class CatchUpPlan:
     reference_type: str
     all_levels: list[DCALevel] = field(default_factory=list)
     orders_to_place: list[DCALevel] = field(default_factory=list)
-    skipped_covered: int = 0   # levels that already have an open order
-    skipped_above: int = 0     # levels above current price
+    skipped_covered: int = 0  # levels that already have an open order
+    skipped_above: int = 0  # levels above current price
 
 
 class DCAStartupAnalyzer:

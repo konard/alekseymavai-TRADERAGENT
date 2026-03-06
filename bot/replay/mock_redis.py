@@ -39,7 +39,7 @@ class MockRedis:
     # -- connection lifecycle ---------------------------------------------
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> "MockRedis":
+    def from_url(cls, url: str, **kwargs) -> MockRedis:
         """Drop-in for ``redis.from_url(...)``."""
         return cls()
 
