@@ -20,7 +20,7 @@ class TestSMCConfigSchema:
         assert schema.trend_period == 20
         assert schema.close_break is True
         assert schema.risk_per_trade == Decimal("0.02")
-        assert schema.min_risk_reward == Decimal("2.5")
+        assert schema.min_risk_reward == Decimal("2.0")
         assert schema.max_position_size == Decimal("10000")
         assert schema.max_positions == 3
         assert schema.use_trailing_stop is True
@@ -76,7 +76,7 @@ class TestSMCConfigSchemaToDataclass:
             close_mitigation=schema.close_mitigation,
             join_consecutive_fvg=schema.join_consecutive_fvg,
             liquidity_range_percent=schema.liquidity_range_percent,
-            risk_per_trade=schema.risk_per_trade,
+            risk_per_trade_pct=schema.risk_per_trade,
             min_risk_reward=schema.min_risk_reward,
             max_position_size=schema.max_position_size,
             require_volume_confirmation=schema.require_volume_confirmation,
@@ -87,7 +87,7 @@ class TestSMCConfigSchemaToDataclass:
             trailing_stop_distance=schema.trailing_stop_distance,
         )
         assert dataclass_config.swing_length == 40
-        assert dataclass_config.risk_per_trade == Decimal("0.03")
+        assert dataclass_config.risk_per_trade_pct == Decimal("0.03")
         assert dataclass_config.max_positions == 5
         assert dataclass_config.close_mitigation is True
 
@@ -97,7 +97,7 @@ class TestSMCConfigSchemaToDataclass:
         assert schema.swing_length == dc.swing_length
         assert schema.trend_period == dc.trend_period
         assert schema.close_break == dc.close_break
-        assert schema.risk_per_trade == dc.risk_per_trade
+        assert schema.risk_per_trade == dc.risk_per_trade_pct
         assert schema.min_risk_reward == dc.min_risk_reward
         assert schema.max_position_size == dc.max_position_size
         assert schema.max_positions == dc.max_positions

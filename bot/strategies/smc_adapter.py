@@ -142,13 +142,18 @@ class SMCStrategyAdapter(BaseStrategy):
         when M5 data is absent.
         """
         df_h1 = self._cached_dfs.get("h1", df)
-        # Always use the passed df as fresh M5 data — never the stale analyze_market cache.
-        # The cache is only updated every smc_analyze_every_n bars (60 bars = 300 sec),
-        # so using it directly would yield signals based on data up to 5 hours old.
-        df_m5 = df if not df.empty else self._cached_dfs.get("m5", pd.DataFrame())
+        # Use the passed df as fresh M5 data only when a real M5 cache exists.
+        # The cache is populated with an empty DataFrame when analyze_market() was
+        # called without a 5th (M5) argument, signalling that the M5 entry path
+        # should NOT be used.  Passing a non-empty df to generate_signal() while
+        # the M5 cache is empty means the caller provided M15 (or another TF) data,
+        # not M5 data — so fall back to legacy signal generation.
+        cached_m5 = self._cached_dfs.get("m5", pd.DataFrame())
+        m5_available = not cached_m5.empty
+        df_m5 = df if m5_available and not df.empty else cached_m5
 
         # Two-level M5 entry: H1 context + M5 precision
-        if not df_m5.empty and hasattr(self._strategy, "generate_signals_m5"):
+        if m5_available and not df_m5.empty and hasattr(self._strategy, "generate_signals_m5"):
             signals = self._strategy.generate_signals_m5(df_h1, df_m5)
         else:
             df_m15 = self._cached_dfs.get("m15", df)

@@ -317,7 +317,7 @@ class SMCConfigSchema(BaseModel):
         description="Risk per trade as fraction of balance (0.02 = 2%)",
     )
     min_risk_reward: Decimal = Field(
-        default=Decimal("2.5"),
+        default=Decimal("2.0"),
         gt=0,
         description="Minimum risk:reward ratio",
     )

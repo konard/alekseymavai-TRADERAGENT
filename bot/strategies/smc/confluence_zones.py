@@ -345,6 +345,58 @@ class ConfluenceZoneAnalyzer:
             if fvg.status == ZoneStatus.ACTIVE:
                 fvg.strength_score = self._calculate_zone_strength(fvg)
 
+    def _update_zone_status(self, df: pd.DataFrame) -> None:
+        """Update zone statuses based on the latest candle in *df*.
+
+        Kept for test-compatibility and manual zone injection.  The main
+        ``analyze()`` path updates statuses via ``_sync_order_blocks`` and
+        ``_sync_fvgs`` when an SMCContext is available.
+
+        Order Block invalidation rules:
+        - Bullish OB: invalidated when the last close falls below ``ob.low``
+        - Bearish OB: invalidated when the last close rises above ``ob.high``
+
+        FVG fill rules:
+        - Fully filled  (≥100 %): last candle's low ≤ gap_low  and  high ≥ gap_high
+        - Partial fill  (>0 %):   last candle's high overlaps the gap (high > gap_low)
+        """
+        if df.empty:
+            return
+
+        last = df.iloc[-1]
+        last_close = Decimal(str(float(last["close"])))
+        last_high = Decimal(str(float(last["high"])))
+        last_low = Decimal(str(float(last["low"])))
+
+        for ob in self.order_blocks:
+            if ob.status != ZoneStatus.ACTIVE:
+                continue
+            if ob.is_bullish and last_close < ob.low:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+            elif not ob.is_bullish and last_close > ob.high:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+
+        for fvg in self.fair_value_gaps:
+            if fvg.status == ZoneStatus.FILLED:
+                continue
+            gap_size = fvg.gap_high - fvg.gap_low
+            if gap_size <= 0:
+                continue
+            # Overlap between last candle [low, high] and gap [gap_low, gap_high]
+            overlap_high = min(last_high, fvg.gap_high)
+            overlap_low = max(last_low, fvg.gap_low)
+            if overlap_high > overlap_low:
+                fill_pct = float((overlap_high - overlap_low) / gap_size) * 100.0
+                fvg.fill_percentage = max(fvg.fill_percentage, fill_pct)
+                if last_low <= fvg.gap_low and last_high >= fvg.gap_high:
+                    fvg.fill_percentage = 100.0
+                    fvg.status = ZoneStatus.FILLED
+                    fvg.filled_at = datetime.now()
+                elif fvg.status == ZoneStatus.ACTIVE:
+                    fvg.status = ZoneStatus.PARTIAL_FILL
+
     def _calculate_zone_strength(self, zone) -> float:
         score = 0.0
         tf_scores = {"4h": 30, "1h": 20, "15m": 10, "5m": 5}
