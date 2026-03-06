@@ -535,6 +535,100 @@ def _count_combos(grid: dict) -> int:
 # ---------------------------------------------------------------------------
 
 _LIVE_CONFIG_DEFAULT = str(PROJECT_ROOT / "configs" / "phase7_demo.yaml")
+_BACKTEST_CONFIG_DEFAULT = str(PROJECT_ROOT / "configs" / "backtest_phase1.yaml")
+
+
+def _cfg_from_backtest_yaml(
+    config_path: str,
+    symbol: str,
+    initial_balance: Decimal | None = None,
+) -> OrchestratorBacktestConfig | None:
+    """Load OrchestratorBacktestConfig from a flat backtest_phase1.yaml.
+
+    This file uses a different structure than the live bot YAML (no ``bots:`` list).
+    Returns None if the file does not exist or cannot be parsed.
+    """
+    path = Path(config_path)
+    if not path.exists():
+        return None
+    try:
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    except Exception as exc:
+        logger.warning("Failed to load backtest config %s: %s", config_path, exc)
+        return None
+
+    bt = data.get("backtest", {})
+    orch = data.get("orchestrator", {})
+    risk = data.get("risk", {})
+    grid_cfg = data.get("grid", {})
+    dca_cfg = data.get("dca", {})
+    tf_cfg = data.get("trend_follower", {})
+    smc_cfg = data.get("smc", {})
+
+    _ib = initial_balance if initial_balance is not None else Decimal(str(bt.get("initial_balance", 1000)))
+
+    max_pos_pct = float(risk.get("max_position_pct", 0.25))
+    max_daily_loss_pct = float(risk.get("max_daily_loss_pct", 0.06))
+    min_order_size = Decimal(str(risk.get("min_order_size", 5)))
+
+    num_levels = int(grid_cfg.get("num_levels", 6))
+    amount_per_grid = (_ib * Decimal(str(max_pos_pct)) / Decimal(str(num_levels))).quantize(Decimal("0.01"))
+    grid_params = {
+        "num_levels": num_levels,
+        "profit_per_grid": Decimal(str(grid_cfg.get("profit_per_grid", 0.012))),
+        "amount_per_grid": amount_per_grid,
+    } if grid_cfg.get("enabled", True) else {}
+
+    dca_params = {
+        "price_deviation_pct": Decimal(str(dca_cfg.get("trigger_pct", 0.04))),
+        "max_safety_orders": int(dca_cfg.get("max_steps", 4)),
+        "take_profit_pct": Decimal(str(dca_cfg.get("take_profit_pct", 0.08))),
+        "safety_order_size": Decimal(str(dca_cfg.get("safety_order_size", 50))),
+        "catch_up_enabled": bool(dca_cfg.get("catch_up_enabled", True)),
+    } if dca_cfg.get("enabled", True) else {}
+
+    tf_params = {
+        "ema_fast_period": int(tf_cfg.get("ema_fast_period", 20)),
+        "ema_slow_period": int(tf_cfg.get("ema_slow_period", 50)),
+        "atr_period": int(tf_cfg.get("atr_period", 14)),
+        "rsi_period": int(tf_cfg.get("rsi_period", 14)),
+        "risk_per_trade_pct": float(tf_cfg.get("risk_per_trade_pct", 0.01)),
+        "max_positions": int(tf_cfg.get("max_positions", 2)),
+    } if tf_cfg.get("enabled", True) else {}
+
+    smc_params = {
+        "swing_length": int(smc_cfg.get("swing_length", 10)),
+        "risk_per_trade": Decimal(str(smc_cfg.get("risk_per_trade", 0.01))),
+        "min_risk_reward": float(smc_cfg.get("min_risk_reward", 2.0)),
+        "max_positions": int(smc_cfg.get("max_positions", 2)),
+        "require_volume_confirmation": bool(smc_cfg.get("require_volume_confirmation", False)),
+        "debug_mode": bool(smc_cfg.get("debug_mode", False)),
+        "log_all_signals": bool(smc_cfg.get("log_all_signals", False)),
+    } if smc_cfg.get("enabled", True) else {}
+
+    return OrchestratorBacktestConfig(
+        symbol=symbol,
+        initial_balance=_ib,
+        warmup_bars=int(bt.get("warmup_bars", 500)),
+        default_analyze_every_n=int(orch.get("analyze_every_n", 1)),
+        router_cooldown_bars=int(orch.get("router_cooldown_bars", 120)),
+        regime_check_every_n=int(orch.get("regime_check_every_n", 12)),
+        enable_strategy_router=bool(orch.get("enable_strategy_router", True)),
+        enable_grid=bool(grid_cfg.get("enabled", True)),
+        enable_dca=bool(dca_cfg.get("enabled", True)),
+        enable_trend_follower=bool(tf_cfg.get("enabled", True)),
+        enable_smc=bool(smc_cfg.get("enabled", True)),
+        max_position_size_pct=max_pos_pct,
+        max_position_pct=Decimal(str(max_pos_pct)),
+        max_daily_loss_pct=max_daily_loss_pct,
+        min_order_size=min_order_size,
+        grid_params=grid_params,
+        dca_params=dca_params,
+        tf_params=tf_params,
+        smc_params=smc_params,
+    )
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -586,7 +680,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     Runs Phase 1 for a single pair in a subprocess worker.
     Returns (symbol, result_dict | None, error_msg | None, elapsed_sec).
     """
-    sym, data_dir_str, max_bars, warmup_bars, initial_balance, live_config_str = args_tuple
+    sym, data_dir_str, max_bars, warmup_bars, initial_balance, live_config_str, backtest_config_str = args_tuple
     t0 = time.perf_counter()
 
     # Suppress verbose debug/info logging in worker processes
@@ -610,9 +704,14 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
         async def _inner() -> dict:
             data = _load_data(sym, Path(data_dir_str), max_bars)
             _ib = Decimal(str(initial_balance))
-            live_cfg = _cfg_from_yaml(live_config_str, sym, initial_balance=_ib)
+            # Prefer dedicated backtest config over live config
+            cfg_base = (
+                _cfg_from_backtest_yaml(backtest_config_str, sym, initial_balance=_ib)
+                or _cfg_from_yaml(live_config_str, sym, initial_balance=_ib)
+                or OrchestratorBacktestConfig(symbol=sym)
+            )
             cfg = dataclasses.replace(
-                live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
+                cfg_base,
                 initial_balance=_ib,
                 warmup_bars=warmup_bars,
                 enable_strategy_router=True,
@@ -650,9 +749,13 @@ async def run_single(args: argparse.Namespace) -> None:
 
     warmup = min(args.warmup_bars, len(data.m5) // 2)
     _ib = Decimal(str(args.initial_balance))
-    live_cfg = _cfg_from_yaml(args.live_config, symbol, initial_balance=_ib)
+    cfg_base = (
+        _cfg_from_backtest_yaml(args.config, symbol, initial_balance=_ib)
+        or _cfg_from_yaml(args.live_config, symbol, initial_balance=_ib)
+        or OrchestratorBacktestConfig(symbol=symbol)
+    )
     config = dataclasses.replace(
-        live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=symbol),
+        cfg_base,
         initial_balance=_ib,
         warmup_bars=warmup,
         enable_strategy_router=True,
@@ -733,7 +836,7 @@ async def run_multi(args: argparse.Namespace) -> None:
 
     # Build args for each worker
     worker_args = [
-        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance, args.live_config)
+        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance, args.live_config, args.config)
         for sym in symbols
     ]
 
@@ -898,9 +1001,13 @@ async def run_auto(args: argparse.Namespace) -> None:
             data = _load_data(sym, data_dir, args.max_bars)
             data_map[sym] = data
             _sym_ib = Decimal(str(args.initial_balance))
-            live_cfg = _cfg_from_yaml(args.live_config, sym, initial_balance=_sym_ib)
+            cfg_base = (
+                _cfg_from_backtest_yaml(args.config, sym, initial_balance=_sym_ib)
+                or _cfg_from_yaml(args.live_config, sym, initial_balance=_sym_ib)
+                or OrchestratorBacktestConfig(symbol=sym)
+            )
             cfg = dataclasses.replace(
-                live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
+                cfg_base,
                 initial_balance=_sym_ib,
                 warmup_bars=args.warmup_bars,
                 enable_strategy_router=True,
@@ -1012,6 +1119,12 @@ def parse_args() -> argparse.Namespace:
         "--live-config",
         default=_LIVE_CONFIG_DEFAULT,
         help="Path to live YAML config for param sync (default: configs/phase7_demo.yaml)",
+    )
+    parser.add_argument(
+        "--config",
+        default=_BACKTEST_CONFIG_DEFAULT,
+        help="Path to backtest-specific YAML config (default: configs/backtest_phase1.yaml). "
+             "Takes priority over --live-config when the file exists.",
     )
     return parser.parse_args()
 

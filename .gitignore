@@ -73,6 +73,7 @@ configs/*.yaml
 !configs/schema.yaml
 !configs/trend_follower_production.yaml
 !configs/phase7_demo.yaml
+!configs/backtest_phase1.yaml
 
 # Alembic
 alembic.ini
