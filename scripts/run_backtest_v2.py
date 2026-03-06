@@ -623,7 +623,6 @@ def _cfg_from_backtest_yaml(
         max_position_size_pct=max_pos_pct,
         max_position_pct=Decimal(str(max_pos_pct)),
         max_daily_loss_pct=max_daily_loss_pct,
-        min_order_size=min_order_size,
         grid_params=grid_params,
         dca_params=dca_params,
         tf_params=tf_params,
