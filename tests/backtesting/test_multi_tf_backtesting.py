@@ -541,10 +541,12 @@ class TestSMCAdapterIntegration:
         smc_config.risk_per_trade_pct = smc_config.risk_per_trade
         smc_config.max_position_size_usd = smc_config.max_position_size
 
+        # warmup_bars must be smaller than the generated data window.
+        # 4 days × 24 h × 12 M5 bars = 1152 bars; use 100 (SMC default).
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=100,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = SMCStrategyAdapter(
@@ -571,10 +573,12 @@ class TestTrendFollowerAdapterIntegration:
     async def test_trend_follower_backtest(self):
         from bot.strategies.trend_follower_adapter import TrendFollowerAdapter
 
+        # warmup_bars must be smaller than the generated data window.
+        # 14 days × 24 h × 12 M5 bars = 2016 bars; use 50 (ample for TF warmup).
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=50,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = TrendFollowerAdapter(
