@@ -68,7 +68,7 @@ class SMCStrategy:
         self.position_manager = PositionManager(
             market_structure=self.market_structure,
             account_balance=account_balance,
-            risk_per_trade_pct=self.config.risk_per_trade,
+            risk_per_trade_pct=self.config.risk_per_trade_pct,
             max_position_size=self.config.max_position_size,
             min_rr_ratio=self.config.min_risk_reward,
         )
@@ -400,7 +400,7 @@ class SMCStrategy:
             "position_summary": self.position_manager.get_position_summary(),
             # Configuration
             "config": {
-                "risk_per_trade": self.config.risk_per_trade,
+                "risk_per_trade_pct": self.config.risk_per_trade_pct,
                 "min_risk_reward": self.config.min_risk_reward,
                 "max_position_size": float(self.config.max_position_size),
             },

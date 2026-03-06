@@ -205,7 +205,7 @@ bots:
     smc:
       enabled: true
       swing_length: 10          # Reduced from 50 → warmup 40 bars instead of 200
-      risk_per_trade: "0.02"
+      risk_per_trade_pct: "0.02"  # 2% risk per trade (fraction of balance)
       min_risk_reward: "2.0"    # Reduced from 2.5 — more signals
       max_position_size: "1666"
       max_positions: 3
@@ -245,7 +245,7 @@ bots:
       swing_length_m5: 20       # M5 entry: 20 bars = 100-min noise filter
       m5_limit: 1000            # ~3.5 days of M5 data
       h1_limit: 200             # H1 history (structure)
-      risk_per_trade: "0.01"    # 1% (cautious: M5 generates more signals)
+      risk_per_trade_pct: "0.01"  # 1% risk per trade (fraction of balance; M5 generates more signals)
       min_risk_reward: "2.0"    # Reduced from 2.5 (M5 levels less clean)
       max_positions: 2
 
