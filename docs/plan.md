@@ -1,217 +1,217 @@
 # TRADERAGENT — План развития
 
-> Дата: 2026-03-05 · Версия: v2.0.0
+> Дата: 2026-03-06 · Версия: v2.0.0  
 > На основе: [Анализ проекта](analysis.md)
 
 ---
 
-## Приоритеты (overview)
+## Обзор приоритетов
 
-| Приоритет | Направление | Статус |
-|-----------|-------------|--------|
-| P0 | Синхронизация Live↔Backtest параметров | 🔴 Блокер |
-| P0 | Расследование SMC = 0 сделок | 🔴 Открыт |
-| P1 | Оптимизация DCA (Phase 2) | ⏳ После P0 |
-| P1 | Подключение MarketRegimeDetector к live | ⏳ После P0 |
-| P2 | TrendFollower SHORT режим | ⏳ Планируется |
-| P2 | Telegram восстановление | 🟡 Инфра |
-| P3 | Веб-дашборд | ⏳ Низкий приоритет |
+| Приоритет | Направление | Цель | Статус |
+|-----------|-------------|------|--------|
+| **P0** | Live↔Backtest синхронизация | Устранить расхождения движков | 🟡 В процессе |
+| **P0** | Реальные данные + Phase 1 перегон | Корректный baseline | 🔴 Открыт |
+| **P1** | Phase 2 оптимизация параметров | Найти оптимальные конфиги | ⏳ После P0 |
+| **P1** | DCA оптимизация | 3-5% deviation, max 3 orders | ⏳ После P0 |
+| **P1** | Unified parameter model | Унификация параметров стратегий | ⏳ После P0 |
+| **P2** | TrendFollower SHORT режим | Торговля в BEAR_TREND | ⏳ Планируется |
+| **P2** | Hybrid в backtest | Воспроизвести Grid↔DCA routing | ⏳ Планируется |
+| **P3** | Auto grid range update | Динамический диапазон Grid | ⏳ Низкий приоритет |
+| **P3** | Telegram proxy | Восстановить уведомления | ⏳ Низкий приоритет |
 
 ---
 
-## Направление 1: Синхронизация Live↔Backtest (P0 — Блокер)
+## Направление 1: Live ↔ Backtest синхронизация (P0)
 
-**Цель:** Бэктест должен воспроизводить live-поведение идентично, иначе результаты оптимизации бессмысленны.
+**Цель:** Backtest воспроизводит live-поведение с отклонением ≤5% по числу сделок.
 
-**Принцип:** Единый конфигурационный файл (`phase7_demo.yaml`) должен использоваться и для live, и для запуска бэктеста.
+**Без этого:** результаты оптимизации бессмысленны для живых ботов.
 
-### Задачи:
+### Задачи по приоритетам
 
-**P0.1** Передавать параметры из YAML в `BacktestOrchestratorEngineConfig`
+**P0.1 — Синхронизация роутера** *(критично)*
+- Заменить `StrategyRouter` (advisory) на логику `HybridCoordinator` (mode-based)
+- В backtest: Grid и DCA не могут работать одновременно, только одна активна
+- Файл: `bot/tests/backtesting/strategy_router.py`, `orchestrator_engine.py`
+- Тест: количество одновременно активных стратегий ≤ 1 для Hybrid пар
+
+**P0.2 — Унификация единиц позиции** *(критично)*
+- Перевести `max_position_size` на `% от текущего баланса` как универсальную единицу
+- Backtest: `position_value = current_balance × max_position_pct`
+- Live: `max_position_size` USD → конвертировать через текущий баланс при старте
+- Файлы: `OrchestratorBacktestConfig`, `bot_orchestrator.py`, `from_yaml_config()`
+
+**P0.3 — Синхронизация `max_daily_loss`** *(критично)*
+- Текущий backtest: `max_daily_loss = 25% × $10k = $2,500` (слишком мягко)
+- Live: `max_daily_loss = $600` (6% от баланса)
+- Решение: `max_daily_loss_pct = 0.006` (0.6% баланса), не хардкоженный %
+
+**P0.4 — Синхронизация частоты SMC-сигналов**
+- Убрать хардкод `smc_generate_signal_every_n = 12`
+- В live: каждый M5-тик → в backtest тоже каждый бар (`= 1`)
+- Обоснование: SMC — swing-стратегия, 1 час между сигналами достаточно, но 12× реже — нет
+
+**P0.5 — DCA catch-up в backtest**
+- Скопировать логику `DCAStartupAnalyzer._run_dca_catchup()` в warmup-фазу backtest
 - Файл: `bot/tests/backtesting/orchestrator_engine.py`
-- Убрать hardcoded дефолты (`profit_per_grid=0.005`, `take_profit_pct=0.015`, `min_order_size=10`)
-- Добавить метод `from_yaml_config(path: str) -> BacktestOrchestratorEngineConfig`
 
-**P0.2** Синхронизировать дефолты adapter'ов с live конфигом
-- `bot/strategies/grid_adapter.py`: `profit_per_grid=0.012`, фиксированные границы из конфига
-- `bot/strategies/dca_adapter.py`: `take_profit_pct=0.10`, `max_positions=5`
-- `bot/strategies/trend_follower_adapter.py`: `max_positions=2`
-- `bot/strategies/smc_adapter.py`: `require_volume_confirmation=True`
-
-**P0.3** Унификация `max_position_size` — единица измерения (USD vs % баланса)
-- Live Risk Manager: абсолютный USD
-- Backtest Risk Manager: % от баланса
-- Выбрать один формат и синхронизировать
-
-**P0.4** Реализовать DCA catch-up в бэктесте
-- Скопировать логику `_run_dca_catchup()` из `bot_orchestrator.py` в backtest engine
-
-**P0.5** Написать верификационный тест
-- Запустить live бота в dry_run и backtest на одном отрезке данных
-- Сравнить количество ордеров, P&L, активные позиции
+**P0.6 — Верификационный тест Live vs Backtest**
+- Запустить live бота в dry_run на отрезке, для которого есть CSV-данные
+- Сравнить: количество сигналов, сделок, P&L
+- Допустимое отклонение: ±10% по числу сделок
 
 ---
 
-## Направление 2: Расследование SMC = 0 сделок (P0)
+## Направление 2: Реальные данные + Phase 1 перегон (P0)
 
-**Проблема:** SMC не открыл ни одной позиции на 37 парах × 50k баров в Phase 1.
+**Цель:** Phase 1 backtest с реальными рыночными данными и исправленным SMC.
 
-**Гипотезы:**
-1. Throttle `smc_generate_signal_every_n=12` + warmup 100 баров → сигналов мало, risk manager блокирует все
-2. `min_risk_reward=2.0` слишком высокое для текущего рынка
-3. `require_volume_confirmation=False` в backtest, но расчёт объёма некорректен
+### Задачи
 
-### Задачи:
+**P0.1 — Сбор исторических данных**
+- Скачать 12 месяцев M5-данных для 37+ пар через `scripts/backfill_history.py`
+- Или скачать CSV с внешнего источника (Binance/Bybit)
+- Требуется: ~100 MB на пару, ~4 GB итого
 
-**P0.1** Smoke-тест: изолированный запуск только SMC
-```bash
-# Одна пара, 500 баров, только SMC, без других стратегий
-# enable_dca=False, enable_grid=False, enable_trend_follower=False
-```
+**P0.2 — Запустить Phase 1 с исправленным движком**
+- SMC баг исправлен (сессия 47) — нужен новый прогон
+- Ожидаемый результат: SMC должен дать сделки на трендовых парах
+- Использовать `--live-config configs/phase7_demo.yaml` (P0.3 сессии 47 — done)
 
-**P0.2** Добавить verbose logging в SMC в backtest
-- Логировать каждый отклонённый сигнал: причину (`rr_too_low`, `no_volume`, `risk_blocked`)
-- Логировать количество warmup баров vs сигнальных
-
-**P0.3** Параметрический эксперимент
-- Снизить `smc_generate_signal_every_n` с 12 до 3
-- Снизить `min_risk_reward` с 2.0 до 1.5
-- Отключить `require_volume_confirmation`
-
-**P0.4** Проверить корректность M5 данных в бэктесте
-- Убедиться что `df_m5` содержит корректные OHLCV для SMC signal generation
+**P0.3 — Анализ Phase 1 результатов**
+- Какие стратегии прибыльны на каких режимах рынка?
+- Какие пары ведут себя хорошо с Grid, DCA, TF, SMC?
+- Выявить аномальные пары (как FTTUSDT в предыдущем прогоне)
 
 ---
 
-## Направление 3: Оптимизация DCA (P1, Phase 2)
+## Направление 3: Оптимизация параметров (P1)
 
-**Проблема:** DCA накапливает убытки бесконечно при даунтренде. Avg -$10k/pair на Phase 1.
+**Цель:** Найти оптимальные параметры для каждой стратегии и каждого режима рынка.
 
-**Стратегия:** Ограничить потери + добавить защитные механизмы.
+**Зависимость:** требует завершения Направлений 1 и 2.
 
-### Задачи:
+### Задачи
 
-**P1.1** Ограничить `max_safety_orders` до 3 (было 5)
-- Быстрое тестирование влияния на Phase 1 результаты
+**P1.1 — Unified parameter model**
+- Ввести нормализованный уровень риск-параметров:
+  - `risk_per_trade_pct` — единица для всех стратегий
+  - `max_position_pct` — единица позиции
+  - `max_daily_loss_pct` — единица дневного лимита
+- Обновить все адаптеры и `from_yaml_config()` для поддержки новой модели
 
-**P1.2** Увеличить `price_deviation_pct` до 3-5%
-- При deviation=2% бот накапливает слишком частые позиции
-- При deviation=5% ждёт более значимых откатов
+**P1.2 — Grid оптимизация**
+- Параметрическая сетка: `profit_per_grid ∈ [0.5%, 2.0%]`, `num_levels ∈ [4, 12]`
+- Разные диапазоны для BTC vs ETH
+- Оценить: лучший profit_per_grid для каждого volatility-режима
 
-**P1.3** Добавить DCA SHORT режим при BEAR_TREND
-- Когда MarketRegimeDetector даёт BEAR_TREND → DCA продаёт вместо покупки
-- Файлы: `bot/strategies/dca/engine.py`, `bot/orchestrator/bot_orchestrator.py`
+**P1.3 — DCA оптимизация**
+- Параметрическая сетка: `trigger_pct ∈ [2%, 6%]`, `max_steps ∈ [2, 6]`, `tp ∈ [5%, 15%]`
+- Тест гипотезы: `trigger_pct=3-5%, max_steps=3` лучше текущего `4%/4 steps`
+- Отдельная оптимизация для BULL vs BEAR рынка
 
-**P1.4** Добавить максимальный убыток на позицию DCA
-- Если суммарный DCA-убыток > X% → закрыть все DCA позиции
-- Параметр: `max_dca_loss_pct: 0.05` (5%)
+**P1.4 — TrendFollower оптимизация**
+- EMA периоды: fast ∈ [10, 20, 30], slow ∈ [40, 50, 100]
+- ATR multiplier TP: ∈ [1.5, 2.0, 2.5, 3.0]
+- Тест: добавить SHORT-режим в BEAR_TREND
 
-**P1.5** Phase 2 backtest: 37 пар × 50k баров с новыми параметрами
-- Сравнить с Phase 1 baseline
+**P1.5 — SMC оптимизация**
+- `swing_length ∈ [5, 10, 20, 35]` для H1
+- `swing_length_m5 ∈ [10, 20, 35]` для M5
+- `min_risk_reward ∈ [1.5, 2.0, 2.5, 3.0]`
+- Тест: M5 vs H1/M15 сигналы по Sharpe
 
----
-
-## Направление 4: Адаптивное переключение стратегий (P1)
-
-**Проблема:** MarketRegimeDetector создан и работает, но результат не используется в live боте.
-
-**Цель:** Живой бот автоматически меняет параметры стратегий в зависимости от режима рынка.
-
-### Задачи:
-
-**P1.1** Подключить MarketRegimeDetector к strategy_selector в live
-- Файл: `bot/orchestrator/bot_orchestrator.py`, метод `_regime_monitor_loop()`
-- Передавать `current_regime` в `strategy_selector.select_active_strategies()`
-
-**P1.2** Определить правила переключения для каждого режима
-```
-BULL_TREND  → активировать TrendFollower (weight=1.0), DCA (weight=0.5)
-BEAR_TREND  → активировать DCA SHORT, отключить Grid LONG
-TIGHT_RANGE → Grid (weight=1.0), DCA (weight=1.0)
-WIDE_RANGE  → SMC (weight=1.0), TrendFollower (weight=0.5)
-```
-
-**P1.3** Cooldown и гистерезис переключений
-- Cooldown уже есть: 600 сек между переключениями
-- Добавить: не переключать при волатильности > X%
-
-**P1.4** Live тестирование на демо-счёте
-- Включить режим для одного бота (demo_btc_hybrid)
-- Мониторинг результатов 2 недели
+**P1.6 — Режим-зависимая оптимизация**
+- Для каждой комбинации {стратегия × режим_рынка} — свои оптимальные параметры
+- Пример: Grid optimal params в TIGHT_RANGE ≠ BULL_TREND
 
 ---
 
-## Направление 5: TrendFollower SHORT режим (P2)
+## Направление 4: TrendFollower SHORT режим (P2)
 
-**Проблема:** TrendFollower открывает только LONG позиции, проигрывает на даунтренде.
+**Цель:** Торговля в SHORT при BEAR_TREND, BEAR_MARKET режимах.
 
-### Задачи:
+### Задачи
 
-**P2.1** Включить SHORT сигналы в TrendFollowerStrategy
+**P2.1 — SHORT сигналы в TrendFollower**
+- Добавить `direction = SHORT` при `ema_fast < ema_slow` + RSI > 60
 - Файл: `bot/strategies/trend_follower/entry_logic.py`
-- При `phase=bearish` → SHORT вход при откате к EMA20
 
-**P2.2** Проверить Bybit demo поддержку SHORT на USDT perpetuals
-- Тестовый ордер Sell Market 0.001 BTC
+**P2.2 — Адаптер для SHORT позиций**
+- `TrendFollowerAdapter.open_position()` должен поддерживать `direction=SHORT`
+- Управление позицией: `update_positions()` с инверсной логикой TP/SL
 
-**P2.3** Backtest TrendFollower только SHORT на Phase 1 данных
-- Сравнить с LONG-only baseline
+**P2.3 — Bybit futures SHORT**
+- Убедиться, что `ByBitDirectClient` корректно открывает SHORT на linear futures
+- Тест в dry_run режиме перед деплоем
 
----
-
-## Направление 6: Инфраструктура (P2)
-
-### Telegram восстановление
-
-**P2.1** Диагностика: почему 185.233.200.13 не может достучаться до api.telegram.org
-```bash
-# На сервере:
-curl -I https://api.telegram.org
-nslookup api.telegram.org
-ping api.telegram.org
-```
-
-**P2.2** Варианты решения:
-- Через прокси (HTTP_PROXY в docker-compose)
-- Через отдельный VPS как relay
-- Замена на Telegram Bot через webhook вместо polling
-
-### Мониторинг балансов
-
-**P2.3** Добавить daily P&L отчёт в файл (если Telegram недоступен)
-- Запись в `/home/ai-agent/TRADERAGENT/logs/daily_pnl.jsonl`
-
-### Тестовый сервер
-
-**P2.4** Восстановить или заменить тестовый сервер 158.160.215.57
-- Сейчас ВЫКЛЮЧЕН после сессии 45
-- Нужен для Phase 2 backtest (35 мин на 37 пар)
-- Альтернатива: запустить на production сервере в отдельном container
+**P2.4 — Backtest SHORT режима**
+- Запустить TF-only backtest на bear рынке (Aug 2025 – Feb 2026)
+- Сравнить LONG-only vs LONG+SHORT Sharpe
 
 ---
 
-## Направление 7: Качество кода (P3)
+## Направление 5: Hybrid в backtest (P2)
 
-**P3.1** Интеграционные тесты для pattern "exit → close_position"
-- По каждой стратегии (TF, SMC, Grid, DCA) написать тест на идемпотентность exit
-- Предотвратить повторение бага TrendFollower Infinite Exit Loop
+**Цель:** Backtest Hybrid (BTC/USDT) воспроизводит поведение `demo_btc_hybrid`.
 
-**P3.2** Унифицированный конфиг для backtest и live
-- Один класс `StrategyConfig` вместо двух (Pydantic + dataclass)
-- Единая точка конвертации в `BacktestOrchestratorEngineConfig`
+### Задачи
 
-**P3.3** Документирование API бэктеста
-- Параметры `BacktestOrchestratorEngineConfig` с пояснениями
-- Пример запуска с параметрами из YAML
+**P2.1 — HybridCoordinator в BacktestOrchestratorEngine**
+- Заменить независимый запуск Grid+DCA на `HybridCoordinator.evaluate(adx)`
+- Файл: `bot/tests/backtesting/orchestrator_engine.py`
+
+**P2.2 — Тест: Live vs Backtest Hybrid**
+- Запустить `demo_btc_hybrid` dry_run на 30-дневном CSV
+- Сравнить количество переключений Grid↔DCA
 
 ---
 
-## Временная шкала (ориентировочно)
+## Направление 6: Инфраструктура (P2-P3)
 
-| Этап | Задачи | Условие перехода |
-|------|--------|-----------------|
-| 1 | P0.1–P0.5: Синхронизация параметров | Бэктест воспроизводит live ордера |
-| 2 | P0.1–P0.4: SMC investigation | SMC генерирует ≥ 1 сделку/100 баров |
-| 3 | P1.1–P1.5: DCA оптимизация | Phase 2 backtest: avg return > 0% |
-| 4 | P1.1–P1.4: Adaptive switching | Live демо 2 недели без критических багов |
-| 5 | P2–P3: Всё остальное | По мере ресурсов |
+### P2: Portfolio-level stop-loss в backtest
+- Подключить `PortfolioRiskManager` к `BacktestOrchestratorEngine`
+- Добавить portfolio-level daily loss halt
+
+### P2: Автоматическое применение результатов оптимизации
+- Инструмент: `scripts/apply_optimization.py --results results/phase2/ --config configs/phase7_demo.yaml`
+- Обновляет YAML параметры на основе Phase 2 результатов
+- Restart бота после обновления
+
+### P3: Динамический Grid-диапазон
+- `GridAdapter` должен пересчитывать `upper_price`/`lower_price` при выходе цены за границы
+- Параметр: `range_pct = 0.08` (±8% от текущей цены)
+
+### P3: Telegram через proxy
+- Настроить HTTP proxy или использовать Telegram Bot API через webhook
+- Альтернатива: push уведомления через самохостинг (Ntfy/Gotify)
+
+### P3: Веб-дашборд
+- Восстановить/дописать React дашборд в `web/`
+- Подключить к `bot/api/` для real-time данных
+
+---
+
+## Метрики успеха
+
+| Задача | Метрика | Целевое значение |
+|--------|---------|-----------------|
+| Live↔Backtest sync | Отклонение числа сделок | ≤ 10% |
+| Phase 1 перегон | SMC сделок на BTC/USDT | > 0 |
+| Phase 2 оптимизация | Sharpe improvement | ≥ 0.5 vs baseline |
+| DCA оптимизация | Max drawdown | < 15% |
+| TF SHORT режим | Bear market return | > -5% |
+| Unified params | Параметров без аналога | 0 |
+
+---
+
+## Временная оценка (ориентировочно)
+
+| Направление | Задачи | Трудоёмкость |
+|-------------|--------|-------------|
+| Live↔Backtest sync | P0.1-P0.6 | 2-3 сессии |
+| Реальные данные + Phase 1 | P0.1-P0.3 | 1-2 сессии + время загрузки |
+| Phase 2 оптимизация | P1.1-P1.6 | 3-4 сессии |
+| TrendFollower SHORT | P2.1-P2.4 | 1-2 сессии |
+| Hybrid в backtest | P2.1-P2.2 | 1 сессия |
+| Инфраструктура | P2-P3 | По мере необходимости |

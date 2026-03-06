@@ -1,13 +1,13 @@
 # TRADERAGENT v2.0
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests: 1352+ passing](https://img.shields.io/badge/tests-1352%20passing-brightgreen.svg)]()
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Tests: 1687+ passing](https://img.shields.io/badge/tests-1687%20passing-brightgreen.svg)]()
 [![Version: 2.0.0](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
 
-Платформа алгоритмической торговли криптовалютами с 4 стратегиями, мультитаймфреймовым анализом и BacktestOrchestratorEngine V3.0.
+Платформа алгоритмической торговли криптовалютами с 4 стратегиями, адаптивным переключением по режиму рынка и BacktestOrchestratorEngine V3.0.
 
-Algorithmic cryptocurrency trading platform with 4 strategies, multi-timeframe analysis and BacktestOrchestratorEngine V3.0.
+Algorithmic cryptocurrency trading platform with 4 strategies, market-regime adaptive switching, and BacktestOrchestratorEngine V3.0.
 
 ---
 
@@ -19,7 +19,9 @@ Algorithmic cryptocurrency trading platform with 4 strategies, multi-timeframe a
 - [Быстрый старт / Quick Start](#быстрый-старт--quick-start)
 - [Конфигурация / Configuration](#конфигурация--configuration)
 - [Бэктестирование / Backtesting](#бэктестирование--backtesting)
+- [Тестирование / Testing](#тестирование--testing)
 - [Документация / Documentation](#документация--documentation)
+- [Инфраструктура / Infrastructure](#инфраструктура--infrastructure)
 
 ---
 
@@ -27,27 +29,29 @@ Algorithmic cryptocurrency trading platform with 4 strategies, multi-timeframe a
 
 | Компонент | Состояние |
 |-----------|-----------|
-| Production боты (5 шт.) | ✅ Работают — 185.233.200.13 |
-| BacktestOrchestratorEngine | ✅ V3.0 (Phase 1: 37 пар, 50k баров) |
-| Тестовый сервер | ⏸️ Выключен |
-| Telegram уведомления | ❌ Сеть недоступна на продакшн-сервере |
+| Production боты (5 шт.) | ✅ Running — 185.233.200.13, баланс ~$102k |
+| BacktestOrchestratorEngine V3.0 | ✅ Phase 1 завершён (37 пар, 50k баров) |
+| SMC критический баг | ✅ Исправлен (сессия 47) — 0 → 1086 сделок |
+| Live↔Backtest sync | 🟡 P0.1-P0.3 done, роутер в процессе |
+| Telegram уведомления | ❌ Сеть недоступна на сервере |
 
-**Phase 1 Backtest Results (2026-03-04):** 5/37 pairs profitable, avg return -11.68% (bearish market Aug 2025 – Feb 2026)
+**Текущий фокус:** синхронизация Live↔Backtest, сбор реальных данных, Phase 2 оптимизация.
 
 ---
 
 ## Стратегии / Strategies
 
-| Стратегия | Описание | Статус |
-|-----------|----------|--------|
-| **Grid** | Сетка limit-ордеров в диапазоне цен | ✅ Production |
-| **DCA** | Усреднение позиции при падении цены | ✅ Production |
-| **Trend Follower** | EMA/ATR/RSI trend-following с trailing stop | ✅ Production |
-| **SMC (Smart Money Concepts)** | H1 структура + M5 вход, Order Blocks | ✅ Production |
+| Стратегия | Описание | Live | Backtest |
+|-----------|----------|------|---------|
+| **Grid** | Сетка limit-ордеров в ценовом диапазоне | ✅ | ✅ |
+| **DCA** | Усреднение позиции при падении цены | ✅ | ✅ |
+| **Trend Follower** | EMA/ATR/RSI trend-following с trailing stop | ✅ | ✅ |
+| **SMC** | H1 структура + M5 вход, Order Blocks, FVG | ✅ | ✅ |
+| **Hybrid (Grid+DCA)** | Координированное переключение Grid↔DCA | ✅ | 🟡 Частично |
 
-Все стратегии реализуют единый интерфейс `BaseStrategy` и работают как в live-боте, так и в бэктесте.
+Все стратегии реализуют единый интерфейс `BaseStrategy` и подключаются через адаптер к live-боту и бэктесту.
 
-All strategies implement a unified `BaseStrategy` interface and work both in the live bot and backtesting engine.
+All strategies implement the unified `BaseStrategy` interface and connect via adapters to both the live bot and backtesting engine.
 
 ---
 
@@ -56,41 +60,47 @@ All strategies implement a unified `BaseStrategy` interface and work both in the
 ```
 bot/
 ├── orchestrator/
-│   ├── bot_orchestrator.py          # Live bot orchestrator
+│   ├── bot_orchestrator.py          # Live bot main loop (~2600 LOC)
 │   ├── market_regime.py             # 6-mode market regime detector
-│   └── strategy_selector.py         # Strategy routing
+│   └── strategy_selector.py         # Strategy routing (HybridCoordinator)
 ├── strategies/
 │   ├── base.py                      # Unified BaseStrategy interface
-│   ├── grid/ + grid_adapter.py
-│   ├── dca/ + dca_adapter.py
-│   ├── trend_follower/ + trend_follower_adapter.py
-│   └── smc/ + smc_adapter.py        # Multi-timeframe H1+M5
+│   ├── grid/ + grid_adapter.py      # Grid strategy
+│   ├── dca/ + dca_adapter.py        # DCA strategy
+│   ├── trend_follower/ + adapter    # TrendFollower (EMA/ATR/RSI)
+│   └── smc/ + smc_adapter.py        # SMC: H1 structure + M5 entry
+├── core/
+│   ├── smc/                         # Internal SMC module (O(n) swing, BOS/CHoCH)
+│   ├── trading_core/                # TradingCore + HybridCoordinator
+│   └── portfolio_risk_manager.py
 └── tests/backtesting/
     ├── orchestrator_engine.py        # BacktestOrchestratorEngine V3.0
-    ├── multi_tf_data_loader.py       # O(log n) data loader
+    ├── multi_tf_data_loader.py       # O(log n) multi-TF data loader
     └── strategy_router.py            # Advisory regime-based routing
 ```
 
-Подробнее: [Анализ проекта](docs/analysis.md) · [План развития](docs/plan.md)
+Подробный анализ архитектуры, сильных/слабых сторон и расхождений Live↔Backtest:
+→ **[docs/analysis.md](docs/analysis.md)**
 
-For details: [Project Analysis](docs/analysis.md) · [Development Plan](docs/plan.md)
+Detailed architecture analysis, strengths/weaknesses, and Live↔Backtest conflicts:
+→ **[docs/analysis.md](docs/analysis.md)**
 
 ---
 
 ## Быстрый старт / Quick Start
 
 ```bash
-# 1. Clone and install
+# 1. Клонирование и установка / Clone and install
 git clone https://github.com/alekseymavai/TRADERAGENT.git
 cd TRADERAGENT
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Configure
-cp configs/example.yaml configs/my_config.yaml
-# Edit: api_key, api_secret, strategy params
+# 2. Настройка / Configure
+cp configs/phase7_demo.yaml configs/my_config.yaml
+# Отредактировать: api_key, api_secret, параметры стратегий
 
-# 3. Run (demo mode)
+# 3. Запуск в demo-режиме / Run in demo mode
 python -m bot.main --config configs/my_config.yaml
 ```
 
@@ -101,60 +111,100 @@ docker compose up -d
 docker compose logs -f bot
 ```
 
+**Требования**: Python 3.12+, PostgreSQL 15, Redis 7, Docker Compose.
+
 ---
 
 ## Конфигурация / Configuration
 
-Пример конфига: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
+Основной конфиг: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
 
-Example config: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
+Main config example: [`configs/phase7_demo.yaml`](configs/phase7_demo.yaml)
 
 ```yaml
-name: demo_btc_hybrid
-exchange: bybit
-sandbox: true              # api-demo.bybit.com
-symbol: BTC/USDT
-strategy: hybrid           # grid + dca
+bots:
+  - name: demo_btc_hybrid
+    symbol: BTC/USDT
+    strategy: hybrid
 
-grid:
-  upper_price: "74000"
-  lower_price: "64000"
-  grid_levels: 6
-  amount_per_grid: "150"
-  profit_per_grid: "0.012"
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_demo
+      sandbox: true              # api-demo.bybit.com
 
-dca:
-  trigger_percentage: "0.02"
-  amount_per_step: "150"
-  max_steps: 5
-  take_profit_percentage: "0.10"
+    grid:
+      grid_levels: 6
+      amount_per_grid: "150"
+      profit_per_grid: "0.012"  # 1.2% profit per level
+
+    dca:
+      trigger_percentage: "0.04"       # Enter DCA at -4%
+      max_steps: 4
+      take_profit_percentage: "0.08"   # TP at +8%
+
+    risk_management:
+      max_position_size: "3000"        # USD
+      max_daily_loss: "600"            # USD
 ```
+
+**Важно**: `sandbox: true` → использует `api-demo.bybit.com` (demo trading), не testnet.
+
+**Note**: `sandbox: true` → uses `api-demo.bybit.com` (demo trading), not testnet.
 
 ---
 
 ## Бэктестирование / Backtesting
 
-### Phase 1 (завершён / completed)
-
-37 пар × 50k M5 баров × 14 CPU = 35 минут
+### Запуск / Run
 
 ```bash
-cd bot/tests/backtesting
-python run_multi_pair.py --config phase1.yaml --pairs all --workers 14
+# Smoke-тест одной пары / Single pair smoke test
+python scripts/run_backtest_v2.py --mode single --symbol BTC/USDT --max-bars 3000
+
+# Phase 1: Baseline 37 пар / 37 pairs baseline
+python scripts/run_backtest_v2.py --mode multi --symbols BTC,ETH,SOL --workers 8
+
+# SMC диагностика / SMC diagnostics
+python scripts/smoke_smc.py --bars 2000 --trend up --warmup 200
 ```
 
-### Ключевые находки / Key Findings
+### Ключевые особенности / Key features
 
-- **DCA катастрофичен при даунтренде** — avg -$10k/pair
-- **SMC = 0 сделок** — требует расследования (throttle + risk manager)
-- **Grid + DCA**: 77-80% win rate, но отрицательный итог
+- Параметры из live YAML: `--live-config configs/phase7_demo.yaml`
+- Параллельный запуск: Phase 1 на 14 CPU = 35 мин для 37 пар
+- Реальный P&L: `(exit_price - entry_price) × amount`
+- Advisory routing по режиму рынка
 
-### BacktestOrchestratorEngine V3.0
+### Phase 1 результаты (2026-03-03, данные Aug 2025 – Feb 2026)
 
-- Параллельный запуск всех 4 стратегий на каждом баре
-- Реальный P&L: `(exit - entry) × amount`
-- Advisory routing по режиму рынка (MarketRegimeDetector)
-- O(log n) поиск данных в multi-TF loader
+> ⚠️ SMC = 0 сделок — исправлен баг в сессии 47. Нужен новый прогон.
+
+| Метрика | Значение |
+|---------|---------|
+| Пар обработано | 28 из 37 |
+| Ср. return | +0.35% (артефакт PnL-заглушки) |
+| SMC сделок | 0 (баг исправлен) |
+| Ср. strategy switches | 199/пару |
+
+---
+
+## Тестирование / Testing
+
+```bash
+# Все тесты / All tests
+python -m pytest tests/ -v
+
+# Unit тесты SMC
+python -m pytest bot/tests/unit/smc/ -v
+
+# Backtest config sync (34 теста)
+python -m pytest bot/tests/unit/test_backtest_config.py -v
+
+# SMC стратегия (без flaky market_structure)
+python -m pytest tests/strategies/smc/ --ignore=tests/strategies/smc/test_market_structure.py -v
+```
+
+**Статус тестов**: 1687+ passing, ~36 pre-existing failures (web tests password, flaky SMC market_structure).
 
 ---
 
@@ -162,31 +212,13 @@ python run_multi_pair.py --config phase1.yaml --pairs all --workers 14
 
 | Документ | Описание |
 |----------|----------|
-| [docs/analysis.md](docs/analysis.md) | Анализ проекта: сильные/слабые стороны, расхождения Live vs Backtest |
-| [docs/plan.md](docs/plan.md) | План развития по приоритетам (P0-P3) |
-| [docs/SESSION_CONTEXT.md](docs/SESSION_CONTEXT.md) | Контекст последних сессий разработки |
-| [docs/architecture_bot.md](docs/architecture_bot.md) | Архитектура живого бота |
+| **[docs/analysis.md](docs/analysis.md)** | Анализ проекта: сильные/слабые стороны, конфликты Live↔Backtest, унификация параметров |
+| **[docs/plan.md](docs/plan.md)** | План развития: P0–P3 задачи по направлениям |
+| [docs/SESSION_CONTEXT.md](docs/SESSION_CONTEXT.md) | Полная история разработки по сессиям |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Деплой на продакшн-сервер |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Справочник по конфигурации |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Деплой на сервер |
+| [docs/BYBIT_DEMO_TRADING_SOLUTION.md](docs/BYBIT_DEMO_TRADING_SOLUTION.md) | Настройка Bybit Demo API |
 | [docs/case-studies/](docs/case-studies/) | Разбор критических багов |
-
----
-
-## Тестирование / Testing
-
-```bash
-# Все тесты
-pytest bot/tests/ -v
-
-# Только unit
-pytest bot/tests/unit/ -v
-
-# Только интеграционные
-pytest bot/tests/integration/ -v
-
-# Backtest smoke test (один бот, 3000 баров)
-pytest bot/tests/backtesting/test_orchestrator_engine.py -v
-```
 
 ---
 
@@ -194,12 +226,21 @@ pytest bot/tests/backtesting/test_orchestrator_engine.py -v
 
 | Сервер | IP | Роль | Статус |
 |--------|----|------|--------|
-| Production | 185.233.200.13 | 5 live ботов | ✅ Работает |
+| Production | 185.233.200.13 | 5 live ботов | ✅ Running |
 | Testing | 158.160.215.57 | Бэктесты | ⏸️ Выключен |
+| Dev | 173.249.2.184 | Разработка | — |
 
-SSH: `ssh ai-agent@185.233.200.13`
+```bash
+# Деплой / Deploy
+tar czf /tmp/sync.tar.gz bot/ scripts/ configs/
+scp /tmp/sync.tar.gz ai-agent@185.233.200.13:/tmp/
+ssh ai-agent@185.233.200.13 "cd ~/TRADERAGENT && tar xzf /tmp/sync.tar.gz && docker compose restart bot"
 
-Docker: `docker compose restart bot`
+# Логи / Logs
+ssh ai-agent@185.233.200.13 "docker logs traderagent-bot --tail 50 -f"
+```
+
+**Stack**: Python 3.12, asyncio, PostgreSQL 15, Redis 7, Docker Compose, Bybit V5 API.
 
 ---
 
