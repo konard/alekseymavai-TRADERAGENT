@@ -1,19 +1,109 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-05)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-06)
 
 ## Текущий статус проекта
 
-**Дата:** 5 марта 2026
-**Статус:** v2.0.0 + **Направление 4 (Адаптивное переключение) завершено (Session 46)**
+**Дата:** 6 марта 2026
+**Статус:** v2.0.0 + **Session 50: Phase 1 backtest pipeline подготовлен к запуску**
 **Pass Rate:** 78 unit tests passing (52 SMC + 26 market regime)
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `f646fc3` (feat(regime): complete P1 adaptive switching — SMC overlay + volatility guard)
-**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc. Задеплоено, ошибок нет.
-**Backtest V2.0 Status:** ✅ Phase 1 завершён (37 пар, 50k баров, 35 мин). Phase 2 (оптимизация) — следующий шаг. SMC=0 расследование — P0.
-**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — работа Session 45 завершена.
+**Последний коммит:** `3ebfaf3` (fix(backfill): fix CSV import bugs + --csv-only/--data-dir)
+**Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc.
+**Backtest V2.0 Status:** 🟡 Phase 1 pipeline готов (per-strategy metrics, backtest_phase1.yaml, exclude FTT/LUNA). Ожидает git pull на тест. сервере + smoke test.
+**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — нужен git pull (отстаёт от main).
 
 ---
 
-## Последняя сессия (2026-03-05) — Session 46: bot/core/smc/ + Адаптивное переключение стратегий
+## Последняя сессия (2026-03-06) — Session 50: Phase 1 backtest pipeline + архитектурные решения
+
+### Задачи сессии
+1. Подготовить Phase 1 backtest pipeline к запуску на тестовом сервере.
+2. Решить архитектурные вопросы: портфельная логика, одновременная работа стратегий, risk management.
+3. Зафиксировать новые GitHub issues для выявленных проблем.
+
+### Архитектурные решения (обсуждение)
+
+#### Портфельная логика (многопарная торговля)
+- Модель: $10k / 10 слотов / $1000 на пару
+- Три уровня: Universe (30-50 пар мониторинг) → Active slots (10 пар, капитал) → Strategy instance
+- Фазы внедрения: Phase 2 ручной выбор → Phase 3 полуавтомат → Phase 4 автопилот
+
+#### Одновременная работа стратегий на одной паре
+- На Bybit Futures (one-way mode): одна позиция = сумма долей всех стратегий
+- Каждая стратегия закрывает **ровно свой объём** через `reduceOnly=True`
+- Выявлены два бага: отсутствие `reduceOnly` (#338) и слепые зоны exposure (#339)
+
+#### Phase 1 backtest — правильная архитектура
+- **Не** изолированные прогоны (Grid в нисходящем тренде = слив депозита)
+- **Один** оркестрованный прогон + накопление `per_strategy_metrics` за активные периоды
+- Результат: матрица `symbol × strategy → Sharpe/Return/Trades`
+
+### Сделано в сессии 50
+
+#### 1. GitHub Issues (#334–#344)
+| Issue | Название |
+|-------|---------|
+| #338 | fix: reduceOnly=True при закрытии позиций SMC и TrendFollower |
+| #339 | feat: _get_total_open_exposure() — единый учёт экспозиции |
+| #344 | feat: per-strategy metrics в оркестрованном backtest (переписан 2×) |
+
+#### 2. `configs/backtest_phase1.yaml` (коммит `1d61933`)
+Новый standalone-конфиг для Phase 1 (не зависит от live YAML):
+- Все 4 стратегии включены, $1000/слот, 6% daily loss, 500 warmup bars
+- `exclude_symbols: [FTTUSDT, LUNAUSDT]` — аномальные пары исключены (крах/делистинг)
+- Grid: 6 уровней, 1.2% profit, amount_per_grid авто от баланса
+- DCA: 4% trigger, 4 шага, 8% TP, catch-up enabled
+- TF: EMA 20/50, 1% risk/trade
+- SMC: swing=10, R:R≥2.0, volume confirmation выключен
+
+#### 3. `scripts/run_backtest_v2.py` — `--config` и `--exclude` (коммит `1d61933`, `5153ad4`)
+- `_cfg_from_backtest_yaml()` — читает плоский формат (без `bots:` списка)
+- `--config` аргумент (дефолт: `configs/backtest_phase1.yaml`), приоритет над `--live-config`
+- `_load_exclude_symbols()` — фильтрует пары из `exclude_symbols` в YAML
+- Применяется в `run_multi`, `run_auto` и `_phase1_worker`
+
+#### 4. `per_strategy_metrics` в `OrchestratorBacktestResult` (подтянуто из remote, коммит `22692b7`)
+- `StrategyPeriodMetrics`: bars_active, trades, realized_pnl, sharpe, max_drawdown_pct, win_rate
+- Трекинг P&L/trades по активной стратегии в каждом баре
+- `_save_score_matrix()` → `strategy_score_matrix.json` + `.csv`
+- `_top3_strategies_per_pair()` → Telegram уведомление
+
+#### 5. `scripts/backfill_history.py` — три бага исправлены (коммит `3ebfaf3`)
+- **Баг 1**: `datetime` колонка в CSV сдвигала все OHLCV на 1 — добавлен автодетект заголовка
+- **Баг 2**: поддержка 4 вариантов имён файлов (`BTC_USDT_5m.csv`, `bybit_BTCUSDT_5m.csv` и др.)
+- **Баг 3**: данные не сохранялись в БД (только печатало "queued") — исправлено, батчи 10k строк
+- `--csv-only` — пропустить REST API, только CSV
+- `--data-dir` — путь к папке с CSV
+
+#### 6. Анализ тестового сервера (158.160.215.57)
+- 45 пар × 5m CSV, данные с 2017, avg 634k баров/пару
+- Для Phase 1 с `--max-bars 50000` все пары подходят
+- 43 пары пойдут в прогон (FTTUSDT, LUNAUSDT исключены)
+
+### Следующие шаги
+
+```
+1. git pull на тестовом сервере (158.160.215.57)
+2. P0.6 Smoke test: python scripts/run_backtest_v2.py \
+     --mode single --symbol BTCUSDT --max-bars 5000
+3. Phase 1 full run: python scripts/run_backtest_v2.py \
+     --mode auto --data-dir data/historical \
+     --max-bars 50000 --workers 14
+4. Анализ strategy_score_matrix.csv
+5. backfill_history.py --csv-only на продакшн сервере
+6. git pull + docker compose restart на продакшн (185.233.200.13)
+```
+
+### Открытые Issues (P0-P1)
+| Issue | Статус | Описание |
+|-------|--------|---------|
+| #338 | 🔴 open | reduceOnly=True при закрытии позиций |
+| #339 | 🔴 open | _get_total_open_exposure() cross-strategy |
+| #344 | 🔴 open | per-strategy metrics — реализовано в движке, нужна интеграция |
+| P0.6 | 🔴 ожидает сервера | Smoke test BTC 5000 баров |
+
+---
+
+## Предыдущая сессия (2026-03-05) — Session 46: bot/core/smc/ + Адаптивное переключение стратегий
 
 ### Задача
 1. Реализовать собственный SMC-модуль `bot/core/smc/`, заменив внешний pip-пакет `smartmoneyconcepts` (Вариант A).
