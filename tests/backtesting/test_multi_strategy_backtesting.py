@@ -337,8 +337,6 @@ class TestSMCBacktestIntegration:
         from bot.strategies.smc_adapter import SMCStrategyAdapter
 
         smc_config = SMCConfig()
-        smc_config.risk_per_trade_pct = smc_config.risk_per_trade
-        smc_config.max_position_size_usd = smc_config.max_position_size
 
         config = MultiTFBacktestConfig(
             initial_balance=Decimal("10000"),
