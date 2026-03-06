@@ -1,5 +1,7 @@
 """Portfolio command handlers: /scan, /create_bot, /delete_bot, /portfolio."""
 
+from typing import Any
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -14,7 +16,7 @@ router = Router()
 
 
 def _get_orchestrators(obj: Message | CallbackQuery) -> dict[str, BotOrchestrator]:
-    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[union-attr]
+    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[no-any-return]
 
 
 def _check_auth(obj: Message | CallbackQuery) -> bool:
@@ -22,10 +24,10 @@ def _check_auth(obj: Message | CallbackQuery) -> bool:
     if user is None:
         return False
     chat_id = obj.message.chat.id if isinstance(obj, CallbackQuery) else obj.chat.id
-    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids  # type: ignore[union-attr]
+    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids
 
 
-def _get_app(obj: Message | CallbackQuery):
+def _get_app(obj: Message | CallbackQuery) -> Any:
     """Get BotApplication reference if available."""
     return getattr(obj.bot, "_tg_app_ref", None)
 
@@ -173,7 +175,7 @@ async def cmd_portfolio(message: Message) -> None:
 
     for bot_name, orch in orchestrators.items():
         try:
-            status = orch.get_status()
+            status = await orch.get_status()
             symbol = status.get("symbol", "?")
             state = status.get("state", "?")
             lines.append(f"• {bot_name} ({symbol}) — {state}")

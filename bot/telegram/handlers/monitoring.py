@@ -15,7 +15,7 @@ router = Router()
 
 
 def _get_orchestrators(obj: Message | CallbackQuery) -> dict[str, BotOrchestrator]:
-    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[union-attr]
+    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[no-any-return]
 
 
 def _check_auth(obj: Message | CallbackQuery) -> bool:
@@ -23,7 +23,7 @@ def _check_auth(obj: Message | CallbackQuery) -> bool:
     if user is None:
         return False
     chat_id = obj.message.chat.id if isinstance(obj, CallbackQuery) else obj.chat.id
-    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids  # type: ignore[union-attr]
+    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids
 
 
 def _parse_bot_name(message: Message) -> str | None:
@@ -203,14 +203,14 @@ async def cmd_pnl(message: Message) -> None:
 
     # SMC P&L
     if orch.smc_strategy:
-        smc_pm = orch.smc_strategy.position_manager
-        active = smc_pm.active_positions
-        closed = smc_pm.closed_positions
-        total_pnl = sum(p.realized_pnl for p in closed) if closed else 0
+        active = orch.smc_strategy.get_active_positions()
+        perf = orch.smc_strategy.get_performance()
+        closed_count = perf.total_trades
+        total_pnl = perf.total_pnl
         response += (
             f"*SMC:*\n"
             f"Active: {len(active)}\n"
-            f"Closed: {len(closed)}\n"
+            f"Closed: {closed_count}\n"
             f"Total P&L: {total_pnl}\n\n"
         )
 
@@ -251,9 +251,9 @@ async def cmd_positions(message: Message) -> None:
         response += (
             f"*DCA Position:*\n"
             f"Symbol: {orch.config.symbol}\n"
-            f"Entry: {pos.avg_entry_price}\n"
-            f"Amount: {pos.total_amount}\n"
-            f"Steps: {orch.dca_engine.current_step}/{orch.dca_engine.max_steps}\n"
+            f"Entry: {pos.average_entry_price}\n"
+            f"Amount: {pos.amount}\n"
+            f"Steps: {orch.dca_engine.position.step_number}/{orch.dca_engine.max_steps}\n"
         )
         if orch.current_price:
             pnl = pos.get_pnl(orch.current_price)
@@ -267,28 +267,28 @@ async def cmd_positions(message: Message) -> None:
         if active:
             has_positions = True
             response += f"*Trend-Follower ({len(active)} active):*\n"
-            for pid, pos in list(active.items())[:5]:
+            for pid, tf_pos in list(active.items())[:5]:
                 response += (
                     f"ID: `{pid[:8]}`\n"
-                    f"  Type: {pos.signal_type.value}\n"
-                    f"  Entry: {pos.entry_price}\n"
-                    f"  Size: {pos.size}\n\n"
+                    f"  Type: {tf_pos.signal_type.value}\n"
+                    f"  Entry: {tf_pos.entry_price}\n"
+                    f"  Size: {tf_pos.size}\n\n"
                 )
             if len(active) > 5:
                 response += f"... and {len(active) - 5} more positions\n"
 
     # SMC positions
     if orch.smc_strategy:
-        smc_active = orch.smc_strategy.position_manager.active_positions
+        smc_active = orch.smc_strategy.get_active_positions()
         if smc_active:
             has_positions = True
             response += f"*SMC ({len(smc_active)} active):*\n"
-            for pid, pos in list(smc_active.items())[:5]:
+            for smc_pos in smc_active[:5]:
                 response += (
-                    f"ID: `{pid[:8]}`\n"
-                    f"  Type: {pos.signal_type.value}\n"
-                    f"  Entry: {pos.entry_price}\n"
-                    f"  Size: {pos.size}\n\n"
+                    f"ID: `{str(smc_pos.position_id)[:8]}`\n"
+                    f"  Direction: {smc_pos.direction.value}\n"
+                    f"  Entry: {smc_pos.entry_price}\n"
+                    f"  Size: {smc_pos.size}\n\n"
                 )
             if len(smc_active) > 5:
                 response += f"... and {len(smc_active) - 5} more positions\n"
