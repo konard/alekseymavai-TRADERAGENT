@@ -1241,11 +1241,9 @@ class BotOrchestrator:
         if dca_actions["dca_triggered"] and self.state == BotState.RUNNING:
             dca_step_amount = self.dca_engine.amount_per_step
 
-            # Check per-bot risk limits
+            # Check per-bot risk limits (uses cross-strategy exposure)
             if self.risk_manager:
-                current_position = (
-                    self.dca_engine.position.amount if self.dca_engine.position else Decimal("0")
-                )
+                current_position = self._get_total_open_exposure()
                 balance = self._cached_balance or await self._get_available_balance()
 
                 risk_check = self.risk_manager.check_trade(
@@ -1361,6 +1359,39 @@ class BotOrchestrator:
                 status=result.status,
             )
         return result.approved
+
+    def _get_total_open_exposure(self) -> Decimal:
+        """Return total capital currently exposed across all active strategies.
+
+        Sums buy-side notional for Grid, invested capital for DCA, and
+        position sizes for TrendFollower and SMC.  Used as ``current_position``
+        in :meth:`~bot.core.risk_manager.RiskManager.check_trade` so that every
+        strategy sees combined cross-strategy exposure before opening new trades.
+        """
+        exposure = Decimal("0")
+
+        # Grid: all active buy-side filled positions (open buy orders represent
+        # capital already committed / earmarked for the position)
+        if self.grid_engine:
+            for order in self.grid_engine.active_orders.values():
+                if order.side == "buy":
+                    exposure += order.price * order.amount
+
+        # DCA: total capital in the current open position
+        if self.dca_engine:
+            exposure += self.dca_engine.get_total_invested()
+
+        # TrendFollower: sum of all active position sizes (quote currency)
+        if self.trend_follower_strategy:
+            for pos in self.trend_follower_strategy.position_manager.active_positions.values():
+                exposure += pos.size
+
+        # SMC: sum of all active position sizes (quote currency)
+        if self.smc_strategy:
+            for pos in self.smc_strategy.get_active_positions():
+                exposure += pos.size
+
+        return exposure
 
     async def _place_grid_orders(self, orders: list) -> None:
         """Place grid orders on exchange.
@@ -1494,15 +1525,9 @@ class BotOrchestrator:
             if entry_data and self.state == BotState.RUNNING:
                 signal, metrics, position_size = entry_data
 
-                # Risk check
+                # Risk check (uses cross-strategy exposure)
                 if self.risk_manager:
-                    current_position_value = sum(
-                        (
-                            pos.size
-                            for pos in self.trend_follower_strategy.position_manager.active_positions.values()
-                        ),
-                        Decimal(0),
-                    )
+                    current_position_value = self._get_total_open_exposure()
                     risk_check = self.risk_manager.check_trade(
                         position_size, current_position_value, balance
                     )
@@ -1752,11 +1777,9 @@ class BotOrchestrator:
                         ),
                     )
 
-                    # Risk check
+                    # Risk check (uses cross-strategy exposure)
                     if self.risk_manager:
-                        current_position_value = sum(
-                            (pos.size for pos in active_positions), Decimal(0)
-                        )
+                        current_position_value = self._get_total_open_exposure()
                         risk_check = self.risk_manager.check_trade(
                             position_size, current_position_value, balance
                         )
