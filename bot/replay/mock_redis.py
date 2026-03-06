@@ -18,7 +18,9 @@ class MockPubSub:
     async def unsubscribe(self, *channels: str) -> None:
         pass
 
-    async def get_message(self, ignore_subscribe_messages: bool = False, timeout: float = 0.0):
+    async def get_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+    ) -> None:
         return None
 
     async def close(self) -> None:
@@ -39,7 +41,7 @@ class MockRedis:
     # -- connection lifecycle ---------------------------------------------
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> MockRedis:
+    def from_url(cls, url: str, **kwargs: object) -> MockRedis:
         """Drop-in for ``redis.from_url(...)``."""
         return cls()
 

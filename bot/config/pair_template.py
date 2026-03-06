@@ -18,11 +18,12 @@ Usage::
 
 from __future__ import annotations
 
-import logging
 from decimal import Decimal
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from bot.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ATR-to-grid multipliers (how wide to make each grid level relative to ATR)
 _GRID_ATR_MULTIPLIER = Decimal("2.0")
@@ -179,7 +180,7 @@ class PairTemplateManager:
                 true_ranges.append(tr)
 
             period = min(14, len(true_ranges))
-            atr = sum(true_ranges[-period:]) / period
+            atr = sum(true_ranges[-period:], Decimal("0")) / period
 
             logger.info(
                 "atr_computed",

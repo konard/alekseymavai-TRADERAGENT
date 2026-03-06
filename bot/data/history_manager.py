@@ -14,7 +14,7 @@ Write path:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from sqlalchemy import text
@@ -332,7 +332,7 @@ class HistoryManager:
 
         async with self._session_factory() as session:
             result = await session.execute(stmt, params)
-            return list(result.fetchall())
+            return cast(list[tuple[Any, ...]], list(result.fetchall()))
 
     async def _count_db(self, symbol: str, interval: str) -> int:
         """Count rows in DB for (symbol, interval)."""

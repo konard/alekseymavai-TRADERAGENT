@@ -48,6 +48,7 @@ from bot.strategies.smc_adapter import SMCStrategyAdapter
 from bot.strategies.trend_follower import TrendFollowerConfig as TrendFollowerDataclassConfig
 from bot.strategies.trend_follower import TrendFollowerStrategy
 from bot.strategies.trend_follower.entry_logic import SignalType
+from bot.strategies.trend_follower.position_manager import ExitReason as TFExitReason
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -841,7 +842,7 @@ class BotOrchestrator:
                         pos = pm.active_positions[pos_id]
                         if self.current_price:
                             base_amount = float(pos.size / self.current_price)
-                            side = "sell" if pos.direction.value == "long" else "buy"
+                            side = "sell" if pos.signal_type.value == "long" else "buy"
                             await self.exchange.create_order(
                                 symbol=self.config.symbol,
                                 order_type="market",
@@ -849,7 +850,7 @@ class BotOrchestrator:
                                 amount=base_amount,
                                 params={"reduceOnly": True},
                             )
-                            pm.close_position(pos_id, self.current_price)
+                            pm.close_position(pos_id, TFExitReason.MANUAL)
                     logger.info("transition_trend_follower_positions_closed")
                 except Exception as e:
                     logger.error("transition_tf_close_failed", error=str(e))
@@ -1012,7 +1013,7 @@ class BotOrchestrator:
         # Extract ADX from regime analysis if available
         adx: float | None = None
         if self._current_regime and hasattr(self._current_regime, "adx"):
-            adx = self._current_regime.adx  # type: ignore[attr-defined]
+            adx = self._current_regime.adx
 
         # Use TradingCore.hybrid_coordinator for the routing decision
         # (stateless, identical logic to what BacktestOrchestratorEngine uses)
@@ -1389,8 +1390,8 @@ class BotOrchestrator:
 
         # SMC: sum of all active position sizes (quote currency)
         if self.smc_strategy:
-            for pos in self.smc_strategy.get_active_positions():
-                exposure += pos.size
+            for smc_pos in self.smc_strategy.get_active_positions():
+                exposure += smc_pos.size
 
         return exposure
 
