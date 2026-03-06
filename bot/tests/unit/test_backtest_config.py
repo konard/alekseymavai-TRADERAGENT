@@ -6,6 +6,8 @@ Covers:
 - Only auto_start=true bots are included
 - _m5 variant bots are skipped
 - Adapter constructor defaults match live phase7_demo.yaml values
+- _cfg_from_yaml() helper: success, missing file, bad symbol
+- run_backtest_v2 script: --live-config propagates params to factories
 """
 from decimal import Decimal
 from pathlib import Path
@@ -158,3 +160,102 @@ class TestAdapterDefaults:
         assert a._max_safety_orders == 4
         assert a._price_deviation_pct == Decimal("0.04")
         assert a._take_profit_pct == Decimal("0.08")
+
+
+# ---------------------------------------------------------------------------
+# _cfg_from_yaml helper (from run_backtest_v2 script)
+# ---------------------------------------------------------------------------
+
+class TestCfgFromYaml:
+    """Tests for the _cfg_from_yaml() helper in run_backtest_v2."""
+
+    def _import_helper(self):
+        import importlib.util, sys
+        from pathlib import Path as _P
+        script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
+        spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_returns_config_for_known_symbol(self):
+        mod = self._import_helper()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
+        assert cfg is not None
+        assert cfg.symbol == "BTC/USDT"
+
+    def test_grid_params_populated(self):
+        mod = self._import_helper()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
+        assert cfg.grid_params.get("num_levels") == 6
+
+    def test_dca_params_populated(self):
+        mod = self._import_helper()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
+        assert cfg.dca_params.get("max_safety_orders") == 4
+
+    def test_returns_none_for_missing_file(self):
+        mod = self._import_helper()
+        result = mod._cfg_from_yaml("/nonexistent/path.yaml", "BTC/USDT")
+        assert result is None
+
+    def test_returns_none_for_unknown_symbol(self):
+        mod = self._import_helper()
+        result = mod._cfg_from_yaml(_YAML, "XYZ/USDT")
+        # from_yaml_config returns an instance with empty params, not None;
+        # _cfg_from_yaml passes it through (no error)
+        # So result is a valid config with empty params
+        assert result is not None
+        assert result.grid_params == {}
+        assert result.dca_params == {}
+
+
+# ---------------------------------------------------------------------------
+# Integration: run_backtest_v2 propagates live params to factories
+# ---------------------------------------------------------------------------
+
+class TestScriptFactoryIntegration:
+    """Verify that _make_strategy_factories receives live params from the script."""
+
+    def _load_script(self):
+        import importlib.util
+        from pathlib import Path as _P
+        script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
+        spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_factories_receive_grid_params_from_yaml(self):
+        mod = self._load_script()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
+        assert cfg is not None
+        factories = mod._make_strategy_factories(
+            "BTC/USDT",
+            grid_params=cfg.grid_params,
+            dca_params=cfg.dca_params,
+            tf_params=cfg.tf_params,
+            smc_params=cfg.smc_params,
+        )
+        # Grid factory must be present
+        assert "grid" in factories
+        # Instantiate with empty override params — should use live defaults
+        grid = factories["grid"]({})
+        assert grid._num_levels == 6
+        assert grid._profit_per_grid == Decimal("0.012")
+
+    def test_factories_receive_dca_params_from_yaml(self):
+        mod = self._load_script()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
+        assert cfg is not None
+        factories = mod._make_strategy_factories(
+            "BTC/USDT",
+            grid_params=cfg.grid_params,
+            dca_params=cfg.dca_params,
+            tf_params=cfg.tf_params,
+            smc_params=cfg.smc_params,
+        )
+        assert "dca" in factories
+        dca = factories["dca"]({})
+        assert dca._max_safety_orders == 4
+        assert dca._price_deviation_pct == Decimal("0.04")

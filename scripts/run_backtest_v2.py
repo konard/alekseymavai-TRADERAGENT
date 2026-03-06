@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import concurrent.futures
+import dataclasses
 import json
 import logging
 import os
@@ -461,6 +462,26 @@ def _count_combos(grid: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Live-config loader helper
+# ---------------------------------------------------------------------------
+
+_LIVE_CONFIG_DEFAULT = str(PROJECT_ROOT / "configs" / "phase7_demo.yaml")
+
+
+def _cfg_from_yaml(live_config: str, symbol: str) -> OrchestratorBacktestConfig | None:
+    """Try to load live YAML config for *symbol*. Returns None on any failure."""
+    path = Path(live_config)
+    if not path.exists():
+        logger.debug("Live config not found: %s — using default params", live_config)
+        return None
+    try:
+        return OrchestratorBacktestConfig.from_yaml_config(str(path), symbol)
+    except Exception as exc:
+        logger.warning("from_yaml_config failed for %s/%s: %s", live_config, symbol, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # ProcessPoolExecutor worker for Phase 1 (module-level for pickling)
 # ---------------------------------------------------------------------------
 
@@ -470,7 +491,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     Runs Phase 1 for a single pair in a subprocess worker.
     Returns (symbol, result_dict | None, error_msg | None, elapsed_sec).
     """
-    sym, data_dir_str, max_bars, warmup_bars, initial_balance = args_tuple
+    sym, data_dir_str, max_bars, warmup_bars, initial_balance, live_config_str = args_tuple
     t0 = time.perf_counter()
 
     # Suppress verbose debug/info logging in worker processes
@@ -493,13 +514,20 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     try:
         async def _inner() -> dict:
             data = _load_data(sym, Path(data_dir_str), max_bars)
-            cfg = OrchestratorBacktestConfig(
-                symbol=sym,
+            live_cfg = _cfg_from_yaml(live_config_str, sym)
+            cfg = dataclasses.replace(
+                live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
                 initial_balance=Decimal(str(initial_balance)),
                 warmup_bars=warmup_bars,
                 enable_strategy_router=True,
             )
-            factories = _make_strategy_factories(sym, smc_params={})
+            factories = _make_strategy_factories(
+                sym,
+                grid_params=cfg.grid_params,
+                dca_params=cfg.dca_params,
+                tf_params=cfg.tf_params,
+                smc_params=cfg.smc_params,
+            )
             result = await phase1_baseline(sym, data, cfg, factories)
             return result.to_dict()
 
@@ -525,13 +553,20 @@ async def run_single(args: argparse.Namespace) -> None:
     )
 
     warmup = min(args.warmup_bars, len(data.m5) // 2)
-    config = OrchestratorBacktestConfig(
-        symbol=symbol,
+    live_cfg = _cfg_from_yaml(args.live_config, symbol)
+    config = dataclasses.replace(
+        live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=symbol),
         initial_balance=Decimal(str(args.initial_balance)),
         warmup_bars=warmup,
         enable_strategy_router=True,
     )
-    factories = _make_strategy_factories(symbol, smc_params={})
+    factories = _make_strategy_factories(
+        symbol,
+        grid_params=config.grid_params,
+        dca_params=config.dca_params,
+        tf_params=config.tf_params,
+        smc_params=config.smc_params,
+    )
 
     output_dir = Path(args.output_dir) / f"single_{symbol}_{datetime.now():%Y%m%d_%H%M%S}"
 
@@ -594,7 +629,7 @@ async def run_multi(args: argparse.Namespace) -> None:
 
     # Build args for each worker
     worker_args = [
-        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance)
+        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance, args.live_config)
         for sym in symbols
     ]
 
@@ -684,12 +719,21 @@ async def run_multi(args: argparse.Namespace) -> None:
             logger.warning("Phase 3 data load failed for %s: %s", sym, e)
 
     if data_map:
-        config = OrchestratorBacktestConfig(
+        _p3_sym = list(data_map.keys())[0]
+        live_cfg = _cfg_from_yaml(args.live_config, _p3_sym)
+        config = dataclasses.replace(
+            live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_p3_sym),
             initial_balance=Decimal(str(args.initial_balance)) / max(len(data_map), 1),
             warmup_bars=args.warmup_bars,
             enable_strategy_router=True,
         )
-        factories = _make_strategy_factories(list(data_map.keys())[0], smc_params={})
+        factories = _make_strategy_factories(
+            _p3_sym,
+            grid_params=config.grid_params,
+            dca_params=config.dca_params,
+            tf_params=config.tf_params,
+            smc_params=config.smc_params,
+        )
         p3 = await phase3_portfolio(
             symbols=list(data_map.keys()),
             data_map=data_map,
@@ -740,13 +784,20 @@ async def run_auto(args: argparse.Namespace) -> None:
         try:
             data = _load_data(sym, data_dir, args.max_bars)
             data_map[sym] = data
-            cfg = OrchestratorBacktestConfig(
-                symbol=sym,
+            live_cfg = _cfg_from_yaml(args.live_config, sym)
+            cfg = dataclasses.replace(
+                live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
                 initial_balance=Decimal(str(args.initial_balance)),
                 warmup_bars=args.warmup_bars,
                 enable_strategy_router=True,
             )
-            factories = _make_strategy_factories(sym, smc_params={})
+            factories = _make_strategy_factories(
+                sym,
+                grid_params=cfg.grid_params,
+                dca_params=cfg.dca_params,
+                tf_params=cfg.tf_params,
+                smc_params=cfg.smc_params,
+            )
             result = await phase1_baseline(sym, data, cfg, factories)
             rankings[sym] = float(result.total_return_pct)
         except Exception as e:
@@ -756,12 +807,21 @@ async def run_auto(args: argparse.Namespace) -> None:
     logger.info("Top-%d pairs by return: %s", args.top_n, top_symbols)
 
     top_data_map = {s: data_map[s] for s in top_symbols if s in data_map}
-    config = OrchestratorBacktestConfig(
+    _auto_sym = top_symbols[0] if top_symbols else "BTC"
+    live_cfg = _cfg_from_yaml(args.live_config, _auto_sym)
+    config = dataclasses.replace(
+        live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_auto_sym),
         initial_balance=Decimal(str(args.initial_balance)) / max(len(top_symbols), 1),
         warmup_bars=args.warmup_bars,
         enable_strategy_router=True,
     )
-    factories = _make_strategy_factories(top_symbols[0] if top_symbols else "BTC", smc_params={})
+    factories = _make_strategy_factories(
+        _auto_sym,
+        grid_params=config.grid_params,
+        dca_params=config.dca_params,
+        tf_params=config.tf_params,
+        smc_params=config.smc_params,
+    )
     output_dir = Path(args.output_dir) / f"auto_{datetime.now():%Y%m%d_%H%M%S}"
 
     p3 = await phase3_portfolio(
@@ -832,6 +892,11 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         default="results/backtest_v2",
         help="Output directory for JSON results",
+    )
+    parser.add_argument(
+        "--live-config",
+        default=_LIVE_CONFIG_DEFAULT,
+        help="Path to live YAML config for param sync (default: configs/phase7_demo.yaml)",
     )
     return parser.parse_args()
 
