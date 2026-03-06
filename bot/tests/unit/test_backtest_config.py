@@ -74,6 +74,23 @@ class TestFromYamlConfigBTC:
         # BTC bot: max_daily_loss=$600, initial_balance=$10k → 600/10000=0.06
         assert abs(self.cfg.max_daily_loss_pct - 0.06) < 0.001
 
+    # P0.2 — max_position_pct uses initial_balance, not hardcoded $10k
+    def test_max_position_pct_from_yaml(self):
+        # BTC risk_management.max_position_size=$3000, initial_balance=$10k → 30%
+        assert abs(float(self.cfg.max_position_pct) - 0.30) < 0.01
+
+    def test_max_position_size_pct_synced(self):
+        # max_position_size_pct must equal max_position_pct (P0.2 unification)
+        assert abs(self.cfg.max_position_size_pct - float(self.cfg.max_position_pct)) < 0.001
+
+    def test_max_position_pct_scales_with_initial_balance(self):
+        # With $20k initial balance, $3000 limit = 15% (not 30%)
+        cfg20k = OrchestratorBacktestConfig.from_yaml_config(
+            _YAML, "BTC/USDT", initial_balance=Decimal("20000")
+        )
+        assert abs(float(cfg20k.max_position_pct) - 0.15) < 0.01
+        assert abs(cfg20k.max_daily_loss_pct - 0.03) < 0.001  # $600/$20k = 3%
+
     # m5 variant must be skipped (auto_start=false)
     def test_m5_variant_not_overwriting_smc_params(self):
         # m5 variant has swing_length_h1 / swing_length_m5 but no top-level swing_length

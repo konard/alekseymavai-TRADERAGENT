@@ -479,10 +479,16 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol + "/USDT"
 
 
-def _cfg_from_yaml(live_config: str, symbol: str) -> OrchestratorBacktestConfig | None:
+def _cfg_from_yaml(
+    live_config: str,
+    symbol: str,
+    initial_balance: Decimal = Decimal("10000"),
+) -> OrchestratorBacktestConfig | None:
     """Try to load live YAML config for *symbol*. Returns None on any failure.
 
     Normalizes symbol format: BTCUSDT / BTC → BTC/USDT to match live YAML keys.
+    Passes ``initial_balance`` so USD position limits are converted to the correct
+    percentage (P0.2 — position unit unification).
     """
     path = Path(live_config)
     if not path.exists():
@@ -490,7 +496,9 @@ def _cfg_from_yaml(live_config: str, symbol: str) -> OrchestratorBacktestConfig 
         return None
     try:
         normalized = _normalize_symbol(symbol)
-        cfg = OrchestratorBacktestConfig.from_yaml_config(str(path), normalized)
+        cfg = OrchestratorBacktestConfig.from_yaml_config(
+            str(path), normalized, initial_balance=initial_balance
+        )
         if normalized != symbol:
             logger.debug("Symbol normalized for YAML lookup: %s → %s", symbol, normalized)
         return cfg
@@ -532,10 +540,11 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     try:
         async def _inner() -> dict:
             data = _load_data(sym, Path(data_dir_str), max_bars)
-            live_cfg = _cfg_from_yaml(live_config_str, sym)
+            _ib = Decimal(str(initial_balance))
+            live_cfg = _cfg_from_yaml(live_config_str, sym, initial_balance=_ib)
             cfg = dataclasses.replace(
                 live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
-                initial_balance=Decimal(str(initial_balance)),
+                initial_balance=_ib,
                 warmup_bars=warmup_bars,
                 enable_strategy_router=True,
             )
@@ -571,10 +580,11 @@ async def run_single(args: argparse.Namespace) -> None:
     )
 
     warmup = min(args.warmup_bars, len(data.m5) // 2)
-    live_cfg = _cfg_from_yaml(args.live_config, symbol)
+    _ib = Decimal(str(args.initial_balance))
+    live_cfg = _cfg_from_yaml(args.live_config, symbol, initial_balance=_ib)
     config = dataclasses.replace(
         live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=symbol),
-        initial_balance=Decimal(str(args.initial_balance)),
+        initial_balance=_ib,
         warmup_bars=warmup,
         enable_strategy_router=True,
     )
@@ -738,10 +748,11 @@ async def run_multi(args: argparse.Namespace) -> None:
 
     if data_map:
         _p3_sym = list(data_map.keys())[0]
-        live_cfg = _cfg_from_yaml(args.live_config, _p3_sym)
+        _p3_ib = Decimal(str(args.initial_balance)) / max(len(data_map), 1)
+        live_cfg = _cfg_from_yaml(args.live_config, _p3_sym, initial_balance=_p3_ib)
         config = dataclasses.replace(
             live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_p3_sym),
-            initial_balance=Decimal(str(args.initial_balance)) / max(len(data_map), 1),
+            initial_balance=_p3_ib,
             warmup_bars=args.warmup_bars,
             enable_strategy_router=True,
         )
@@ -802,10 +813,11 @@ async def run_auto(args: argparse.Namespace) -> None:
         try:
             data = _load_data(sym, data_dir, args.max_bars)
             data_map[sym] = data
-            live_cfg = _cfg_from_yaml(args.live_config, sym)
+            _sym_ib = Decimal(str(args.initial_balance))
+            live_cfg = _cfg_from_yaml(args.live_config, sym, initial_balance=_sym_ib)
             cfg = dataclasses.replace(
                 live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=sym),
-                initial_balance=Decimal(str(args.initial_balance)),
+                initial_balance=_sym_ib,
                 warmup_bars=args.warmup_bars,
                 enable_strategy_router=True,
             )
@@ -826,10 +838,11 @@ async def run_auto(args: argparse.Namespace) -> None:
 
     top_data_map = {s: data_map[s] for s in top_symbols if s in data_map}
     _auto_sym = top_symbols[0] if top_symbols else "BTC"
-    live_cfg = _cfg_from_yaml(args.live_config, _auto_sym)
+    _auto_ib = Decimal(str(args.initial_balance)) / max(len(top_symbols), 1)
+    live_cfg = _cfg_from_yaml(args.live_config, _auto_sym, initial_balance=_auto_ib)
     config = dataclasses.replace(
         live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_auto_sym),
-        initial_balance=Decimal(str(args.initial_balance)) / max(len(top_symbols), 1),
+        initial_balance=_auto_ib,
         warmup_bars=args.warmup_bars,
         enable_strategy_router=True,
     )

@@ -96,9 +96,9 @@ class TestOrchestratorBacktestConfig:
         assert cfg.enable_grid is True
         assert cfg.enable_dca is True
         assert cfg.enable_trend_follower is True
-        assert cfg.enable_smc is False
+        assert cfg.enable_smc is True   # P0.4: SMC enabled by default (mirrors live bot)
         assert cfg.enable_strategy_router is True
-        assert cfg.router_cooldown_bars == 60
+        assert cfg.router_cooldown_bars == 120  # P0.1: 600s / 5min bars = 120 (live parity)
 
     def test_custom_params(self) -> None:
         cfg = OrchestratorBacktestConfig(

@@ -102,13 +102,24 @@ class OrchestratorBacktestConfig:
     slippage: Decimal = Decimal("0.0003")     # 0.03 % average slippage
 
     @classmethod
-    def from_yaml_config(cls, path: str, symbol: str) -> "OrchestratorBacktestConfig":
+    def from_yaml_config(
+        cls,
+        path: str,
+        symbol: str,
+        initial_balance: Decimal = Decimal("10000"),
+    ) -> "OrchestratorBacktestConfig":
         """Load backtest config from a live YAML config file.
 
         Finds all bots for *symbol* and maps ``grid`` / ``dca`` /
         ``trend_follower`` / ``smc`` YAML sections to the corresponding
         ``*_params`` dicts so the backtest engine mirrors the live bot's
         exact settings.
+
+        Args:
+            path: Path to the live YAML config file.
+            symbol: Trading pair in ``BASE/QUOTE`` format (e.g. ``"BTC/USDT"``).
+            initial_balance: Starting portfolio value used to convert absolute
+                USD position/loss limits to percentages. Defaults to $10,000.
 
         Example::
 
@@ -138,6 +149,7 @@ class OrchestratorBacktestConfig:
         risk_per_trade = Decimal("0.02")
         max_position_pct = Decimal("0.25")
         max_daily_loss_pct: float = 0.25  # fallback default
+        _ib = initial_balance  # alias for brevity in calculations
 
         for bot in matching:
             rm = bot.get("risk_management") or {}
@@ -196,30 +208,34 @@ class OrchestratorBacktestConfig:
                     risk_per_trade = Decimal(str(s["risk_per_trade"]))
 
             # --- risk_management: derive max_position_pct and max_daily_loss_pct ---
-            if "max_position_size" in rm:
+            # P0.2: convert absolute USD limits → % of initial_balance (not hardcoded $10k).
+            # Take the FIRST (primary) bot's value — same convention as max_daily_loss_pct.
+            if max_position_pct == Decimal("0.25") and "max_position_size" in rm:
                 max_pos_usd = Decimal(str(rm["max_position_size"]))
-                # Fraction of the default $10,000 initial balance
-                candidate = min(max_pos_usd / Decimal("10000"), Decimal("1.0"))
-                if candidate > max_position_pct:
-                    max_position_pct = candidate
+                max_position_pct = min(max_pos_usd / _ib, Decimal("1.0"))
 
-            # Sync max_daily_loss from live YAML: convert absolute USD → % of $10k
-            # Take the FIRST (primary) bot's value; e.g. BTC hybrid $600 → 6%
+            # Sync max_daily_loss from live YAML (P0.3): take the FIRST bot's value.
+            # e.g. BTC hybrid: max_daily_loss=$600, initial_balance=$10k → 6%
             if max_daily_loss_pct == 0.25:  # still at fallback default
                 for key in ("max_daily_loss", "max_daily_loss_usd"):
                     if key in rm:
                         live_daily_loss_usd = float(str(rm[key]))
-                        max_daily_loss_pct = min(live_daily_loss_usd / 10_000.0, 0.25)
+                        max_daily_loss_pct = min(
+                            live_daily_loss_usd / float(_ib), 0.25
+                        )
                         break
 
         return cls(
             symbol=symbol,
+            initial_balance=initial_balance,
             grid_params=grid_params,
             dca_params=dca_params,
             tf_params=tf_params,
             smc_params=smc_params,
             risk_per_trade=risk_per_trade,
             max_position_pct=max_position_pct,
+            # P0.2: sync RiskManager limit to match actual position sizing fraction
+            max_position_size_pct=float(max_position_pct),
             max_daily_loss_pct=max_daily_loss_pct,
         )
 
@@ -346,6 +362,24 @@ class BacktestOrchestratorEngine:
         max_drawdown = Decimal("0")
         base_df = data.m5
         total_bars = len(base_df)
+
+        # P0.5 — DCA warmup catch-up: mirror live DCAStartupAnalyzer._run_dca_catchup()
+        # The live bot tracks price from day 1; the backtest starts fresh after warmup_bars.
+        # Without catch-up, DCA._recent_high = 0 and can never trigger until a new high
+        # is observed, causing the first ~50 bars to be DCA-silent even if price already
+        # dropped far enough. Fix: set _recent_high from warmup data and, if price has
+        # fallen enough, pre-open catch-up orders as if they had been placed during warmup.
+        if "dca" in strategies and config.enable_dca and config.warmup_bars > 0:
+            await self._run_dca_warmup_catchup(
+                dca_strategy=strategies["dca"],
+                base_df=base_df,
+                warmup_bars=config.warmup_bars,
+                config=config,
+                simulator=simulator,
+                position_amounts=position_amounts["dca"],
+                position_directions=position_directions["dca"],
+                position_entry_prices=position_entry_prices["dca"],
+            )
 
         for i in range(config.warmup_bars, total_bars):
             df_d1, df_h4, df_h1, df_m15, df_m5 = self.data_loader.get_context_at(
@@ -608,6 +642,131 @@ class BacktestOrchestratorEngine:
             except Exception as e:
                 logger.debug("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
         return pnl_delta
+
+    # ------------------------------------------------------------------
+    # DCA warmup catch-up (P0.5)
+    # ------------------------------------------------------------------
+
+    async def _run_dca_warmup_catchup(
+        self,
+        dca_strategy: Any,
+        base_df: Any,
+        warmup_bars: int,
+        config: "OrchestratorBacktestConfig",
+        simulator: MarketSimulator,
+        position_amounts: dict[str, Decimal],
+        position_directions: dict[str, SignalDirection],
+        position_entry_prices: dict[str, Decimal],
+    ) -> None:
+        """Initialize DCA strategy state from warmup data (mirrors live DCAStartupAnalyzer).
+
+        Step 1 — always: set ``_recent_high`` from the last 500 warmup bars so the
+        DCA adapter can trigger on bar 0 if price has already dropped enough.
+
+        Step 2 — catch-up orders: if price at warmup end is below the trigger
+        threshold from the recent high, pre-open DCA positions that would have
+        been placed during the warmup period.
+        """
+        import pandas as pd
+
+        warmup_df = base_df.iloc[:warmup_bars]
+        if warmup_df.empty:
+            return
+
+        # Reference window — last 500 M5 bars (~41 hours) of warmup, same as live
+        lookback = min(500, len(warmup_df))
+        window = warmup_df.iloc[-lookback:]
+        recent_high = Decimal(str(window["high"].max()))
+        warmup_end_price = Decimal(str(base_df.iloc[warmup_bars - 1]["close"]))
+
+        # Step 1: set _recent_high so DCA can trigger naturally from bar 0
+        if hasattr(dca_strategy, "_recent_high"):
+            dca_strategy._recent_high = recent_high
+
+        # Step 2: simulate catch-up orders using DCAStartupAnalyzer
+        try:
+            from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
+            from bot.strategies.base import BaseSignal, SignalDirection as _SD
+            from datetime import timezone
+
+            if not (
+                hasattr(dca_strategy, "_price_deviation_pct")
+                and hasattr(dca_strategy, "_safety_order_size")
+                and hasattr(dca_strategy, "_max_safety_orders")
+            ):
+                return
+
+            # Build OHLCV list expected by DCAStartupAnalyzer [[ts, o, h, l, c, v], ...]
+            ohlcv_rows = [
+                [
+                    int(ts.timestamp() * 1000),
+                    float(row["open"]),
+                    float(row["high"]),
+                    float(row["low"]),
+                    float(row["close"]),
+                    float(row.get("volume", 0)),
+                ]
+                for ts, row in window.iterrows()
+            ]
+
+            analyzer = DCAStartupAnalyzer(
+                trigger_pct=dca_strategy._price_deviation_pct,
+                amount_per_step=dca_strategy._safety_order_size,
+                max_steps=dca_strategy._max_safety_orders,
+                catch_up_max_orders=dca_strategy._max_safety_orders,
+                catch_up_reference="last_high",
+                catch_up_lookback_bars=lookback,
+            )
+            plan = analyzer.analyze(
+                ohlcv=ohlcv_rows,
+                current_price=warmup_end_price,
+                open_orders=[],
+            )
+
+            if not plan.orders_to_place:
+                return
+
+            await simulator.set_price(warmup_end_price)
+            for level in plan.orders_to_place:
+                cost = level.amount_usd
+                if cost > simulator.balance.quote or cost <= Decimal("0"):
+                    continue
+                amount = cost / level.price
+                take_profit = level.price * (
+                    Decimal("1") + getattr(dca_strategy, "_take_profit_pct", Decimal("0.08"))
+                )
+                catchup_signal = BaseSignal(
+                    direction=_SD.LONG,
+                    entry_price=level.price,
+                    stop_loss=level.price * Decimal("0.88"),
+                    take_profit=take_profit,
+                    confidence=0.7,
+                    timestamp=datetime.now(timezone.utc),
+                    strategy_type="dca",
+                    signal_reason="dca_warmup_catchup",
+                )
+                try:
+                    pos_id = dca_strategy.open_position(catchup_signal, cost)
+                    await simulator.create_order(
+                        symbol=config.symbol,
+                        order_type="market",
+                        side="buy",
+                        amount=amount,
+                    )
+                    position_amounts[pos_id] = amount
+                    position_directions[pos_id] = _SD.LONG
+                    position_entry_prices[pos_id] = level.price
+                    logger.debug(
+                        "DCA warmup catchup: level %d @ %.4f, cost=%.2f",
+                        level.level_num, float(level.price), float(cost),
+                    )
+                except Exception as e:
+                    logger.debug("DCA warmup catchup order failed: %s", e)
+
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug("DCA warmup catch-up failed: %s", e)
 
     # ------------------------------------------------------------------
     # Strategy construction
