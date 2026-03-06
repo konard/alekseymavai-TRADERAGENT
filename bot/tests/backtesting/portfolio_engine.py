@@ -314,7 +314,7 @@ class PortfolioBacktestEngine:
             return_series[sym] = rets
 
         matrix: dict[str, dict[str, float]] = {s: {} for s in symbols}
-        for _i, sym_a in enumerate(symbols):
+        for sym_a in symbols:
             for sym_b in symbols:
                 if sym_a == sym_b:
                     matrix[sym_a][sym_b] = 1.0
@@ -345,7 +345,7 @@ class PortfolioBacktestEngine:
         """Average off-diagonal correlation."""
         values = []
         symbols = list(matrix.keys())
-        for _i, sym_a in enumerate(symbols):
+        for sym_a in symbols:
             for sym_b in symbols:
                 if sym_a != sym_b:
                     values.append(matrix[sym_a][sym_b])

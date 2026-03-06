@@ -135,8 +135,8 @@ def patch_time(clock: SimulatedClock):
     for modname in _DATETIME_MODULES:
         mod = sys.modules.get(modname)
         if mod is not None and hasattr(mod, "datetime"):
-            _saved[modname] = mod.datetime
-            mod.datetime = FakeDatetime
+            _saved[modname] = mod.datetime  # type: ignore[attr-defined]
+            mod.datetime = FakeDatetime  # type: ignore[attr-defined]
 
     try:
         yield clock
@@ -149,4 +149,4 @@ def patch_time(clock: SimulatedClock):
         for modname, original in _saved.items():
             mod = sys.modules.get(modname)
             if mod is not None:
-                mod.datetime = original
+                mod.datetime = original  # type: ignore[attr-defined]

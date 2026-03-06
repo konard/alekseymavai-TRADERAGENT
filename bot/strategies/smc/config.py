@@ -48,7 +48,7 @@ class SMCConfig:
     risk_per_trade_pct: Decimal = Decimal(
         "0.02"
     )  # 2% risk per trade (fraction of balance, e.g. 0.02 = 2%)
-    min_risk_reward: Decimal = Decimal("2.5")  # Minimum R:R ratio
+    min_risk_reward: Decimal = Decimal("2.0")  # Minimum R:R ratio
     max_position_size: Decimal = Decimal("10000")  # Max position in USD
 
     # Entry Signal parameters
