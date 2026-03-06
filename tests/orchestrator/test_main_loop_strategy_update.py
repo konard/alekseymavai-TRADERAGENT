@@ -99,10 +99,12 @@ class TestMainLoopThrottle:
 
     @pytest.mark.asyncio
     async def test_update_called_on_first_tick(self):
-        """_last_active_strategies_update_at == 0 → immediate call on first tick."""
+        """Immediate call on first tick when the interval has already elapsed."""
         orch = _make_stub(regime_check_interval=3600.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_active_strategies_update_at = 0.0  # never updated
+        # Simulate "never updated" by setting timestamp far enough in the past
+        # to guarantee the interval has elapsed regardless of system uptime.
+        orch._last_active_strategies_update_at = time.monotonic() - 3601.0
 
         await _run_main_loop_throttle(orch)
 
