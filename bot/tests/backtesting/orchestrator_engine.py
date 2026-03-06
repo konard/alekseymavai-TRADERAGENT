@@ -48,6 +48,28 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class StrategyPeriodMetrics:
+    """Per-strategy metrics collected only during bars where the strategy was active (routed)."""
+
+    bars_active: int = 0
+    trades: int = 0
+    realized_pnl: float = 0.0
+    sharpe: float | None = None
+    max_drawdown_pct: float = 0.0
+    win_rate: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bars_active": self.bars_active,
+            "trades": self.trades,
+            "realized_pnl": self.realized_pnl,
+            "sharpe": self.sharpe,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "win_rate": self.win_rate,
+        }
+
+
+@dataclass
 class OrchestratorBacktestConfig:
     """Configuration for the V2.0 orchestrator backtest engine."""
 
@@ -370,6 +392,9 @@ class OrchestratorBacktestResult(BacktestResult):
     # How many times cooldown blocked a switch
     cooldown_events: int = 0
 
+    # Per-strategy detailed metrics (only during active/routed bars)
+    per_strategy_metrics: dict[str, StrategyPeriodMetrics] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         base = super().to_dict()
         base["orchestrator"] = {
@@ -377,6 +402,9 @@ class OrchestratorBacktestResult(BacktestResult):
             "per_strategy_pnl": self.per_strategy_pnl,
             "regime_routing_stats": self.regime_routing_stats,
             "cooldown_events": self.cooldown_events,
+            "per_strategy_metrics": {
+                k: v.to_dict() for k, v in self.per_strategy_metrics.items()
+            },
         }
         return base
 
@@ -472,6 +500,12 @@ class BacktestOrchestratorEngine:
         cooldown_events = 0
         current_regime: RegimeAnalysis | None = None
 
+        # Per-strategy period metrics accumulators
+        strat_bars_active: dict[str, int] = dict.fromkeys(strategies, 0)
+        strat_trades: dict[str, int] = dict.fromkeys(strategies, 0)
+        # Per-strategy equity snapshots (only when active) for Sharpe + drawdown
+        strat_equity: dict[str, list[float]] = {name: [] for name in strategies}
+
         # Execution loop
         equity_curve: list[dict[str, Any]] = []
         peak_value = config.initial_balance
@@ -534,6 +568,12 @@ class BacktestOrchestratorEngine:
             for strat_name, strategy in strategies.items():
                 weight = regime_weights.get(strat_name, 1.0)
 
+                # Count this bar as "active" when router allows this strategy
+                is_active = weight > 0.0
+                if is_active:
+                    strat_bars_active[strat_name] += 1
+                    strat_equity[strat_name].append(float(balance))
+
                 # analyze_market — always, at per-strategy intervals:
                 # SMC: every 60 bars (300 sec, mirrors live 5-min throttle)
                 # Grid/DCA/TF: every bar (price-reactive, lightweight)
@@ -577,6 +617,8 @@ class BacktestOrchestratorEngine:
                         config=config,
                         position_weight=weight,
                     )
+                    if is_active:
+                        strat_trades[strat_name] += 1
 
                 # 4. update_positions — always (each strategy manages its own positions)
                 try:
@@ -651,6 +693,9 @@ class BacktestOrchestratorEngine:
             strategy_switches=router.switch_history,
             cooldown_events=cooldown_events,
             risk_manager=risk_manager,
+            strat_bars_active=strat_bars_active,
+            strat_trades=strat_trades,
+            strat_equity=strat_equity,
         )
         return result
 
@@ -931,6 +976,9 @@ class BacktestOrchestratorEngine:
         strategy_switches: list[dict[str, Any]],
         cooldown_events: int,
         risk_manager: RiskManager | None,
+        strat_bars_active: dict[str, int] | None = None,
+        strat_trades: dict[str, int] | None = None,
+        strat_equity: dict[str, list[float]] | None = None,
     ) -> OrchestratorBacktestResult:
         """Assemble OrchestratorBacktestResult from simulation state."""
         from datetime import timedelta
@@ -977,6 +1025,25 @@ class BacktestOrchestratorEngine:
 
         duration = end_time - start_time if end_time > start_time else timedelta(0)
 
+        # Build per-strategy detailed metrics
+        per_strategy_metrics: dict[str, StrategyPeriodMetrics] = {}
+        for name in strategies:
+            bars = (strat_bars_active or {}).get(name, 0)
+            trades = (strat_trades or {}).get(name, 0)
+            pnl = float(per_strategy_pnl.get(name, Decimal("0")))
+            eq_series = (strat_equity or {}).get(name, [])
+            strat_sharpe = self._calculate_sharpe_from_values(eq_series)
+            strat_dd_pct = self._calculate_max_drawdown_pct(eq_series)
+            strat_win_rate = self._calculate_win_rate_from_pnl(pnl, trades)
+            per_strategy_metrics[name] = StrategyPeriodMetrics(
+                bars_active=bars,
+                trades=trades,
+                realized_pnl=pnl,
+                sharpe=strat_sharpe,
+                max_drawdown_pct=strat_dd_pct,
+                win_rate=strat_win_rate,
+            )
+
         result = OrchestratorBacktestResult(
             strategy_name="orchestrator_v2",
             symbol=config.symbol,
@@ -1005,6 +1072,7 @@ class BacktestOrchestratorEngine:
             per_strategy_pnl={k: float(v) for k, v in per_strategy_pnl.items()},
             regime_routing_stats=regime_routing_stats,
             cooldown_events=cooldown_events,
+            per_strategy_metrics=per_strategy_metrics,
         )
 
         if risk_manager:
@@ -1032,3 +1100,51 @@ class BacktestOrchestratorEngine:
         if std_r > 0:
             return (mean_r / std_r) * Decimal(str((365 * 24 * 12) ** 0.5))
         return None
+
+    @staticmethod
+    def _calculate_sharpe_from_values(values: list[float]) -> float | None:
+        """Annualised Sharpe ratio from a list of equity values (M5 frequency)."""
+        if len(values) < 2:
+            return None
+        returns = []
+        for i in range(1, len(values)):
+            prev = values[i - 1]
+            curr = values[i]
+            if prev > 0:
+                returns.append((curr - prev) / prev)
+        if not returns:
+            return None
+        n = len(returns)
+        mean_r = sum(returns) / n
+        variance = sum((r - mean_r) ** 2 for r in returns) / n
+        std_r = variance ** 0.5
+        if std_r > 0:
+            return (mean_r / std_r) * ((365 * 24 * 12) ** 0.5)
+        return None
+
+    @staticmethod
+    def _calculate_max_drawdown_pct(values: list[float]) -> float:
+        """Maximum drawdown percentage from a list of equity values."""
+        if len(values) < 2:
+            return 0.0
+        peak = values[0]
+        max_dd = 0.0
+        for v in values[1:]:
+            if v > peak:
+                peak = v
+            elif peak > 0:
+                dd = (peak - v) / peak * 100.0
+                if dd > max_dd:
+                    max_dd = dd
+        return max_dd
+
+    @staticmethod
+    def _calculate_win_rate_from_pnl(realized_pnl: float, trades: int) -> float:
+        """Approximate win rate: 100% if profitable, 0% if not, 0% if no trades.
+
+        A more accurate per-trade win rate requires individual trade records attributed
+        per strategy. This simple heuristic gives a meaningful top-level signal.
+        """
+        if trades == 0:
+            return 0.0
+        return 100.0 if realized_pnl > 0 else 0.0

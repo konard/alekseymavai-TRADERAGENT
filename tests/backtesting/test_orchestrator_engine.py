@@ -22,6 +22,7 @@ from bot.tests.backtesting.orchestrator_engine import (
     BacktestOrchestratorEngine,
     OrchestratorBacktestConfig,
     OrchestratorBacktestResult,
+    StrategyPeriodMetrics,
 )
 from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 
@@ -240,3 +241,87 @@ class TestBacktestOrchestratorEngine:
 
         result = await engine.run(data, cfg)
         assert "grid" in result.per_strategy_pnl
+
+    @pytest.mark.asyncio
+    async def test_per_strategy_metrics_populated(self) -> None:
+        """per_strategy_metrics should contain a StrategyPeriodMetrics for each enabled strategy."""
+        engine = BacktestOrchestratorEngine()
+        engine.register_strategy_factory("grid", lambda p: _make_noop_strategy())
+
+        data = _tiny_data(60)
+        cfg = OrchestratorBacktestConfig(
+            warmup_bars=10,
+            enable_dca=False,
+            enable_trend_follower=False,
+            enable_smc=False,
+            enable_strategy_router=False,
+            enable_risk_manager=False,
+        )
+
+        result = await engine.run(data, cfg)
+        assert hasattr(result, "per_strategy_metrics")
+        assert isinstance(result.per_strategy_metrics, dict)
+        assert "grid" in result.per_strategy_metrics
+        m = result.per_strategy_metrics["grid"]
+        assert isinstance(m, StrategyPeriodMetrics)
+        # No signals → no trades, but bars_active should be > 0 when router is off (all bars active)
+        assert m.bars_active == 60 - 10
+        assert m.trades == 0
+        assert m.realized_pnl == 0.0
+
+    @pytest.mark.asyncio
+    async def test_per_strategy_metrics_in_to_dict(self) -> None:
+        """to_dict() should serialize per_strategy_metrics under orchestrator section."""
+        engine = BacktestOrchestratorEngine()
+        engine.register_strategy_factory("grid", lambda p: _make_noop_strategy())
+
+        data = _tiny_data(50)
+        cfg = OrchestratorBacktestConfig(
+            warmup_bars=5,
+            enable_dca=False,
+            enable_trend_follower=False,
+            enable_smc=False,
+            enable_strategy_router=False,
+            enable_risk_manager=False,
+        )
+
+        result = await engine.run(data, cfg)
+        d = result.to_dict()
+        assert "per_strategy_metrics" in d["orchestrator"]
+        psm = d["orchestrator"]["per_strategy_metrics"]
+        assert "grid" in psm
+        m = psm["grid"]
+        assert "bars_active" in m
+        assert "trades" in m
+        assert "realized_pnl" in m
+        assert "sharpe" in m
+        assert "max_drawdown_pct" in m
+        assert "win_rate" in m
+
+    def test_strategy_period_metrics_defaults(self) -> None:
+        """StrategyPeriodMetrics should have sensible zero defaults."""
+        m = StrategyPeriodMetrics()
+        assert m.bars_active == 0
+        assert m.trades == 0
+        assert m.realized_pnl == 0.0
+        assert m.sharpe is None
+        assert m.max_drawdown_pct == 0.0
+        assert m.win_rate == 0.0
+
+    def test_strategy_period_metrics_to_dict(self) -> None:
+        """StrategyPeriodMetrics.to_dict() should include all required fields."""
+        m = StrategyPeriodMetrics(
+            bars_active=100,
+            trades=5,
+            realized_pnl=42.5,
+            sharpe=1.23,
+            max_drawdown_pct=3.5,
+            win_rate=60.0,
+        )
+        d = m.to_dict()
+        assert d["bars_active"] == 100
+        assert d["trades"] == 5
+        assert d["realized_pnl"] == 42.5
+        assert d["sharpe"] == 1.23
+        assert d["max_drawdown_pct"] == 3.5
+        assert d["win_rate"] == 60.0
