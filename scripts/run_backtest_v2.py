@@ -631,6 +631,21 @@ def _cfg_from_backtest_yaml(
     )
 
 
+def _load_exclude_symbols(config_path: str) -> set[str]:
+    """Return set of excluded symbols (uppercase, no slash) from backtest YAML."""
+    path = Path(config_path)
+    if not path.exists():
+        return set()
+    try:
+        import yaml
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        raw = data.get("backtest", {}).get("exclude_symbols", [])
+        return {s.upper().replace("/", "") for s in raw}
+    except Exception:
+        return set()
+
+
 def _normalize_symbol(symbol: str) -> str:
     """Convert bare symbol to YAML format: BTCUSDT → BTC/USDT, BTC → BTC/USDT."""
     if "/" in symbol:
@@ -820,7 +835,13 @@ async def run_single(args: argparse.Namespace) -> None:
 async def run_multi(args: argparse.Namespace) -> None:
     """Multi-pair mode: Phase 1 in parallel via ProcessPoolExecutor."""
     raw_symbols = (args.symbols or "BTC,ETH,SOL").split(",")
-    symbols = [s.strip() for s in raw_symbols if s.strip()]
+    exclude = _load_exclude_symbols(args.config)
+    symbols = [
+        s.strip() for s in raw_symbols
+        if s.strip() and s.strip().upper().replace("/", "") not in exclude
+    ]
+    if exclude:
+        logger.info("Excluded symbols: %s", sorted(exclude))
 
     max_workers = max(1, min(args.workers, len(symbols)))
     data_dir = str(Path(args.data_dir) if args.data_dir else Path("data/historical"))
@@ -978,17 +999,21 @@ async def run_auto(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     csv_files = list(data_dir.glob("*5m*.csv")) + list(data_dir.glob("*_5m.csv"))
+    exclude = _load_exclude_symbols(args.config)
     symbols_found = []
     for f in csv_files:
         name = f.stem.upper()
         for suffix in ["_5M", "_5MIN", "_5m", "_5min"]:
             name = name.replace(suffix.upper(), "")
-        symbols_found.append(name)
+        if name not in exclude:
+            symbols_found.append(name)
 
     if not symbols_found:
         logger.error("No 5m CSV files found in %s", data_dir)
         sys.exit(1)
 
+    if exclude:
+        logger.info("Excluded symbols: %s", sorted(exclude))
     symbols_found = symbols_found[: args.top_n]
     logger.info("Auto mode: found %d symbols: %s", len(symbols_found), symbols_found)
 
