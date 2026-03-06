@@ -9,9 +9,10 @@ simulated timestamps while wall-clock time advances near-instantly.
 import asyncio
 import sys
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Generator
+from typing import Any
 
 
 class SimulatedClock:
