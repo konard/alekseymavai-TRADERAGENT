@@ -398,6 +398,7 @@ class SMCStrategy:
             "position_summary": self.position_manager.get_position_summary(),
             # Configuration
             "config": {
+                "risk_per_trade": self.config.risk_per_trade,
                 "risk_per_trade_pct": self.config.risk_per_trade_pct,
                 "min_risk_reward": self.config.min_risk_reward,
                 "max_position_size": float(self.config.max_position_size),

@@ -424,10 +424,12 @@ class ByBitDirectClient:
 
         markets = {}
         for instrument in data.get("list", []):
-            # Only include perpetual contracts; dated futures (LinearFutures) share
-            # the same base/quote pair but have different lot sizes and would
-            # overwrite the perpetual's precision in the markets dict.
-            if instrument.get("contractType") != "LinearPerpetual":
+            # For linear/inverse categories: only include perpetual contracts;
+            # dated futures (LinearFutures) share the same base/quote pair but
+            # have different lot sizes and would overwrite the perpetual's
+            # precision in the markets dict.
+            # For spot category: there is no contractType field — include all.
+            if self.category != "spot" and instrument.get("contractType") != "LinearPerpetual":
                 continue
             base = instrument.get("baseCoin", "")
             quote = instrument.get("quoteCoin", "")

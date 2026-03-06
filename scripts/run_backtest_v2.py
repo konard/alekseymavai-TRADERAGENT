@@ -454,6 +454,75 @@ def _save_results(output_dir: Path, name: str, data: Any) -> None:
     logger.info("Saved %s", path)
 
 
+def _save_score_matrix(
+    output_dir: Path,
+    phase1_results: dict[str, dict],
+) -> dict[str, dict[str, Any]]:
+    """Build and save strategy_score_matrix.json and .csv from Phase 1 per_strategy_metrics.
+
+    Returns the score matrix dict (symbol → strategy → metrics).
+    """
+    import csv
+
+    score_matrix: dict[str, dict[str, Any]] = {}
+    for sym, result_dict in phase1_results.items():
+        orch = result_dict.get("orchestrator", {})
+        psm = orch.get("per_strategy_metrics", {})
+        if psm:
+            score_matrix[sym] = psm
+
+    if not score_matrix:
+        return score_matrix
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # JSON
+    json_path = output_dir / "strategy_score_matrix.json"
+    with open(json_path, "w") as f:
+        json.dump(score_matrix, f, indent=2, default=str)
+    logger.info("Saved %s", json_path)
+
+    # CSV: one row per (symbol, strategy)
+    csv_path = output_dir / "strategy_score_matrix.csv"
+    metric_keys = ["bars_active", "trades", "realized_pnl", "sharpe", "max_drawdown_pct", "win_rate"]
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["symbol", "strategy"] + metric_keys)
+        for sym, strategies in score_matrix.items():
+            for strat_name, metrics in strategies.items():
+                row = [sym, strat_name] + [metrics.get(k, "") for k in metric_keys]
+                writer.writerow(row)
+    logger.info("Saved %s", csv_path)
+
+    return score_matrix
+
+
+def _top3_strategies_per_pair(
+    score_matrix: dict[str, dict[str, Any]],
+) -> str:
+    """Format top-3 strategies per pair by realized_pnl for Telegram notification."""
+    lines = []
+    for sym, strategies in score_matrix.items():
+        ranked = sorted(
+            strategies.items(),
+            key=lambda x: float(x[1].get("realized_pnl", 0) or 0),
+            reverse=True,
+        )
+        top3 = ranked[:3]
+        strat_lines = []
+        for strat_name, m in top3:
+            pnl = float(m.get("realized_pnl", 0) or 0)
+            sharpe = m.get("sharpe")
+            sharpe_str = f"{float(sharpe):.2f}" if sharpe is not None else "N/A"
+            bars = int(m.get("bars_active", 0) or 0)
+            sign = "+" if pnl >= 0 else ""
+            strat_lines.append(
+                f"  {strat_name}: PnL={sign}{pnl:.2f} Sharpe={sharpe_str} bars={bars}"
+            )
+        lines.append(f"<b>{sym}</b>:\n" + "\n".join(strat_lines))
+    return "\n\n".join(lines)
+
+
 def _count_combos(grid: dict) -> int:
     result = 1
     for v in grid.values():
@@ -600,7 +669,14 @@ async def run_single(args: argparse.Namespace) -> None:
 
     phases_set = set(args.phases.split(",")) if args.phases else set()
     p1_result = await phase1_baseline(symbol, data, config, factories)
-    _save_results(output_dir, "phase1_baseline", p1_result.to_dict())
+    p1_dict = p1_result.to_dict()
+    _save_results(output_dir, "phase1_baseline", p1_dict)
+
+    # Save strategy score matrix for single-pair run
+    score_matrix = _save_score_matrix(output_dir, {symbol: p1_dict})
+    if score_matrix:
+        top3_text = _top3_strategies_per_pair(score_matrix)
+        tg_send(f"🏆 <b>Топ-3 стратегии — {symbol} (Phase 1):</b>\n\n{top3_text}")
 
     if phases_set and "2" not in phases_set:
         return
@@ -730,6 +806,14 @@ async def run_multi(args: argparse.Namespace) -> None:
             f"⏱ Общее время: {total_elapsed/60:.1f} мин\n\n"
             f"<b>Топ-5 по return:</b>\n" + "\n".join(top5_lines)
         )
+
+        # Save strategy score matrix and notify with top-3 strategies per pair
+        score_matrix = _save_score_matrix(output_dir, phase1_results)
+        if score_matrix:
+            top3_text = _top3_strategies_per_pair(score_matrix)
+            tg_send(
+                f"🏆 <b>Топ-3 стратегии по паре (Phase 1):</b>\n\n{top3_text}"
+            )
 
     # Phase 3 only if requested
     phases_set = set(args.phases.split(",")) if args.phases else set()
