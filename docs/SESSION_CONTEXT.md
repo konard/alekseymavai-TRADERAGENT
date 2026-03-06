@@ -3800,19 +3800,24 @@ docker compose up webui-backend webui-frontend
 
 ## Last Updated
 
-- **Date:** February 28, 2026
-- **Session:** 38 (SMC Parameter Fix + HybridStrategy Integration)
-- **Status:** 1537 tests passing (100%), 25 skipped
-- **Last commit:** `a533d8f` (fix: align SMC swing_length default with intraday trading + integrate HybridStrategy)
-- **Bot Status:** RUNNING — 4 bota na `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_smc. Balans: 100,022.73 USDT
-- **Session 38 Fixes:** SMC swing_length 50→10, HybridStrategy integrated into orchestrator, 14 new tests
-- **Code Quality:** ruff PASS + black PASS + mypy PASS (0 errors)
-- **Pipeline Status:** Phase 1 DONE (135/135, 85 min), Phase 2 ostanovlena — SMC defaults teper' ispravleny
-- **Multi-TF Backtester:** PRODUCTION-READY — SHORT, M5, CSV, CLI runner, 163 tests, PR #273 merged
-- **v2.0 Algorithm:** COMPLETE — TRADERAGENT_V2_ALGORITHM.md (1322 strok)
-- **SMC Integration:** smartmoneyconcepts library integrated, swing_length fixed, HybridStrategy connected
-- **State Persistence:** COMPLETE (#237) — save/load/reconcile + timezone fix
-- **Server:** 185.233.200.13 (Docker, RUNNING — 4 bota)
-- **Historical Data:** 450 CSV (45 pairs × 10 TF, 5.4 GB) deployed
-- **Next Action:** Phase 2 pipeline s novymi SMC defaults → Monitor hybrid transitions → Regime→loop integration
-- **Co-Authored:** Claude Opus 4.6
+- **Date:** 2026-03-06
+- **Session:** 48 (SMC Critical Bug Fix + Phase 1 Rerun)
+- **Status:** 1687+ tests passing
+- **Last commit:** `2c6f8e9` (docs: mark historical data done, add server sync P0.0)
+- **Bot Status:** RUNNING — 5 ботов на `185.233.200.13` (git: 8 коммитов позади, нужен деплой SMC-фикса)
+- **Session 47 Fixes:**
+  - SMC critical bug: wrong dict key `"trend"` → `"current_trend"` в `generate_signals_m5()` → 0 → 1086 сделок
+  - P0.3 Live↔Backtest sync: `run_backtest_v2.py` читает `from_yaml_config()` для всех точек создания конфигов
+  - `OrchestratorBacktestConfig.from_yaml_config()` + 34 теста в `test_backtest_config.py`
+  - `scripts/smoke_smc.py` — новый диагностический инструмент
+  - docs/analysis.md, docs/plan.md, README.md — полная переработка, удалены 19 стейл-доков
+- **Session 48 Progress:**
+  - Тестовый сервер (158.160.215.57) синхронизирован с main
+  - Phase 1 smoke BTCUSDT (5000 баров): SMC = **+$162**, 122 сделки, win_rate=33.6%
+  - Phase 1 auto (45 пар) запущен в фоне на тестовом сервере (`/tmp/bt_phase1_all.log`)
+- **Servers:**
+  - Production 185.233.200.13: RUNNING, git 8 коммитов позади (нужен деплой)
+  - Testing 158.160.215.57: синхронизирован, Phase 1 running
+- **Historical Data:** 450 CSV (45 pairs × 10 TF, 5.4 GB) на тестовом сервере (с 2017)
+- **Next Action:** Дождаться Phase 1 → Deploy SMC-фикс на продакшн → P0.1 Router sync
+- **Co-Authored:** Claude Sonnet 4.6
