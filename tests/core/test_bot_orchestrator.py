@@ -1,7 +1,7 @@
 """Unit tests for BotOrchestrator"""
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,6 +14,7 @@ from bot.config.schemas import (
 )
 from bot.orchestrator.bot_orchestrator import BotOrchestrator, BotState
 from bot.orchestrator.events import EventType
+from bot.strategies.trend_follower.entry_logic import SignalType
 
 
 @pytest.fixture
@@ -437,3 +438,101 @@ class TestBotOrchestratorErrorHandling:
 
         # Event publish failure should be logged but not crash
         assert True
+
+
+class TestReduceOnlyOnCloseOrders:
+    """Test that reduceOnly=True is passed for all strategy close/exit orders."""
+
+    @pytest.mark.asyncio
+    async def test_execute_trend_follower_exit_passes_reduce_only(
+        self, orchestrator, mock_exchange
+    ):
+        """Test that _execute_trend_follower_exit passes reduceOnly=True to create_order."""
+        # Build a minimal mock position (LONG)
+        position = MagicMock()
+        position.signal_type = SignalType.LONG
+        position.size = Decimal("450")  # quote-currency size
+        position.entry_price = Decimal("45000")
+
+        await orchestrator._execute_trend_follower_exit(position)
+
+        mock_exchange.create_order.assert_called_once()
+        call_kwargs = mock_exchange.create_order.call_args.kwargs
+        assert call_kwargs.get("params") == {"reduceOnly": True}, (
+            "Expected params={'reduceOnly': True} to be passed on trend_follower exit order"
+        )
+        # Side must be the opposite of LONG (i.e. sell)
+        assert call_kwargs.get("side") == "sell"
+
+    @pytest.mark.asyncio
+    async def test_execute_trend_follower_exit_short_passes_reduce_only(
+        self, orchestrator, mock_exchange
+    ):
+        """Test that _execute_trend_follower_exit passes reduceOnly=True for SHORT positions."""
+        position = MagicMock()
+        position.signal_type = SignalType.SHORT
+        position.size = Decimal("450")
+        position.entry_price = Decimal("45000")
+
+        await orchestrator._execute_trend_follower_exit(position)
+
+        mock_exchange.create_order.assert_called_once()
+        call_kwargs = mock_exchange.create_order.call_args.kwargs
+        assert call_kwargs.get("params") == {"reduceOnly": True}
+        # Side must be the opposite of SHORT (i.e. buy)
+        assert call_kwargs.get("side") == "buy"
+
+    @pytest.mark.asyncio
+    async def test_execute_smc_exit_passes_reduce_only(self, orchestrator, mock_exchange):
+        """Test that _execute_smc_exit passes reduceOnly=True to create_order."""
+        position_id = "pos_abc123"
+        # SMC exit looks up the closed trade in smc_strategy._closed_trades
+        closed_trade = {
+            "position_id": position_id,
+            "direction": "long",
+            "size": Decimal("450"),
+            "entry_price": Decimal("45000"),
+        }
+
+        mock_smc = MagicMock()
+        mock_smc._closed_trades = [closed_trade]
+        orchestrator.smc_strategy = mock_smc
+
+        exit_reason = MagicMock()
+        exit_reason.value = "take_profit"
+
+        await orchestrator._execute_smc_exit(position_id, exit_reason)
+
+        mock_exchange.create_order.assert_called_once()
+        call_kwargs = mock_exchange.create_order.call_args.kwargs
+        assert call_kwargs.get("params") == {"reduceOnly": True}, (
+            "Expected params={'reduceOnly': True} to be passed on SMC exit order"
+        )
+        # Side must be opposite of long (i.e. sell)
+        assert call_kwargs.get("side") == "sell"
+
+    @pytest.mark.asyncio
+    async def test_execute_smc_exit_short_passes_reduce_only(self, orchestrator, mock_exchange):
+        """Test that _execute_smc_exit passes reduceOnly=True for SHORT positions."""
+        position_id = "pos_short456"
+        closed_trade = {
+            "position_id": position_id,
+            "direction": "short",
+            "size": Decimal("450"),
+            "entry_price": Decimal("45000"),
+        }
+
+        mock_smc = MagicMock()
+        mock_smc._closed_trades = [closed_trade]
+        orchestrator.smc_strategy = mock_smc
+
+        exit_reason = MagicMock()
+        exit_reason.value = "stop_loss"
+
+        await orchestrator._execute_smc_exit(position_id, exit_reason)
+
+        mock_exchange.create_order.assert_called_once()
+        call_kwargs = mock_exchange.create_order.call_args.kwargs
+        assert call_kwargs.get("params") == {"reduceOnly": True}
+        # Side must be opposite of short (i.e. buy)
+        assert call_kwargs.get("side") == "buy"
