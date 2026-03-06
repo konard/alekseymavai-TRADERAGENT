@@ -335,10 +335,12 @@ class TestSharedRiskTracking:
             adapter.open_position(signal, Decimal("100"))
 
         # Price hits TP — all positions should trigger exit
+        # DCA adapter recalculates TP as entry_price*(1+take_profit_pct=8%), so
+        # 45000*1.08=48600; using 49000 to satisfy all three adapters' TP conditions.
         df = _make_ohlcv(n=10)
         all_exits = []
         for adapter in adapters:
-            exits = adapter.update_positions(Decimal("47000"), df)
+            exits = adapter.update_positions(Decimal("49000"), df)
             all_exits.extend(exits)
 
         assert len(all_exits) == 3
