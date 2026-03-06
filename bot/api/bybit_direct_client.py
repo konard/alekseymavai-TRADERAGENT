@@ -15,7 +15,7 @@ import hmac
 import json
 import time
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import aiohttp
 from tenacity import (
@@ -292,7 +292,7 @@ class ByBitDirectClient:
                 )
                 raise self._map_error_code(ret_code, ret_msg)
 
-            return data.get("result", {})
+            return cast(dict[str, Any], data.get("result", {}))
 
         except aiohttp.ClientError as e:
             self._error_count += 1
@@ -343,7 +343,7 @@ class ByBitDirectClient:
 
         # Convert to CCXT-compatible format
         coins = data.get("list", [{}])[0].get("coin", [])
-        balance = {"total": {}, "free": {}, "used": {}}
+        balance: dict[str, dict[str, float]] = {"total": {}, "free": {}, "used": {}}
 
         for coin_data in coins:
             currency = coin_data.get("coin", "")
@@ -458,15 +458,20 @@ class ByBitDirectClient:
                 },
                 "precision": {
                     "amount": abs(
-                        Decimal(
-                            lot_size_filter.get(
-                                "qtyStep", lot_size_filter.get("basePrecision", "0.01")
+                        cast(
+                            int,
+                            Decimal(
+                                lot_size_filter.get(
+                                    "qtyStep", lot_size_filter.get("basePrecision", "0.01")
+                                )
                             )
+                            .as_tuple()
+                            .exponent,
                         )
-                        .as_tuple()
-                        .exponent
                     ),
-                    "price": abs(Decimal(price_filter.get("tickSize", "0.01")).as_tuple().exponent),
+                    "price": abs(
+                        cast(int, Decimal(price_filter.get("tickSize", "0.01")).as_tuple().exponent)
+                    ),
                 },
             }
 
@@ -665,9 +670,11 @@ class ByBitDirectClient:
         if order_type.lower() == "limit":
             if price is None:
                 raise ValueError("Price required for limit orders")
-            return await self.create_limit_order(symbol, side, amount, price, params)
+            return await self.create_limit_order(
+                symbol, side, Decimal(str(amount)), Decimal(str(price)), params
+            )
         elif order_type.lower() == "market":
-            return await self.create_market_order(symbol, side, amount, params)
+            return await self.create_market_order(symbol, side, Decimal(str(amount)), params)
         else:
             raise ValueError(f"Unknown order type: {order_type}")
 

@@ -359,6 +359,47 @@ class ConfluenceZoneAnalyzer:
         score += max(0, 20 - (age_hours / 24) * 20)
         return max(0.0, min(100.0, score))
 
+    def _update_zone_status(self, df: pd.DataFrame) -> None:
+        """Update order block and FVG status based on the latest price bar."""
+        if df.empty:
+            return
+        last = df.iloc[-1]
+        last_close = Decimal(str(float(last["close"])))
+        last_high = Decimal(str(float(last["high"])))
+        last_low = Decimal(str(float(last["low"])))
+
+        for ob in self.order_blocks:
+            if ob.status != ZoneStatus.ACTIVE:
+                continue
+            if ob.is_bullish and last_close < ob.low:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+            elif not ob.is_bullish and last_close > ob.high:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+
+        for fvg in self.fair_value_gaps:
+            if fvg.status not in (ZoneStatus.ACTIVE, ZoneStatus.PARTIAL_FILL):
+                continue
+            gap_size = fvg.gap_high - fvg.gap_low
+            if gap_size <= 0:
+                continue
+            if fvg.is_bullish:
+                overlap_high = min(last_high, fvg.gap_high)
+                overlap_low = max(last_low, fvg.gap_low)
+            else:
+                overlap_high = min(last_high, fvg.gap_high)
+                overlap_low = max(last_low, fvg.gap_low)
+            if overlap_high > overlap_low:
+                fill_pct = float((overlap_high - overlap_low) / gap_size) * 100
+                fvg.fill_percentage = max(fvg.fill_percentage, fill_pct)
+                if fvg.fill_percentage >= 100:
+                    fvg.status = ZoneStatus.FILLED
+                    if fvg.filled_at is None:
+                        fvg.filled_at = datetime.now()
+                else:
+                    fvg.status = ZoneStatus.PARTIAL_FILL
+
     def _cleanup_zones(self) -> None:
         self.order_blocks = [
             ob

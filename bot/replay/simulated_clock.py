@@ -9,6 +9,7 @@ simulated timestamps while wall-clock time advances near-instantly.
 import asyncio
 import sys
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -51,7 +52,7 @@ class SimulatedClock:
         return self.current_time
 
 
-def _make_fake_datetime_class(clock: SimulatedClock):
+def _make_fake_datetime_class(clock: SimulatedClock) -> type:
     """
     Create a ``datetime`` subclass whose ``now()`` and ``utcnow()``
     class methods return simulated time from *clock*.
@@ -64,7 +65,7 @@ def _make_fake_datetime_class(clock: SimulatedClock):
 
     class FakeDatetime(datetime):
         @classmethod
-        def now(cls, tz=None):
+        def now(cls, tz: timezone | None = None) -> datetime:  # type: ignore[override]
             if tz is None:
                 return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(
                     tzinfo=None
@@ -72,7 +73,7 @@ def _make_fake_datetime_class(clock: SimulatedClock):
             return datetime.fromtimestamp(clock.current_time, tz=tz)
 
         @classmethod
-        def utcnow(cls):
+        def utcnow(cls) -> datetime:  # type: ignore[override]
             return datetime.fromtimestamp(clock.current_time, tz=timezone.utc).replace(tzinfo=None)
 
     return FakeDatetime
@@ -93,7 +94,7 @@ _DATETIME_MODULES = [
 
 
 @contextmanager
-def patch_time(clock: SimulatedClock):
+def patch_time(clock: SimulatedClock) -> Generator[SimulatedClock, None, None]:
     """
     Context manager that monkey-patches stdlib time functions and asyncio.sleep
     to use *clock* instead of real wall-clock time.
@@ -111,14 +112,14 @@ def patch_time(clock: SimulatedClock):
     _real_monotonic = time.monotonic
     _real_time = time.time
 
-    time.monotonic = clock.monotonic  # type: ignore[assignment]
-    time.time = clock.time  # type: ignore[assignment]
+    time.monotonic = clock.monotonic
+    time.time = clock.time
 
     # -- asyncio.sleep patch -----------------------------------------------
 
     _real_sleep = asyncio.sleep
 
-    async def _fake_sleep(seconds, result=None):
+    async def _fake_sleep(seconds: float, result: object = None) -> object:
         """Advance simulated clock by *seconds*, then yield control."""
         if seconds > 0:
             clock.advance(seconds)
@@ -135,16 +136,16 @@ def patch_time(clock: SimulatedClock):
     for modname in _DATETIME_MODULES:
         mod = sys.modules.get(modname)
         if mod is not None and hasattr(mod, "datetime"):
-            _saved[modname] = mod.datetime  # type: ignore[attr-defined]
+            _saved[modname] = mod.datetime
             mod.datetime = FakeDatetime  # type: ignore[attr-defined]
 
     try:
         yield clock
     finally:
         # Restore everything
-        time.monotonic = _real_monotonic  # type: ignore[assignment]
-        time.time = _real_time  # type: ignore[assignment]
-        asyncio.sleep = _real_sleep  # type: ignore[assignment]
+        time.monotonic = _real_monotonic
+        time.time = _real_time
+        asyncio.sleep = _real_sleep
 
         for modname, original in _saved.items():
             mod = sys.modules.get(modname)

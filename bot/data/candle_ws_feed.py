@@ -109,7 +109,7 @@ class CandleWSFeed:
     async def _connect_and_listen(self) -> None:
         """Open a single WebSocket session and process messages."""
         try:
-            import websockets  # type: ignore[import]
+            import websockets  # noqa: F401  # type: ignore[import-not-found]
         except ImportError:
             logger.warning("websockets_not_installed", hint="pip install websockets")
             await asyncio.sleep(60)

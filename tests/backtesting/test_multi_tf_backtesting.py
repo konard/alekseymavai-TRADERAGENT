@@ -534,12 +534,7 @@ class TestSMCAdapterIntegration:
         from bot.strategies.smc.config import SMCConfig
         from bot.strategies.smc_adapter import SMCStrategyAdapter
 
-        # SMCStrategy.__init__ references risk_per_trade_pct and
-        # max_position_size_usd but SMCConfig has risk_per_trade and
-        # max_position_size. Provide a patched config with aliases.
         smc_config = SMCConfig()
-        smc_config.risk_per_trade_pct = smc_config.risk_per_trade
-        smc_config.max_position_size_usd = smc_config.max_position_size
 
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
