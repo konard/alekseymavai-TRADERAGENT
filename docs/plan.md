@@ -47,10 +47,8 @@
 - Live: `max_daily_loss = $600` (6% от баланса)
 - Решение: `max_daily_loss_pct = 0.006` (0.6% баланса), не хардкоженный %
 
-**P0.4 — Синхронизация частоты SMC-сигналов**
-- Убрать хардкод `smc_generate_signal_every_n = 12`
-- В live: каждый M5-тик → в backtest тоже каждый бар (`= 1`)
-- Обоснование: SMC — swing-стратегия, 1 час между сигналами достаточно, но 12× реже — нет
+**~~P0.4 — Синхронизация частоты SMC-сигналов~~** ✅ ВЫПОЛНЕНО
+- `smc_generate_signal_every_n`: `12` → `1` (каждый M5-бар, как в live)
 
 **P0.5 — DCA catch-up в backtest**
 - Скопировать логику `DCAStartupAnalyzer._run_dca_catchup()` в warmup-фазу backtest

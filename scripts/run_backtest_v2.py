@@ -468,14 +468,32 @@ def _count_combos(grid: dict) -> int:
 _LIVE_CONFIG_DEFAULT = str(PROJECT_ROOT / "configs" / "phase7_demo.yaml")
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """Convert bare symbol to YAML format: BTCUSDT → BTC/USDT, BTC → BTC/USDT."""
+    if "/" in symbol:
+        return symbol
+    for quote in ("USDT", "BUSD", "USDC", "BTC", "ETH"):
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return symbol[: -len(quote)] + "/" + quote
+    # bare base like "BTC", "ETH" — assume USDT pair
+    return symbol + "/USDT"
+
+
 def _cfg_from_yaml(live_config: str, symbol: str) -> OrchestratorBacktestConfig | None:
-    """Try to load live YAML config for *symbol*. Returns None on any failure."""
+    """Try to load live YAML config for *symbol*. Returns None on any failure.
+
+    Normalizes symbol format: BTCUSDT / BTC → BTC/USDT to match live YAML keys.
+    """
     path = Path(live_config)
     if not path.exists():
         logger.debug("Live config not found: %s — using default params", live_config)
         return None
     try:
-        return OrchestratorBacktestConfig.from_yaml_config(str(path), symbol)
+        normalized = _normalize_symbol(symbol)
+        cfg = OrchestratorBacktestConfig.from_yaml_config(str(path), normalized)
+        if normalized != symbol:
+            logger.debug("Symbol normalized for YAML lookup: %s → %s", symbol, normalized)
+        return cfg
     except Exception as exc:
         logger.warning("from_yaml_config failed for %s/%s: %s", live_config, symbol, exc)
         return None

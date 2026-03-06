@@ -189,6 +189,21 @@ class TestCfgFromYaml:
         assert cfg is not None
         assert cfg.symbol == "BTC/USDT"
 
+    def test_symbol_normalization_btcusdt(self):
+        # BTCUSDT (from CSV filename) must resolve to same params as BTC/USDT
+        mod = self._import_helper()
+        cfg = mod._cfg_from_yaml(_YAML, "BTCUSDT")
+        assert cfg is not None
+        assert cfg.grid_params.get("num_levels") == 6
+        assert abs(cfg.max_daily_loss_pct - 0.06) < 0.001
+
+    def test_symbol_normalization_bare_base(self):
+        # bare "BTC" → BTC/USDT
+        mod = self._import_helper()
+        cfg = mod._cfg_from_yaml(_YAML, "BTC")
+        assert cfg is not None
+        assert cfg.grid_params.get("num_levels") == 6
+
     def test_grid_params_populated(self):
         mod = self._import_helper()
         cfg = mod._cfg_from_yaml(_YAML, "BTC/USDT")
