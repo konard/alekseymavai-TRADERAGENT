@@ -10,6 +10,7 @@ Algorithm:
   - CHOCH_BULL: price closes above the most recent SH while in a bear trend (reversal).
   - CHOCH_BEAR: price closes below the most recent SL while in a bull trend.
 """
+
 from __future__ import annotations
 
 from enum import Enum, auto
@@ -80,7 +81,7 @@ class StructuralDetector:
             return []
 
         highs = [sp for sp in swing_points if sp.is_high]
-        lows  = [sp for sp in swing_points if sp.is_low]
+        lows = [sp for sp in swing_points if sp.is_low]
 
         if not highs or not lows:
             return []
@@ -99,7 +100,7 @@ class StructuralDetector:
         # Walk bar-by-bar from the first confirmed swing onwards
         all_swings = sorted(swing_points, key=lambda s: s.index)
         first_bar = all_swings[0].index
-        last_bar  = len(close) - 1
+        last_bar = len(close) - 1
 
         # Seed initial state from first two opposing swings
         if highs and lows:
@@ -154,20 +155,19 @@ class StructuralDetector:
                     stype = StructureType.BOS_BULL
                     state = _TrendState.BULL
 
-                events.append(StructureEvent(
-                    index=bar,
-                    structure_type=stype,
-                    break_price=c,
-                    broken_swing=prev_sh,
-                    impulse_size=impulse,
-                ))
-                logger.debug("structure_event", type=stype.value, bar=bar,
-                             price=round(c, 4))
+                events.append(
+                    StructureEvent(
+                        index=bar,
+                        structure_type=stype,
+                        break_price=c,
+                        broken_swing=prev_sh,
+                        impulse_size=impulse,
+                    )
+                )
+                logger.debug("structure_event", type=stype.value, bar=bar, price=round(c, 4))
 
                 # After a break, the broken swing becomes the new reference
-                prev_sh = SwingPoint(
-                    index=bar, price=c, swing_type=SwingType.HIGH, strength=0
-                )
+                prev_sh = SwingPoint(index=bar, price=c, swing_type=SwingType.HIGH, strength=0)
 
             # --- Check downside break (below prev_sl) ---
             elif c < prev_sl.price:
@@ -184,19 +184,18 @@ class StructuralDetector:
                     stype = StructureType.BOS_BEAR
                     state = _TrendState.BEAR
 
-                events.append(StructureEvent(
-                    index=bar,
-                    structure_type=stype,
-                    break_price=c,
-                    broken_swing=prev_sl,
-                    impulse_size=impulse,
-                ))
-                logger.debug("structure_event", type=stype.value, bar=bar,
-                             price=round(c, 4))
-
-                prev_sl = SwingPoint(
-                    index=bar, price=c, swing_type=SwingType.LOW, strength=0
+                events.append(
+                    StructureEvent(
+                        index=bar,
+                        structure_type=stype,
+                        break_price=c,
+                        broken_swing=prev_sl,
+                        impulse_size=impulse,
+                    )
                 )
+                logger.debug("structure_event", type=stype.value, bar=bar, price=round(c, 4))
+
+                prev_sl = SwingPoint(index=bar, price=c, swing_type=SwingType.LOW, strength=0)
 
         logger.debug(
             "structural_detection_complete",

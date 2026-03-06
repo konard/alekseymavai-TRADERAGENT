@@ -18,7 +18,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -56,9 +56,9 @@ class BotAllocation:
     """Tracks capital allocation for a single bot."""
 
     bot_name: str
-    allocated: Decimal = Decimal("0")      # reserved/committed capital
-    deployed: Decimal = Decimal("0")       # actually in open positions
-    max_limit: Decimal = Decimal("0")      # hard cap for this bot
+    allocated: Decimal = Decimal("0")  # reserved/committed capital
+    deployed: Decimal = Decimal("0")  # actually in open positions
+    max_limit: Decimal = Decimal("0")  # hard cap for this bot
 
 
 class SharedCapitalPool:
@@ -85,9 +85,7 @@ class SharedCapitalPool:
     def register_bot(self, bot_name: str, max_limit: Decimal) -> None:
         """Register a bot with an individual capital cap."""
         if bot_name not in self._allocations:
-            self._allocations[bot_name] = BotAllocation(
-                bot_name=bot_name, max_limit=max_limit
-            )
+            self._allocations[bot_name] = BotAllocation(bot_name=bot_name, max_limit=max_limit)
 
     def allocate(self, bot_name: str, amount: Decimal) -> bool:
         """
@@ -335,9 +333,7 @@ class PortfolioRiskManager:
             self._peak_value = total
 
         drawdown_pct = (
-            (self._peak_value - total) / self._peak_value
-            if self._peak_value > 0
-            else Decimal("0")
+            (self._peak_value - total) / self._peak_value if self._peak_value > 0 else Decimal("0")
         )
 
         if not self._halted and drawdown_pct >= self.portfolio_stop_loss_pct:
@@ -396,7 +392,7 @@ class PortfolioRiskManager:
         if base_a == base_b:
             return 1.0
         # BTC and ETH often correlated
-        if set([base_a, base_b]) <= {"BTC", "ETH"}:
+        if {base_a, base_b} <= {"BTC", "ETH"}:
             return 0.85
         return 0.3  # Default: low correlation
 
@@ -411,9 +407,11 @@ class PortfolioRiskManager:
             "current_value": float(self._current_value),
             "peak_value": float(self._peak_value),
             "drawdown_pct": round(
-                float((self._peak_value - self._current_value) / self._peak_value * 100)
-                if self._peak_value > 0
-                else 0.0,
+                (
+                    float((self._peak_value - self._current_value) / self._peak_value * 100)
+                    if self._peak_value > 0
+                    else 0.0
+                ),
                 2,
             ),
             "halted": self._halted,

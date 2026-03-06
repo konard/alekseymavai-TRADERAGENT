@@ -1,16 +1,16 @@
 """
 Tests for bot/core/smc/swing_detector.py
 """
+
 import numpy as np
-import pytest
 
 from bot.core.smc.models import SwingType
 from bot.core.smc.swing_detector import find_swing_highs, find_swing_lows, find_swing_points
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_zigzag(n: int = 50, amplitude: float = 100.0) -> tuple[np.ndarray, np.ndarray]:
     """Alternating peaks and troughs, each 10 bars apart."""
@@ -18,7 +18,7 @@ def _make_zigzag(n: int = 50, amplitude: float = 100.0) -> tuple[np.ndarray, np.
     for i in range(n):
         price[i] = amplitude * np.sin(2 * np.pi * i / 10)
     high = price.copy()
-    low  = price.copy()
+    low = price.copy()
     high[price > 0] += 5
     low[price < 0] -= 5
     return high, low
@@ -28,10 +28,11 @@ def _make_zigzag(n: int = 50, amplitude: float = 100.0) -> tuple[np.ndarray, np.
 # find_swing_points
 # ---------------------------------------------------------------------------
 
+
 class TestFindSwingPoints:
     def test_returns_empty_when_insufficient_bars(self):
         high = np.array([1.0, 2.0, 3.0])
-        low  = np.array([0.5, 1.0, 1.5])
+        low = np.array([0.5, 1.0, 1.5])
         # strength=5 requires 11 bars
         result = find_swing_points(high, low, strength=5)
         assert result == []
@@ -39,17 +40,17 @@ class TestFindSwingPoints:
     def test_detects_obvious_peak(self):
         # Flat series with one clear peak in the middle
         high = np.array([1.0] * 20, dtype=float)
-        low  = np.array([0.9] * 20, dtype=float)
-        high[10] = 2.0   # peak
-        low[10]  = 0.8
+        low = np.array([0.9] * 20, dtype=float)
+        high[10] = 2.0  # peak
+        low[10] = 0.8
         result = find_swing_points(high, low, strength=5)
         highs = [s for s in result if s.is_high]
         assert any(s.index == 10 for s in highs), "Peak at index 10 not found"
 
     def test_detects_obvious_trough(self):
         high = np.array([1.0] * 20, dtype=float)
-        low  = np.array([0.9] * 20, dtype=float)
-        low[10] = 0.2    # trough
+        low = np.array([0.9] * 20, dtype=float)
+        low[10] = 0.2  # trough
         result = find_swing_points(high, low, strength=5)
         lows = [s for s in result if s.is_low]
         assert any(s.index == 10 for s in lows), "Trough at index 10 not found"
@@ -73,7 +74,7 @@ class TestFindSwingPoints:
 
     def test_strength_attribute_preserved(self):
         high = np.array([1.0] * 20, dtype=float)
-        low  = np.array([0.9] * 20, dtype=float)
+        low = np.array([0.9] * 20, dtype=float)
         high[10] = 2.0
         result = find_swing_points(high, low, strength=5)
         for s in result:
@@ -81,7 +82,7 @@ class TestFindSwingPoints:
 
     def test_constant_series_returns_all_as_swings(self):
         high = np.ones(20)
-        low  = np.ones(20)
+        low = np.ones(20)
         result = find_swing_points(high, low, strength=3)
         # Every interior bar qualifies (ties are allowed)
         assert len(result) > 0

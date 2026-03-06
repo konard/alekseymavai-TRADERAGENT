@@ -47,6 +47,8 @@ class DCAAdapter(BaseStrategy):
         safety_step_pct: Decimal = Decimal("0.02"),
         take_profit_pct: Decimal = Decimal("0.08"),
         name: str = "dca-default",
+        # Level 1 — Universal parameter (P1.1 unification)
+        risk_per_trade_pct: Optional[Decimal] = None,
     ) -> None:
         self._symbol = symbol
         self._name = name
@@ -56,6 +58,10 @@ class DCAAdapter(BaseStrategy):
         self._price_deviation_pct = price_deviation_pct
         self._safety_step_pct = safety_step_pct
         self._take_profit_pct = take_profit_pct
+        # risk_per_trade_pct is stored for reference / future position-sizing use.
+        self._risk_per_trade_pct: Optional[Decimal] = (
+            Decimal(str(risk_per_trade_pct)) if risk_per_trade_pct is not None else None
+        )
 
         self._last_analysis: BaseMarketAnalysis | None = None
 

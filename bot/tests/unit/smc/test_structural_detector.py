@@ -5,16 +5,16 @@ Seeding rule:
   If SH[0].index < SL[0].index → initial state = BULL
   If SL[0].index < SH[0].index → initial state = BEAR
 """
+
 import numpy as np
-import pytest
 
 from bot.core.smc.models import StructureType, SwingPoint, SwingType
 from bot.core.smc.structural_detector import StructuralDetector
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _swing(index: int, price: float, swing_type: SwingType) -> SwingPoint:
     return SwingPoint(index=index, price=price, swing_type=swing_type, strength=5)
@@ -23,7 +23,7 @@ def _swing(index: int, price: float, swing_type: SwingType) -> SwingPoint:
 def _bull_swings() -> list[SwingPoint]:
     """SH first → seeds BULL. SH@5(120), SL@10(108), SH@20(140)."""
     return [
-        _swing(5,  120.0, SwingType.HIGH),
+        _swing(5, 120.0, SwingType.HIGH),
         _swing(10, 108.0, SwingType.LOW),
         _swing(20, 140.0, SwingType.HIGH),
     ]
@@ -32,9 +32,9 @@ def _bull_swings() -> list[SwingPoint]:
 def _bear_swings() -> list[SwingPoint]:
     """SL first → seeds BEAR. SL@5(100), SH@10(120), SL@20(90)."""
     return [
-        _swing(5,  100.0, SwingType.LOW),
+        _swing(5, 100.0, SwingType.LOW),
         _swing(10, 120.0, SwingType.HIGH),
-        _swing(20,  90.0, SwingType.LOW),
+        _swing(20, 90.0, SwingType.LOW),
     ]
 
 
@@ -49,6 +49,7 @@ def _midclose(n: int, lo: float, hi: float, break_bar: int, break_val: float) ->
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestStructuralDetector:
     def setup_method(self):
@@ -155,7 +156,7 @@ class TestStructuralDetector:
 
     def test_no_break_when_price_stays_in_range(self):
         """No late events when price never crosses swing levels after bar 21."""
-        swings = _bull_swings()   # SH at 120 and 140, SL at 108
+        swings = _bull_swings()  # SH at 120 and 140, SL at 108
         # Stay strictly between 108 and 120 the whole time
         close = np.full(40, 114.0)
         events = self.det.detect(swings, close)

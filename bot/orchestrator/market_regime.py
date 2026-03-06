@@ -401,9 +401,7 @@ class MarketRegimeDetector:
             return analysis
 
         # Blend base confidence with SMC warmup quality
-        smc_confidence = analysis.confidence * 0.6 + (
-            0.4 if smc_context.warmup_complete else 0.0
-        )
+        smc_confidence = analysis.confidence * 0.6 + (0.4 if smc_context.warmup_complete else 0.0)
 
         details = dict(analysis.analysis_details)
         details["smc_phase"] = smc_context.phase.value

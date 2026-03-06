@@ -23,11 +23,9 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import Any
 
-from bot.core.trading_core import TradingCore, TradingCoreConfig
+from bot.core.trading_core import TradingCore
 from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 from bot.tests.backtesting.orchestrator_engine import (
     BacktestOrchestratorEngine,
@@ -227,7 +225,7 @@ class UnifiedBacktestEngine(BacktestOrchestratorEngine):
         cls,
         core: TradingCore,
         strategy_factories: dict[str, Any] | None = None,
-    ) -> "UnifiedBacktestEngine":
+    ) -> UnifiedBacktestEngine:
         """
         Convenience factory: create engine pre-loaded with strategy factories.
 

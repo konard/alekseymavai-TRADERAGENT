@@ -1,4 +1,5 @@
 """bot/core/smc — Smart Money Concepts analysis module."""
+
 from bot.core.smc.analyzer import SMCAnalyzer
 from bot.core.smc.models import (
     FairValueGap,

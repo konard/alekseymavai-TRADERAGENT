@@ -22,6 +22,19 @@ json_logs: true  # Structured logs for production monitoring
 # Encryption Key
 encryption_key: ${ENCRYPTION_KEY}
 
+# =============================================================================
+# P1.1 — Unified Strategy Parameter Model
+# Single block for cross-strategy risk parameters.
+# Values here become universal defaults; strategy sections may override them.
+# =============================================================================
+strategy_params:
+  risk_per_trade_pct: "0.01"       # 1% of balance per trade (fraction)
+  max_position_pct: "0.30"         # 30% of balance max position ($3000 on $10k)
+  max_daily_loss_pct: "0.06"       # 6% of balance daily limit ($600 on $10k)
+  max_positions: 3                 # max simultaneous positions across strategies
+  require_volume_confirmation: true
+  min_volume_multiplier: "1.5"     # 1.5× average volume
+
 # Bot Configurations
 bots:
   # =========================================================================

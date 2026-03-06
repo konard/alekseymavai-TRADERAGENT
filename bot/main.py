@@ -44,11 +44,11 @@ class BotApplication:
         # Multi-pair / auto-trade components (set in initialize() if enabled)
         self._scanner_task: asyncio.Task | None = None
         self._portfolio_risk_manager = None  # PortfolioRiskManager
-        self._pair_template_manager = None   # PairTemplateManager
-        self._scanner = None                  # MarketScanner
-        self._main_config = None              # cached AppConfig
+        self._pair_template_manager = None  # PairTemplateManager
+        self._scanner = None  # MarketScanner
+        self._main_config = None  # cached AppConfig
         self._redis_url: str = "redis://localhost:6379"
-        self._main_exchange_client = None     # shared exchange client for scanner
+        self._main_exchange_client = None  # shared exchange client for scanner
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -186,8 +186,10 @@ class BotApplication:
 
         # Initialize portfolio risk manager
         try:
-            from bot.core.portfolio_risk_manager import PortfolioRiskManager
             from decimal import Decimal
+
+            from bot.core.portfolio_risk_manager import PortfolioRiskManager
+
             # Use total capital as sum of all initial bot allocations (10k default)
             total_cap = Decimal("10000")
             self._portfolio_risk_manager = PortfolioRiskManager(total_capital=total_cap)
@@ -211,7 +213,9 @@ class BotApplication:
                         config=main_config.auto_trade.scanner,
                     )
                     self._scanner_task = asyncio.create_task(self._scanner_loop())
-                    logger.info("auto_trade_scanner_started", max_bots=main_config.auto_trade.max_bots)
+                    logger.info(
+                        "auto_trade_scanner_started", max_bots=main_config.auto_trade.max_bots
+                    )
             except Exception as e:
                 logger.warning("auto_trade_scanner_init_failed", error=str(e))
 
@@ -377,17 +381,15 @@ class BotApplication:
                 scan_results = await self._scanner.scan()
 
                 # Determine which symbols to trade (top-N by confidence)
-                top = [
-                    r for r in scan_results
-                    if r.confidence >= auto_cfg.min_confidence
-                ][: auto_cfg.max_bots]
+                top = [r for r in scan_results if r.confidence >= auto_cfg.min_confidence][
+                    : auto_cfg.max_bots
+                ]
 
                 top_symbols = {r.symbol for r in top}
 
                 # Remove bots whose symbol is no longer in top
                 auto_bot_names = [
-                    name for name in list(self.orchestrators.keys())
-                    if name.startswith("auto_")
+                    name for name in list(self.orchestrators.keys()) if name.startswith("auto_")
                 ]
                 for bot_name in auto_bot_names:
                     orch = self.orchestrators.get(bot_name)
