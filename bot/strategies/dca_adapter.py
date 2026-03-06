@@ -201,8 +201,13 @@ class DCAAdapter(BaseStrategy):
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
 
-            # Check take profit (based on average price)
-            tp_price = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
+            # Check take profit: honour the signal's explicit TP if set,
+            # otherwise fall back to the DCA percentage-based target.
+            explicit_tp = pos.get("take_profit")
+            if explicit_tp is not None:
+                tp_price = explicit_tp
+            else:
+                tp_price = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
             if current_price >= tp_price:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
                 continue
@@ -228,8 +233,11 @@ class DCAAdapter(BaseStrategy):
                     pos["total_invested"] = new_total
                     pos["avg_price"] = new_total / new_qty if new_qty > 0 else pos["avg_price"]
                     pos["safety_orders_filled"] = safety_filled + 1
-                    # Update TP based on new average
-                    pos["take_profit"] = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
+                    # Update TP based on new average (only when no explicit TP was set)
+                    if explicit_tp is None:
+                        pos["take_profit"] = pos["avg_price"] * (
+                            Decimal("1") + self._take_profit_pct
+                        )
 
         return exits
 
