@@ -901,8 +901,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _suppress_strategy_logging() -> None:
+    """Suppress verbose DEBUG logs from bot strategies (structlog + stdlib)."""
+    # Suppress structlog debug output from strategies (pattern detection etc.)
+    try:
+        import structlog as _sl
+        _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(logging.WARNING))
+    except Exception:
+        pass
+    # Suppress stdlib DEBUG from all bot submodules
+    for name in ("bot", "bot.strategies", "bot.tests", "bot.orchestrator"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main() -> None:
     args = parse_args()
+    # Always suppress noisy strategy debug logs — they slow backtest 10-100x
+    _suppress_strategy_logging()
     logger.info("Backtest V2.0 | mode=%s | workers=%d", args.mode, args.workers)
 
     if args.mode == "single":
