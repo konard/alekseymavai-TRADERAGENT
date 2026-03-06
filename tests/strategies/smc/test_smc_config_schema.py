@@ -20,7 +20,7 @@ class TestSMCConfigSchema:
         assert schema.trend_period == 20
         assert schema.close_break is True
         assert schema.risk_per_trade_pct == Decimal("0.02")
-        assert schema.min_risk_reward == Decimal("2.5")
+        assert schema.min_risk_reward == Decimal("2.0")
         assert schema.max_position_size == Decimal("10000")
         assert schema.max_positions == 3
         assert schema.use_trailing_stop is True
