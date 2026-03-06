@@ -3,7 +3,7 @@ BacktestOrchestratorEngine V3.0 — mirrors BotOrchestrator._main_loop() on hist
 
 V3.0 changes vs V2.0:
 - All strategies run in PARALLEL every bar (like the live bot, not sequential)
-- Router provides advisory weights (1.0 active / 0.5 reduced), does NOT block strategies
+- Router provides hard weights (1.0 active / 0.0 inactive), mirrors HybridCoordinator
 - Real PnL: (exit_price - entry_price) × amount  (replaces × 0.001 stub)
 - Proper portfolio tracking via position_entry_prices dict
 - Per-strategy P&L correctly attributed
@@ -137,6 +137,7 @@ class OrchestratorBacktestConfig:
         smc_params: dict = {}
         risk_per_trade = Decimal("0.02")
         max_position_pct = Decimal("0.25")
+        max_daily_loss_pct: float = 0.25  # fallback default
 
         for bot in matching:
             rm = bot.get("risk_management") or {}
@@ -194,13 +195,22 @@ class OrchestratorBacktestConfig:
                 if "risk_per_trade" in s:
                     risk_per_trade = Decimal(str(s["risk_per_trade"]))
 
-            # --- risk_management: derive max_position_pct from USD limit ---
+            # --- risk_management: derive max_position_pct and max_daily_loss_pct ---
             if "max_position_size" in rm:
                 max_pos_usd = Decimal(str(rm["max_position_size"]))
                 # Fraction of the default $10,000 initial balance
                 candidate = min(max_pos_usd / Decimal("10000"), Decimal("1.0"))
                 if candidate > max_position_pct:
                     max_position_pct = candidate
+
+            # Sync max_daily_loss from live YAML: convert absolute USD → % of $10k
+            # Take the FIRST (primary) bot's value; e.g. BTC hybrid $600 → 6%
+            if max_daily_loss_pct == 0.25:  # still at fallback default
+                for key in ("max_daily_loss", "max_daily_loss_usd"):
+                    if key in rm:
+                        live_daily_loss_usd = float(str(rm[key]))
+                        max_daily_loss_pct = min(live_daily_loss_usd / 10_000.0, 0.25)
+                        break
 
         return cls(
             symbol=symbol,
@@ -210,6 +220,7 @@ class OrchestratorBacktestConfig:
             smc_params=smc_params,
             risk_per_trade=risk_per_trade,
             max_position_pct=max_position_pct,
+            max_daily_loss_pct=max_daily_loss_pct,
         )
 
 
@@ -351,16 +362,17 @@ class BacktestOrchestratorEngine:
                 regime_key = current_regime.regime.value
                 regime_routing_stats[regime_key] = regime_routing_stats.get(regime_key, 0) + 1
 
-            # 2. Strategy routing (advisory weights — does NOT block any strategy)
-            # active strategies → weight 1.0 (full position size)
-            # inactive strategies → weight 0.5 (reduced position size, still trade)
+            # 2. Strategy routing — mirrors live HybridCoordinator behaviour:
+            # active strategies → weight 1.0 (trade normally)
+            # inactive strategies → weight 0.0 (skip entirely, no signal generation)
+            # This makes Grid/DCA mutually exclusive as in the live bot.
             regime_weights: dict[str, float] = {}
             if config.enable_strategy_router:
                 router_event = router.on_bar(current_regime, i)
                 if router_event.cooldown_remaining > 0:
                     cooldown_events += 1
                 regime_weights = {
-                    name: (1.0 if name in router_event.active_strategies else 0.5)
+                    name: (1.0 if name in router_event.active_strategies else 0.0)
                     for name in strategies
                 }
 
@@ -386,21 +398,24 @@ class BacktestOrchestratorEngine:
                     except Exception as e:
                         logger.debug("analyze_market error %s bar %d: %s", strat_name, i, e)
 
-                # generate_signal — throttled for SMC (expensive O(n²) pattern scan),
-                # every bar for Grid/DCA/TF (lightweight, price-reactive).
-                _gen_n = (
-                    config.smc_generate_signal_every_n
-                    if strat_name == "smc"
-                    else 1
-                )
-                if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
-                    try:
-                        signal = strategy.generate_signal(df_m5, balance)
-                    except Exception as e:
-                        logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
-                        signal = None
-                else:
+                # generate_signal — skip entirely if router deactivated this strategy
+                # (weight=0.0 mirrors live HybridCoordinator suspending inactive strategy)
+                if weight == 0.0:
                     signal = None
+                else:
+                    _gen_n = (
+                        config.smc_generate_signal_every_n
+                        if strat_name == "smc"
+                        else 1
+                    )
+                    if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
+                        try:
+                            signal = strategy.generate_signal(df_m5, balance)
+                        except Exception as e:
+                            logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
+                            signal = None
+                    else:
+                        signal = None
 
                 if signal is not None:
                     await self._handle_signal(

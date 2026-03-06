@@ -69,6 +69,11 @@ class TestFromYamlConfigBTC:
     def test_tf_risk_per_trade_pct(self):
         assert self.cfg.tf_params["risk_per_trade_pct"] == Decimal("0.01")
 
+    # max_daily_loss synced from live YAML (P0.3)
+    def test_max_daily_loss_synced_from_yaml(self):
+        # BTC bot: max_daily_loss=$600, initial_balance=$10k → 600/10000=0.06
+        assert abs(self.cfg.max_daily_loss_pct - 0.06) < 0.001
+
     # m5 variant must be skipped (auto_start=false)
     def test_m5_variant_not_overwriting_smc_params(self):
         # m5 variant has swing_length_h1 / swing_length_m5 but no top-level swing_length
