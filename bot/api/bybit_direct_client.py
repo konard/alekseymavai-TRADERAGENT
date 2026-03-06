@@ -468,7 +468,9 @@ class ByBitDirectClient:
                             .exponent
                         )
                     ),
-                    "price": abs(int(Decimal(price_filter.get("tickSize", "0.01")).as_tuple().exponent)),
+                    "price": abs(
+                        int(Decimal(price_filter.get("tickSize", "0.01")).as_tuple().exponent)
+                    ),
                 },
             }
 
@@ -667,7 +669,9 @@ class ByBitDirectClient:
         if order_type.lower() == "limit":
             if price is None:
                 raise ValueError("Price required for limit orders")
-            return await self.create_limit_order(symbol, side, Decimal(str(amount)), Decimal(str(price)), params)
+            return await self.create_limit_order(
+                symbol, side, Decimal(str(amount)), Decimal(str(price)), params
+            )
         elif order_type.lower() == "market":
             return await self.create_market_order(symbol, side, Decimal(str(amount)), params)
         else:

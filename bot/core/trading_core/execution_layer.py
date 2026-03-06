@@ -138,7 +138,10 @@ class LiveExecutionLayer(ExecutionLayer):
         price: float | None = None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return cast(dict[str, Any], await self._client.create_order(symbol, order_type, side, amount, price, params))
+        return cast(
+            dict[str, Any],
+            await self._client.create_order(symbol, order_type, side, amount, price, params),
+        )
 
     async def cancel_order(
         self,
@@ -156,7 +159,9 @@ class LiveExecutionLayer(ExecutionLayer):
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol, params or {}))
+        return cast(
+            list[dict[str, Any]], await self._client.fetch_open_orders(symbol, params or {})
+        )
 
     async def fetch_balance(self) -> dict[str, Any]:
         return cast(dict[str, Any], await self._client.fetch_balance())
