@@ -46,13 +46,22 @@ class GridAdapter(BaseStrategy):
         profit_per_grid: Decimal = Decimal("0.012"),
         grid_range_pct: Decimal = Decimal("0.05"),
         name: str = "grid-default",
+        # Level 1 — Universal parameter (P1.1 unification)
+        risk_per_trade_pct: Optional[Decimal] = None,
     ) -> None:
+        import warnings as _w
         self._symbol = symbol
         self._name = name
         self._num_levels = num_levels
-        self._amount_per_grid = amount_per_grid
         self._profit_per_grid = profit_per_grid
         self._grid_range_pct = grid_range_pct
+        # risk_per_trade_pct is stored for reference / future position-sizing use.
+        self._risk_per_trade_pct: Optional[Decimal] = (
+            Decimal(str(risk_per_trade_pct)) if risk_per_trade_pct is not None else None
+        )
+        # amount_per_grid: accepted as explicit value (backward compat).
+        # In the future it will be computed from balance × risk_per_trade_pct.
+        self._amount_per_grid = amount_per_grid
 
         self._grid_engine: GridEngine | None = None
         self._grid_levels: list[Decimal] = []

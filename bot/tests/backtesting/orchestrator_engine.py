@@ -115,6 +115,33 @@ class OrchestratorBacktestConfig:
         ``*_params`` dicts so the backtest engine mirrors the live bot's
         exact settings.
 
+        P1.1 — Unified strategy_params block
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        If the YAML contains a top-level ``strategy_params:`` block, its
+        values are used as universal defaults for **all** strategies.
+        Strategy-specific sections supplement / override these defaults.
+
+        The mapping is:
+
+        ``strategy_params.risk_per_trade_pct``
+            → ``grid_params``, ``dca_params``, ``tf_params``, ``smc_params``
+
+        ``strategy_params.max_position_pct``
+            → ``max_position_pct`` (overrides risk_management calculation)
+
+        ``strategy_params.max_daily_loss_pct``
+            → ``max_daily_loss_pct`` (overrides risk_management calculation)
+
+        ``strategy_params.max_positions``
+            → ``smc_params``, ``tf_params`` (strategy-level limit)
+
+        Backward compatibility
+        ~~~~~~~~~~~~~~~~~~~~~~
+        Old per-strategy ``risk_per_trade`` / ``risk_per_trade_pct`` fields
+        inside ``smc:`` / ``trend_follower:`` sections continue to work as
+        per-strategy overrides.  Old per-grid ``amount_per_grid`` is also
+        preserved.
+
         Args:
             path: Path to the live YAML config file.
             symbol: Trading pair in ``BASE/QUOTE`` format (e.g. ``"BTC/USDT"``).
@@ -142,14 +169,35 @@ class OrchestratorBacktestConfig:
             if b.get("symbol") == symbol and b.get("auto_start", True)
         ]
 
+        # --- P1.1: Read top-level strategy_params block (universal defaults) ---
+        sp = raw.get("strategy_params") or {}
+        sp_risk_pct: Decimal | None = (
+            Decimal(str(sp["risk_per_trade_pct"])) if "risk_per_trade_pct" in sp else None
+        )
+        sp_max_position_pct: Decimal | None = (
+            Decimal(str(sp["max_position_pct"])) if "max_position_pct" in sp else None
+        )
+        sp_max_daily_loss_pct: float | None = (
+            float(str(sp["max_daily_loss_pct"])) if "max_daily_loss_pct" in sp else None
+        )
+        sp_max_positions: int | None = sp.get("max_positions")
+        sp_require_volume: bool | None = sp.get("require_volume_confirmation")
+        sp_volume_multiplier: Decimal | None = (
+            Decimal(str(sp["min_volume_multiplier"])) if "min_volume_multiplier" in sp else None
+        )
+
         grid_params: dict = {}
         dca_params: dict = {}
         tf_params: dict = {}
         smc_params: dict = {}
-        risk_per_trade = Decimal("0.02")
-        max_position_pct = Decimal("0.25")
-        max_daily_loss_pct: float = 0.25  # fallback default
+        risk_per_trade = sp_risk_pct if sp_risk_pct is not None else Decimal("0.02")
+        max_position_pct = sp_max_position_pct if sp_max_position_pct is not None else Decimal("0.25")
+        # Use strategy_params.max_daily_loss_pct if provided; else derive from risk_management below
+        max_daily_loss_pct: float = sp_max_daily_loss_pct if sp_max_daily_loss_pct is not None else 0.25
         _ib = initial_balance  # alias for brevity in calculations
+        # Track whether per-field defaults have been set by strategy_params already
+        _pos_pct_from_sp = sp_max_position_pct is not None
+        _daily_loss_from_sp = sp_max_daily_loss_pct is not None
 
         for bot in matching:
             rm = bot.get("risk_management") or {}
@@ -162,6 +210,8 @@ class OrchestratorBacktestConfig:
                         "num_levels": g.get("grid_levels"),
                         "amount_per_grid": Decimal(str(g["amount_per_grid"])) if "amount_per_grid" in g else None,
                         "profit_per_grid": Decimal(str(g["profit_per_grid"])) if "profit_per_grid" in g else None,
+                        # Propagate universal risk_per_trade_pct to grid (P1.1)
+                        "risk_per_trade_pct": sp_risk_pct,
                     }.items() if v is not None
                 }
 
@@ -174,20 +224,29 @@ class OrchestratorBacktestConfig:
                         "safety_order_size": Decimal(str(d["amount_per_step"])) if "amount_per_step" in d else None,
                         "max_safety_orders": d.get("max_steps"),
                         "take_profit_pct": Decimal(str(d["take_profit_percentage"])) if "take_profit_percentage" in d else None,
+                        # Propagate universal risk_per_trade_pct to dca (P1.1)
+                        "risk_per_trade_pct": sp_risk_pct,
                     }.items() if v is not None
                 }
 
             # --- trend_follower ---
             if "trend_follower" in bot and not tf_params:
                 tf = bot["trend_follower"]
+                # Per-strategy risk_per_trade_pct overrides universal default
+                _tf_risk = (
+                    Decimal(str(tf["risk_per_trade_pct"])) if "risk_per_trade_pct" in tf
+                    else sp_risk_pct
+                )
                 tf_params = {
                     k: v for k, v in {
                         "ema_fast_period": tf.get("ema_fast_period"),
                         "ema_slow_period": tf.get("ema_slow_period"),
                         "atr_period": tf.get("atr_period"),
                         "rsi_period": tf.get("rsi_period"),
-                        "risk_per_trade_pct": Decimal(str(tf["risk_per_trade_pct"])) if "risk_per_trade_pct" in tf else None,
+                        "risk_per_trade_pct": _tf_risk,
                         "max_position_size_usd": Decimal(str(tf["max_position_size_usd"])) if "max_position_size_usd" in tf else None,
+                        # Propagate universal max_positions if set (P1.1)
+                        "max_positions": sp_max_positions if sp_max_positions is not None else tf.get("max_positions"),
                     }.items() if v is not None
                 }
 
@@ -197,30 +256,37 @@ class OrchestratorBacktestConfig:
                     continue
                 s = bot["smc"]
                 # Support both new unified key (risk_per_trade_pct) and legacy key (risk_per_trade)
+                # Per-strategy value overrides universal default
                 _smc_risk = (
-                    s.get("risk_per_trade_pct") or s.get("risk_per_trade")
+                    Decimal(str(s["risk_per_trade_pct"])) if "risk_per_trade_pct" in s
+                    else Decimal(str(s["risk_per_trade"])) if "risk_per_trade" in s
+                    else sp_risk_pct
                 )
                 smc_params = {
                     k: v for k, v in {
                         "swing_length": s.get("swing_length"),
-                        "risk_per_trade_pct": Decimal(str(_smc_risk)) if _smc_risk is not None else None,
+                        "risk_per_trade_pct": _smc_risk,
                         "min_risk_reward": Decimal(str(s["min_risk_reward"])) if "min_risk_reward" in s else None,
                         "max_position_size": Decimal(str(s["max_position_size"])) if "max_position_size" in s else None,
+                        # Propagate universal max_positions if set (P1.1)
+                        "max_positions": sp_max_positions if sp_max_positions is not None else s.get("max_positions"),
                     }.items() if v is not None
                 }
                 if _smc_risk is not None:
-                    risk_per_trade = Decimal(str(_smc_risk))
+                    risk_per_trade = _smc_risk
 
             # --- risk_management: derive max_position_pct and max_daily_loss_pct ---
             # P0.2: convert absolute USD limits → % of initial_balance (not hardcoded $10k).
             # Take the FIRST (primary) bot's value — same convention as max_daily_loss_pct.
-            if max_position_pct == Decimal("0.25") and "max_position_size" in rm:
+            # strategy_params.max_position_pct takes precedence over risk_management values.
+            if not _pos_pct_from_sp and max_position_pct == Decimal("0.25") and "max_position_size" in rm:
                 max_pos_usd = Decimal(str(rm["max_position_size"]))
                 max_position_pct = min(max_pos_usd / _ib, Decimal("1.0"))
 
             # Sync max_daily_loss from live YAML (P0.3): take the FIRST bot's value.
+            # strategy_params.max_daily_loss_pct takes precedence.
             # e.g. BTC hybrid: max_daily_loss=$600, initial_balance=$10k → 6%
-            if max_daily_loss_pct == 0.25:  # still at fallback default
+            if not _daily_loss_from_sp and max_daily_loss_pct == 0.25:  # still at fallback default
                 for key in ("max_daily_loss", "max_daily_loss_usd"):
                     if key in rm:
                         live_daily_loss_usd = float(str(rm[key]))
