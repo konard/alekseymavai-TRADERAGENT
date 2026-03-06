@@ -334,11 +334,13 @@ class TestSharedRiskTracking:
         for adapter in adapters:
             adapter.open_position(signal, Decimal("100"))
 
-        # Price hits TP — all positions should trigger exit
+        # Price hits TP — all positions should trigger exit.
+        # DCAAdapter uses percentage-based TP (default 8% → 45000*1.08=48600),
+        # so the price must exceed 48600 to trigger DCA's exit as well.
         df = _make_ohlcv(n=10)
         all_exits = []
         for adapter in adapters:
-            exits = adapter.update_positions(Decimal("47000"), df)
+            exits = adapter.update_positions(Decimal("50000"), df)
             all_exits.extend(exits)
 
         assert len(all_exits) == 3
