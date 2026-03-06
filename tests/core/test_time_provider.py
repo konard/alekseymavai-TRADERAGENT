@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -89,14 +88,14 @@ class TestBacktestTimeProvider:
     def test_advance_bars_m5(self) -> None:
         start = datetime(2024, 1, 1, tzinfo=UTC)
         provider = BacktestTimeProvider(start=start)
-        provider.advance_bars(n=12, bar_duration_seconds=300)   # 12 × 5 min = 1 hour
+        provider.advance_bars(n=12, bar_duration_seconds=300)  # 12 × 5 min = 1 hour
         expected = datetime(2024, 1, 1, 1, 0, tzinfo=UTC)
         assert provider.now() == expected
 
     def test_advance_bars_m1(self) -> None:
         start = datetime(2024, 1, 1, tzinfo=UTC)
         provider = BacktestTimeProvider(start=start)
-        provider.advance_bars(n=60, bar_duration_seconds=60)    # 60 × 1 min = 1 hour
+        provider.advance_bars(n=60, bar_duration_seconds=60)  # 60 × 1 min = 1 hour
         expected = datetime(2024, 1, 1, 1, 0, tzinfo=UTC)
         assert provider.now() == expected
 

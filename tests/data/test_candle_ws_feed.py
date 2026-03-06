@@ -4,9 +4,7 @@ Unit tests for CandleWSFeed.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -49,6 +47,7 @@ def _kline_msg(confirm: bool, ts_ms: int = 1_700_000_000_000) -> dict:
 # 1. Confirmed candle is saved to DB
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_confirmed_candle_saved_to_db():
     feed, hm = _make_feed()
@@ -65,6 +64,7 @@ async def test_confirmed_candle_saved_to_db():
 # 2. Unconfirmed candle is NOT saved
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_unconfirmed_candle_not_saved():
     feed, hm = _make_feed()
@@ -76,6 +76,7 @@ async def test_unconfirmed_candle_not_saved():
 # ---------------------------------------------------------------------------
 # 3. Pong / subscribe messages ignored
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_pong_message_ignored():
@@ -89,6 +90,7 @@ async def test_pong_message_ignored():
 # 4. Multiple confirmed candles in one message
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_multiple_confirmed_candles_saved():
     feed, hm = _make_feed()
@@ -98,8 +100,11 @@ async def test_multiple_confirmed_candles_saved():
             {
                 "start": 1_700_000_000_000 + i * 300_000,
                 "interval": "5",
-                "open": "50000", "high": "51000", "low": "49500",
-                "close": "50500", "volume": "100",
+                "open": "50000",
+                "high": "51000",
+                "low": "49500",
+                "close": "50500",
+                "volume": "100",
                 "confirm": True,
             }
             for i in range(3)
@@ -115,6 +120,7 @@ async def test_multiple_confirmed_candles_saved():
 # 5. Interval conversion
 # ---------------------------------------------------------------------------
 
+
 def test_to_bybit_interval():
     assert CandleWSFeed._to_bybit_interval("5m") == "5"
     assert CandleWSFeed._to_bybit_interval("1h") == "60"
@@ -126,6 +132,7 @@ def test_to_bybit_interval():
 # ---------------------------------------------------------------------------
 # 6. stop() cancels internal task
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_stop_sets_running_false():

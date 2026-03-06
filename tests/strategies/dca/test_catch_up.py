@@ -4,8 +4,6 @@ Unit tests for DCAStartupAnalyzer — catch-up mode.
 
 from decimal import Decimal
 
-import pytest
-
 from bot.strategies.dca.startup_analyzer import CatchUpPlan, DCALevel, DCAStartupAnalyzer
 
 
@@ -15,14 +13,14 @@ def _make_ohlcv(closes: list[float]) -> list[list]:
 
 
 def _analyzer(**kwargs) -> DCAStartupAnalyzer:
-    defaults = dict(
-        trigger_pct=Decimal("0.05"),
-        amount_per_step=Decimal("20"),
-        max_steps=5,
-        catch_up_max_orders=3,
-        catch_up_reference="current_price",
-        catch_up_lookback_bars=500,
-    )
+    defaults = {
+        "trigger_pct": Decimal("0.05"),
+        "amount_per_step": Decimal("20"),
+        "max_steps": 5,
+        "catch_up_max_orders": 3,
+        "catch_up_reference": "current_price",
+        "catch_up_lookback_bars": 500,
+    }
     defaults.update(kwargs)
     return DCAStartupAnalyzer(**defaults)
 
@@ -30,6 +28,7 @@ def _analyzer(**kwargs) -> DCAStartupAnalyzer:
 # ---------------------------------------------------------------------------
 # 1. All levels above current price → nothing to place
 # ---------------------------------------------------------------------------
+
 
 def test_no_levels_when_all_above_current_price():
     analyzer = _analyzer()
@@ -58,7 +57,7 @@ def test_no_levels_when_current_price_very_low():
     ohlcv = _make_ohlcv([100.0] * 10)
     plan = analyzer.analyze(
         ohlcv=ohlcv,
-        current_price=Decimal("1"),   # price far below all levels
+        current_price=Decimal("1"),  # price far below all levels
         open_orders=[],
         min_order_size=Decimal("5"),
     )
@@ -90,6 +89,7 @@ def test_no_levels_placed_when_current_price_above_all_levels():
 # 2. Identifies missing levels below current price
 # ---------------------------------------------------------------------------
 
+
 def test_identifies_two_missing_levels_below_price():
     analyzer = _analyzer(
         trigger_pct=Decimal("0.05"),
@@ -114,6 +114,7 @@ def test_identifies_two_missing_levels_below_price():
 # 3. Respects max_catch_up_orders limit
 # ---------------------------------------------------------------------------
 
+
 def test_respects_max_catch_up_orders_limit():
     analyzer = _analyzer(max_steps=10, catch_up_max_orders=2)
     plan = analyzer.analyze(
@@ -128,6 +129,7 @@ def test_respects_max_catch_up_orders_limit():
 # ---------------------------------------------------------------------------
 # 4. Skips levels with existing open orders
 # ---------------------------------------------------------------------------
+
 
 def test_skips_levels_with_existing_open_orders():
     analyzer = _analyzer(trigger_pct=Decimal("0.05"), max_steps=3, catch_up_max_orders=3)
@@ -148,6 +150,7 @@ def test_skips_levels_with_existing_open_orders():
 # ---------------------------------------------------------------------------
 # 5. last_high reference finds rolling maximum
 # ---------------------------------------------------------------------------
+
 
 def test_last_high_reference_finds_rolling_maximum():
     # High was 200, current price is 180 (10% pullback), trigger_pct=0.05
@@ -195,6 +198,7 @@ def test_last_high_not_confirmed_falls_back_to_current_price():
 # 6. Lot-size filter removes too-small orders
 # ---------------------------------------------------------------------------
 
+
 def test_lot_size_filter_removes_too_small_orders():
     # amount_per_step = 3 USD, min_order_size = 10 → all levels filtered out
     analyzer = _analyzer(amount_per_step=Decimal("3"), max_steps=3, catch_up_max_orders=3)
@@ -210,6 +214,7 @@ def test_lot_size_filter_removes_too_small_orders():
 # ---------------------------------------------------------------------------
 # 7. Dry-run returns plan but test validates structure
 # ---------------------------------------------------------------------------
+
 
 def test_plan_structure_is_correct():
     analyzer = _analyzer(max_steps=3, catch_up_max_orders=2)
@@ -232,6 +237,7 @@ def test_plan_structure_is_correct():
 # 8. Empty OHLCV falls back to current price
 # ---------------------------------------------------------------------------
 
+
 def test_empty_ohlcv_falls_back_to_current_price():
     analyzer = _analyzer(catch_up_reference="last_high", max_steps=2, catch_up_max_orders=2)
     plan = analyzer.analyze(
@@ -247,6 +253,7 @@ def test_empty_ohlcv_falls_back_to_current_price():
 # ---------------------------------------------------------------------------
 # 9. Orders sorted by proximity (closest first)
 # ---------------------------------------------------------------------------
+
 
 def test_orders_sorted_closest_first():
     analyzer = _analyzer(trigger_pct=Decimal("0.05"), max_steps=5, catch_up_max_orders=5)

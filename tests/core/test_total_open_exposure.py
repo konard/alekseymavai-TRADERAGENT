@@ -199,8 +199,12 @@ class TestGetTotalOpenExposure:
             amount_per_grid=Decimal("0.01"),
             profit_per_grid=Decimal("0.01"),
         )
-        o1 = GridOrder(level=1, price=Decimal("40000"), amount=Decimal("0.01"), side="buy", order_id="o1")
-        o2 = GridOrder(level=2, price=Decimal("42000"), amount=Decimal("0.01"), side="buy", order_id="o2")
+        o1 = GridOrder(
+            level=1, price=Decimal("40000"), amount=Decimal("0.01"), side="buy", order_id="o1"
+        )
+        o2 = GridOrder(
+            level=2, price=Decimal("42000"), amount=Decimal("0.01"), side="buy", order_id="o2"
+        )
         engine.active_orders["o1"] = o1
         engine.active_orders["o2"] = o2
         orch.grid_engine = engine
@@ -403,7 +407,9 @@ class TestGetTotalOpenExposure:
             amount_per_grid=Decimal("0.01"),
             profit_per_grid=Decimal("0.01"),
         )
-        o1 = GridOrder(level=1, price=Decimal("40000"), amount=Decimal("0.01"), side="buy", order_id="o1")
+        o1 = GridOrder(
+            level=1, price=Decimal("40000"), amount=Decimal("0.01"), side="buy", order_id="o1"
+        )
         engine.active_orders["o1"] = o1
         orch.grid_engine = engine
 

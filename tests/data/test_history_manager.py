@@ -7,7 +7,6 @@ Uses in-memory mocking of session_factory and exchange to avoid a real DB.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
@@ -15,27 +14,29 @@ import pytest
 
 from bot.data.history_manager import HistoryManager
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_raw_ohlcv(n: int = 5, base_ts_ms: int = 1_700_000_000_000) -> list[list]:
     """Build synthetic raw OHLCV list."""
-    return [
-        [base_ts_ms + i * 3_600_000, 100.0, 105.0, 98.0, 102.0, 1000.0]
-        for i in range(n)
-    ]
+    return [[base_ts_ms + i * 3_600_000, 100.0, 105.0, 98.0, 102.0, 1000.0] for i in range(n)]
 
 
 def _make_db_rows(n: int = 5) -> list[tuple]:
     """Build synthetic DB result rows (time, open, high, low, close, volume)."""
     base = datetime(2024, 1, 1, tzinfo=timezone.utc)
     import datetime as dt
+
     return [
         (
             base + dt.timedelta(hours=i),
-            "100.0", "105.0", "98.0", "102.0", "1000.0",
+            "100.0",
+            "105.0",
+            "98.0",
+            "102.0",
+            "1000.0",
         )
         for i in range(n)
     ]
@@ -64,6 +65,7 @@ def _make_session_factory(query_rows: list, count: int = 0):
 # 1. get_candles returns DataFrame with correct columns
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_candles_returns_dataframe_with_correct_columns():
     db_rows = _make_db_rows(5)
@@ -88,6 +90,7 @@ async def test_get_candles_returns_dataframe_with_correct_columns():
 # 2. DB has sufficient data → no API call
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_reads_from_db_when_sufficient_data():
     db_rows = _make_db_rows(200)
@@ -108,6 +111,7 @@ async def test_reads_from_db_when_sufficient_data():
 # 3. DB empty → backfill from API
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_backfills_from_api_when_db_empty():
     raw = _make_raw_ohlcv(200)
@@ -120,6 +124,7 @@ async def test_backfills_from_api_when_db_empty():
 
     # _query_db: first call returns empty (triggers backfill), second returns data
     query_call_count = {"n": 0}
+
     async def _fake_query(sym, iv, limit, since):
         if query_call_count["n"] == 0:
             query_call_count["n"] += 1
@@ -139,6 +144,7 @@ async def test_backfills_from_api_when_db_empty():
 # ---------------------------------------------------------------------------
 # 4. upsert_candles is idempotent (same candles inserted twice → no error)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_upsert_is_idempotent():
@@ -160,7 +166,11 @@ async def test_upsert_is_idempotent():
             "time": datetime(2024, 1, 1, tzinfo=timezone.utc),
             "symbol": "BTC/USDT",
             "interval": "1h",
-            "open": 100.0, "high": 105.0, "low": 98.0, "close": 102.0, "volume": 1000.0,
+            "open": 100.0,
+            "high": 105.0,
+            "low": 98.0,
+            "close": 102.0,
+            "volume": 1000.0,
         }
     ]
 
@@ -175,6 +185,7 @@ async def test_upsert_is_idempotent():
 # ---------------------------------------------------------------------------
 # 5. get_candles returns empty DataFrame when no data at all
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_candles_returns_empty_df_when_no_data():

@@ -620,7 +620,10 @@ class TestADXHysteresis:
         detector = MarketRegimeDetector()
         # Currently in BULL_TREND, ADX=28 is above exit_trending (25)
         regime = detector._classify_regime(
-            adx=28.0, atr_pct=1.5, ema_fast=3050.0, ema_slow=3000.0,
+            adx=28.0,
+            atr_pct=1.5,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.BULL_TREND,
         )
         assert regime == MarketRegime.BULL_TREND
@@ -629,7 +632,10 @@ class TestADXHysteresis:
         """In trend: ADX=23 (below 25) should exit trend."""
         detector = MarketRegimeDetector()
         regime = detector._classify_regime(
-            adx=23.0, atr_pct=1.0, ema_fast=3050.0, ema_slow=3000.0,
+            adx=23.0,
+            atr_pct=1.0,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.BULL_TREND,
         )
         # ADX 23 is between 18 and 32, so falls to transition zone
@@ -641,7 +647,10 @@ class TestADXHysteresis:
         # Currently in TIGHT_RANGE, ADX=28 is above exit_ranging (22)
         # so we exit range, but ADX<32 so we end up in transition
         regime = detector._classify_regime(
-            adx=28.0, atr_pct=0.5, ema_fast=3050.0, ema_slow=3000.0,
+            adx=28.0,
+            atr_pct=0.5,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.TIGHT_RANGE,
         )
         assert regime in (MarketRegime.QUIET_TRANSITION, MarketRegime.VOLATILE_TRANSITION)
@@ -650,7 +659,10 @@ class TestADXHysteresis:
         """In range: ADX=20 (below 22) should stay in range."""
         detector = MarketRegimeDetector()
         regime = detector._classify_regime(
-            adx=20.0, atr_pct=0.5, ema_fast=3050.0, ema_slow=3000.0,
+            adx=20.0,
+            atr_pct=0.5,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.TIGHT_RANGE,
         )
         assert regime == MarketRegime.TIGHT_RANGE
@@ -659,10 +671,18 @@ class TestADXHysteresis:
         """ATR threshold splits tight vs wide range."""
         detector = MarketRegimeDetector()
         tight = detector._classify_regime(
-            adx=15.0, atr_pct=0.5, ema_fast=3000.0, ema_slow=3000.0, current_regime=None,
+            adx=15.0,
+            atr_pct=0.5,
+            ema_fast=3000.0,
+            ema_slow=3000.0,
+            current_regime=None,
         )
         wide = detector._classify_regime(
-            adx=15.0, atr_pct=1.5, ema_fast=3000.0, ema_slow=3000.0, current_regime=None,
+            adx=15.0,
+            atr_pct=1.5,
+            ema_fast=3000.0,
+            ema_slow=3000.0,
+            current_regime=None,
         )
         assert tight == MarketRegime.TIGHT_RANGE
         assert wide == MarketRegime.WIDE_RANGE
@@ -671,10 +691,18 @@ class TestADXHysteresis:
         """ATR threshold splits quiet vs volatile transition."""
         detector = MarketRegimeDetector()
         quiet = detector._classify_regime(
-            adx=25.0, atr_pct=1.0, ema_fast=3000.0, ema_slow=3000.0, current_regime=None,
+            adx=25.0,
+            atr_pct=1.0,
+            ema_fast=3000.0,
+            ema_slow=3000.0,
+            current_regime=None,
         )
         volatile = detector._classify_regime(
-            adx=25.0, atr_pct=3.0, ema_fast=3000.0, ema_slow=3000.0, current_regime=None,
+            adx=25.0,
+            atr_pct=3.0,
+            ema_fast=3000.0,
+            ema_slow=3000.0,
+            current_regime=None,
         )
         assert quiet == MarketRegime.QUIET_TRANSITION
         assert volatile == MarketRegime.VOLATILE_TRANSITION
@@ -683,7 +711,10 @@ class TestADXHysteresis:
         """In BEAR_TREND: ADX=27 should stay in bear trend."""
         detector = MarketRegimeDetector()
         regime = detector._classify_regime(
-            adx=27.0, atr_pct=1.5, ema_fast=2950.0, ema_slow=3000.0,
+            adx=27.0,
+            atr_pct=1.5,
+            ema_fast=2950.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.BEAR_TREND,
         )
         assert regime == MarketRegime.BEAR_TREND
@@ -693,7 +724,11 @@ class TestADXHysteresis:
         detector = MarketRegimeDetector()
         # ADX=28 with no current regime → transition (not trend, need 32)
         regime = detector._classify_regime(
-            adx=28.0, atr_pct=1.0, ema_fast=3050.0, ema_slow=3000.0, current_regime=None,
+            adx=28.0,
+            atr_pct=1.0,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
+            current_regime=None,
         )
         assert regime in (MarketRegime.QUIET_TRANSITION, MarketRegime.VOLATILE_TRANSITION)
 
@@ -702,7 +737,10 @@ class TestADXHysteresis:
         detector = MarketRegimeDetector()
         # In QUIET_TRANSITION, ADX=28 → still transition (not trend)
         regime = detector._classify_regime(
-            adx=28.0, atr_pct=1.0, ema_fast=3050.0, ema_slow=3000.0,
+            adx=28.0,
+            atr_pct=1.0,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.QUIET_TRANSITION,
         )
         assert regime in (MarketRegime.QUIET_TRANSITION, MarketRegime.VOLATILE_TRANSITION)
@@ -712,7 +750,10 @@ class TestADXHysteresis:
         detector = MarketRegimeDetector()
         # ADX=33 from range → enters trend
         regime = detector._classify_regime(
-            adx=33.0, atr_pct=1.0, ema_fast=3050.0, ema_slow=3000.0,
+            adx=33.0,
+            atr_pct=1.0,
+            ema_fast=3050.0,
+            ema_slow=3000.0,
             current_regime=MarketRegime.WIDE_RANGE,
         )
         assert regime == MarketRegime.BULL_TREND

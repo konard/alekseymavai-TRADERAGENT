@@ -14,7 +14,6 @@ from bot.tests.backtesting.unified_engine import (
     trading_core_to_backtest_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # trading_core_to_backtest_config
 # ---------------------------------------------------------------------------
@@ -137,6 +136,7 @@ class TestUnifiedBacktestEngine:
 
     def test_is_subclass(self) -> None:
         from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
+
         assert issubclass(UnifiedBacktestEngine, BacktestOrchestratorEngine)
 
     def test_can_instantiate(self) -> None:
@@ -152,9 +152,7 @@ class TestUnifiedBacktestEngine:
     def test_from_trading_core_factory(self) -> None:
         core = TradingCore.from_config(TradingCoreConfig())
         factory = MagicMock()
-        engine = UnifiedBacktestEngine.from_trading_core(
-            core, strategy_factories={"grid": factory}
-        )
+        engine = UnifiedBacktestEngine.from_trading_core(core, strategy_factories={"grid": factory})
         assert isinstance(engine, UnifiedBacktestEngine)
         assert "grid" in engine._strategy_factories
 

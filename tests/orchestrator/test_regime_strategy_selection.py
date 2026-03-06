@@ -60,7 +60,7 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     orch._publish_event = AsyncMock()
     orch._graceful_transition = AsyncMock()
     # Phase-0 additions
-    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._last_regime_update_at = 1.0  # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
     return orch
@@ -315,7 +315,7 @@ class TestRegimeStaleness:
     async def test_eager_fetch_on_first_call(self) -> None:
         """_update_active_strategies triggers detect_market_regime on first call."""
         orch = _make_orchestrator_stub()
-        orch._last_regime_update_at = 0.0   # never fetched
+        orch._last_regime_update_at = 0.0  # never fetched
         orch._current_regime = None
         await orch._update_active_strategies()
         orch.detect_market_regime.assert_awaited_once()

@@ -7,12 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.orchestrator.bot_orchestrator import BotOrchestrator
-from bot.strategies.hybrid.hybrid_config import HybridConfig, HybridMode
-from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
-
-
 from bot.core.trading_core import HybridCoordinator, TradingCore, TradingCoreConfig
+from bot.orchestrator.bot_orchestrator import BotOrchestrator
+from bot.strategies.hybrid.hybrid_config import HybridConfig
+from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 
 
 def _make_orchestrator_stub(

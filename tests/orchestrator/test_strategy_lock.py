@@ -55,7 +55,7 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     orch.redis_client = None
     orch.config = type("C", (), {"name": "test_bot"})()
     # Phase-0 additions
-    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._last_regime_update_at = 1.0  # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
     return orch
@@ -89,9 +89,7 @@ class TestStrategyLock:
         """When locked, _update_active_strategies should not change strategies."""
         orch = _make_orchestrator_stub()
         # Set a regime that would normally switch to grid
-        orch._current_regime = _make_regime(
-            MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID
-        )
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         # Lock to smc
         orch.lock_strategy({"smc"})
         # Run auto-switch — should be bypassed
@@ -125,9 +123,7 @@ class TestStrategyLock:
         orch = _make_orchestrator_stub()
         orch.lock_strategy({"smc"})
         orch.unlock_strategy()
-        orch._current_regime = _make_regime(
-            MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID
-        )
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
         assert orch._active_strategies == {"grid"}
 
@@ -149,12 +145,12 @@ class TestGetStatusLock:
         orch.config.symbol = "BTC/USDT"
         orch.config.strategy = "hybrid"
         orch.config.dry_run = True
-        orch.strategy_registry = type("SR", (), {
-            "get_registry_status": lambda self: {"total": 0, "active": 0}
-        })()
-        orch.health_monitor = type("HM", (), {
-            "get_health_summary": lambda self: {"status": "healthy"}
-        })()
+        orch.strategy_registry = type(
+            "SR", (), {"get_registry_status": lambda self: {"total": 0, "active": 0}}
+        )()
+        orch.health_monitor = type(
+            "HM", (), {"get_health_summary": lambda self: {"status": "healthy"}}
+        )()
 
         orch.lock_strategy({"smc", "grid"})
         status = await orch.get_status()
@@ -176,12 +172,12 @@ class TestGetStatusLock:
         orch.config.symbol = "BTC/USDT"
         orch.config.strategy = "hybrid"
         orch.config.dry_run = True
-        orch.strategy_registry = type("SR", (), {
-            "get_registry_status": lambda self: {"total": 0, "active": 0}
-        })()
-        orch.health_monitor = type("HM", (), {
-            "get_health_summary": lambda self: {"status": "healthy"}
-        })()
+        orch.strategy_registry = type(
+            "SR", (), {"get_registry_status": lambda self: {"total": 0, "active": 0}}
+        )()
+        orch.health_monitor = type(
+            "HM", (), {"get_health_summary": lambda self: {"status": "healthy"}}
+        )()
 
         status = await orch.get_status()
 

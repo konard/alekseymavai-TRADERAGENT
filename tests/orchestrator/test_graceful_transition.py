@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -65,7 +65,7 @@ def _make_orchestrator_with_exchange(
     orch._strategy_locked = False
     orch._locked_strategies = None
     # Phase-0 additions
-    orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
+    orch._last_regime_update_at = 1.0  # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
 
@@ -320,9 +320,7 @@ class TestGracefulTransitionIntegration:
         assert "dca" in orch._active_strategies
 
         # Regime changes to HOLD
-        orch._current_regime = _make_regime(
-            MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD
-        )
+        orch._current_regime = _make_regime(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD)
         await orch._update_active_strategies()
 
         # All strategies deactivated
@@ -333,9 +331,7 @@ class TestGracefulTransitionIntegration:
         """If order cancellation fails, strategies still switch and no panic."""
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
-        orch.exchange.cancel_all_orders = AsyncMock(
-            side_effect=Exception("Network timeout")
-        )
+        orch.exchange.cancel_all_orders = AsyncMock(side_effect=Exception("Network timeout"))
 
         # Grid active
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)

@@ -115,7 +115,7 @@ def trading_core_to_backtest_config(
         initial_balance=cfg.initial_balance,
         lookback=lookback,
         warmup_bars=warmup_bars,
-        analyze_every_n=cfg.analyze_every_n_bars,
+        default_analyze_every_n=cfg.analyze_every_n_bars,
         # Strategies
         enable_grid=cfg.enable_grid,
         enable_dca=cfg.enable_dca,

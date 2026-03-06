@@ -7,12 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.config.schemas import BotConfig, DCAConfig, ExchangeConfig, RiskManagementConfig, StrategyType
-
+from bot.config.schemas import (
+    BotConfig,
+    DCAConfig,
+    ExchangeConfig,
+    RiskManagementConfig,
+    StrategyType,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_bot_config(catch_up_enabled: bool = True) -> BotConfig:
     return BotConfig(
@@ -61,10 +67,11 @@ def _make_exchange(current_price: float = 88.0) -> AsyncMock:
 # Test 1: catch_up_enabled=false → _run_dca_catchup never called
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_catchup_disabled_skips_entire_flow():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=False)
     exchange = _make_exchange()
@@ -93,10 +100,11 @@ async def test_catchup_disabled_skips_entire_flow():
 # Test 2: catch_up_enabled=true, dry_run=true → plan built, no orders placed
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_catchup_builds_plan_but_no_orders_in_dry_run():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=True)
     exchange = _make_exchange(current_price=88.0)
@@ -106,6 +114,7 @@ async def test_catchup_builds_plan_but_no_orders_in_dry_run():
     orchestrator.current_price = Decimal("88")
 
     from bot.core.dca_engine import DCAEngine
+
     orchestrator.dca_engine = DCAEngine(
         symbol="SOL/USDT",
         trigger_percentage=Decimal("0.05"),
@@ -124,10 +133,11 @@ async def test_catchup_builds_plan_but_no_orders_in_dry_run():
 # Test 3: catch_up respects existing open orders (does not duplicate)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_catchup_respects_existing_exchange_orders():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=True)
     exchange = _make_exchange(current_price=88.0)
@@ -140,6 +150,7 @@ async def test_catchup_respects_existing_exchange_orders():
     orchestrator.current_price = Decimal("88")
 
     from bot.core.dca_engine import DCAEngine
+
     orchestrator.dca_engine = DCAEngine(
         symbol="SOL/USDT",
         trigger_percentage=Decimal("0.05"),

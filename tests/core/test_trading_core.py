@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
-
 from bot.core.trading_core import (
     CoordinatedDecision,
     HybridCoordinator,
@@ -13,7 +11,6 @@ from bot.core.trading_core import (
     TradingCoreConfig,
 )
 from bot.strategies.hybrid.hybrid_config import HybridMode
-
 
 # ---------------------------------------------------------------------------
 # TradingCoreConfig
@@ -109,18 +106,14 @@ class TestHybridCoordinator:
         assert decision.run_dca is False
 
     def test_allow_both_in_tolerance_band(self) -> None:
-        coord = HybridCoordinator(
-            adx_dca_threshold=25.0, allow_both=True, adx_tolerance=3.0
-        )
+        coord = HybridCoordinator(adx_dca_threshold=25.0, allow_both=True, adx_tolerance=3.0)
         # adx=26 is in [22, 28] band
         decision = coord.evaluate(adx=26.0)
         assert decision.run_grid is True
         assert decision.run_dca is True
 
     def test_allow_both_outside_band_follows_normal_rules(self) -> None:
-        coord = HybridCoordinator(
-            adx_dca_threshold=25.0, allow_both=True, adx_tolerance=3.0
-        )
+        coord = HybridCoordinator(adx_dca_threshold=25.0, allow_both=True, adx_tolerance=3.0)
         # adx=35 is outside band → DCA only
         decision = coord.evaluate(adx=35.0)
         assert decision.run_grid is False

@@ -10,18 +10,16 @@ Verifies:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-import pandas as pd
 import pytest
 
-from bot.scanner.market_scanner import MarketScanner, ScannerConfig, ScanResult
-
+from bot.scanner.market_scanner import MarketScanner, ScannerConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures / Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_ticker(
     *,
@@ -52,10 +50,10 @@ def _make_ohlcv(rows: int = 200) -> list[list]:
     for i in range(rows):
         o = price
         h = price + 50
-        l = price - 30
+        low = price - 30
         c = price + 20
         v = 100.0
-        data.append([base_ts + i * 3600000, o, h, l, c, v])
+        data.append([base_ts + i * 3600000, o, h, low, c, v])
         price = c + 5  # slight uptrend
     return data
 
@@ -69,15 +67,14 @@ def _make_exchange(
 ) -> AsyncMock:
     exchange = AsyncMock()
     exchange.fetch_ticker = AsyncMock(return_value=ticker or _make_ticker())
-    exchange.fetch_ohlcv = AsyncMock(
-        return_value=_make_ohlcv() if ohlcv is _SENTINEL else ohlcv
-    )
+    exchange.fetch_ohlcv = AsyncMock(return_value=_make_ohlcv() if ohlcv is _SENTINEL else ohlcv)
     return exchange
 
 
 # ---------------------------------------------------------------------------
 # Static method tests
 # ---------------------------------------------------------------------------
+
 
 class TestExtractVolume24h:
     def test_uses_quote_volume(self) -> None:
@@ -139,6 +136,7 @@ class TestOhlcvToDataframe:
 # Filtering tests
 # ---------------------------------------------------------------------------
 
+
 class TestScanFiltering:
     @pytest.mark.asyncio
     async def test_filters_low_volume(self) -> None:
@@ -199,6 +197,7 @@ class TestScanFiltering:
 # ---------------------------------------------------------------------------
 # Regime detection integration
 # ---------------------------------------------------------------------------
+
 
 class TestRegimeIntegration:
     @pytest.mark.asyncio
@@ -268,6 +267,7 @@ class TestRegimeIntegration:
 # Error handling
 # ---------------------------------------------------------------------------
 
+
 class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_ticker_error_skips_pair(self) -> None:
@@ -328,9 +328,11 @@ class TestErrorHandling:
 # Config schema tests
 # ---------------------------------------------------------------------------
 
+
 class TestScannerConfigSchema:
     def test_default_config(self) -> None:
         from bot.config.schemas import ScannerConfig as SchemaConfig
+
         cfg = SchemaConfig()
         assert cfg.enabled is False
         assert len(cfg.pairs) == 5
@@ -339,6 +341,7 @@ class TestScannerConfigSchema:
 
     def test_custom_config(self) -> None:
         from bot.config.schemas import ScannerConfig as SchemaConfig
+
         cfg = SchemaConfig(
             enabled=True,
             pairs=["BTC/USDT"],
@@ -352,6 +355,7 @@ class TestScannerConfigSchema:
 
     def test_app_config_includes_scanner(self) -> None:
         from bot.config.schemas import AppConfig
+
         cfg = AppConfig(
             database_url="postgresql+asyncpg://user:pass@localhost/test",
             encryption_key="dGVzdA==",

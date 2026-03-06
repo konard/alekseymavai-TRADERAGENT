@@ -12,23 +12,22 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 from bot.tests.backtesting.orchestrator_engine import (
     BacktestOrchestratorEngine,
     OrchestratorBacktestConfig,
     OrchestratorBacktestResult,
 )
-from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _tiny_df(n: int = 50, base_price: float = 100.0) -> pd.DataFrame:
     rng = pd.date_range("2024-01-01", periods=n, freq="5min")
@@ -57,27 +56,36 @@ def _tiny_data(n: int = 200) -> MultiTimeframeData:
 
 def _make_noop_strategy():
     """Return a strategy instance that never generates signals."""
-    from bot.strategies.base import BaseStrategy, PositionInfo, StrategyPerformance
+    from bot.strategies.base import BaseStrategy, StrategyPerformance
 
     class NoOpStrategy(BaseStrategy):
         def get_strategy_name(self) -> str:
             return "noop"
+
         def get_strategy_type(self) -> str:
             return "grid"
+
         def analyze_market(self, *args, **kwargs):
             return None
+
         def generate_signal(self, df, balance):
             return None
+
         def update_positions(self, price, df):
             return []
+
         def open_position(self, signal, amount) -> str:
             return "pos_1"
+
         def close_position(self, pos_id, reason, price) -> None:
             pass
+
         def reset(self) -> None:
             pass
+
         def get_active_positions(self) -> list:
             return []
+
         def get_performance(self):
             return StrategyPerformance()
 
@@ -88,6 +96,7 @@ def _make_noop_strategy():
 # Config tests
 # ---------------------------------------------------------------------------
 
+
 class TestOrchestratorBacktestConfig:
     def test_defaults(self) -> None:
         cfg = OrchestratorBacktestConfig()
@@ -96,7 +105,7 @@ class TestOrchestratorBacktestConfig:
         assert cfg.enable_grid is True
         assert cfg.enable_dca is True
         assert cfg.enable_trend_follower is True
-        assert cfg.enable_smc is True   # P0.4: SMC enabled by default (mirrors live bot)
+        assert cfg.enable_smc is True  # P0.4: SMC enabled by default (mirrors live bot)
         assert cfg.enable_strategy_router is True
         assert cfg.router_cooldown_bars == 120  # P0.1: 600s / 5min bars = 120 (live parity)
 
@@ -116,6 +125,7 @@ class TestOrchestratorBacktestConfig:
 # ---------------------------------------------------------------------------
 # Engine tests
 # ---------------------------------------------------------------------------
+
 
 class TestBacktestOrchestratorEngine:
     def test_no_factories_raises(self) -> None:

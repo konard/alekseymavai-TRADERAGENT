@@ -13,7 +13,6 @@ from bot.core.trading_core import (
     LiveExecutionLayer,
 )
 
-
 # ---------------------------------------------------------------------------
 # BacktestExecutionLayer
 # ---------------------------------------------------------------------------
@@ -147,7 +146,9 @@ class TestLiveExecutionLayer:
         client.cancel_all_orders = AsyncMock(return_value=[])
         client.fetch_open_orders = AsyncMock(return_value=[])
         client.fetch_balance = AsyncMock(return_value={"USDT": {"free": 10000.0, "total": 10000.0}})
-        client.fetch_ticker = AsyncMock(return_value={"last": 65000.0, "bid": 64999.0, "ask": 65001.0})
+        client.fetch_ticker = AsyncMock(
+            return_value={"last": 65000.0, "bid": 64999.0, "ask": 65001.0}
+        )
         return LiveExecutionLayer(client), client
 
     def test_is_execution_layer(self) -> None:

@@ -21,7 +21,6 @@ from bot.orchestrator.market_regime import (
     RegimeAnalysis,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -66,10 +65,10 @@ def _make_stub(
     orch._strategy_locked = False
     orch._locked_strategies = None
     # Throttle attributes
-    orch._last_active_strategies_update_at = 0.0
+    orch._last_active_strategies_update_at = float("-inf")
     orch._regime_check_interval = regime_check_interval
     # Phase-0 attributes
-    orch._last_regime_update_at = 1.0       # non-zero → skip eager fetch
+    orch._last_regime_update_at = 1.0  # non-zero → skip eager fetch
     orch._regime_stale_threshold = 2.0 * regime_check_interval
     orch.detect_market_regime = AsyncMock(return_value=None)
     # Mocked async helpers
@@ -99,10 +98,10 @@ class TestMainLoopThrottle:
 
     @pytest.mark.asyncio
     async def test_update_called_on_first_tick(self):
-        """_last_active_strategies_update_at == 0 → immediate call on first tick."""
+        """_last_active_strategies_update_at == -inf → immediate call on first tick."""
         orch = _make_stub(regime_check_interval=3600.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_active_strategies_update_at = 0.0  # never updated
+        orch._last_active_strategies_update_at = float("-inf")  # never updated
 
         await _run_main_loop_throttle(orch)
 
@@ -136,7 +135,7 @@ class TestMainLoopThrottle:
         orch = _make_stub(regime_check_interval=60.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         before = time.monotonic()
-        orch._last_active_strategies_update_at = 0.0
+        orch._last_active_strategies_update_at = float("-inf")
 
         await _run_main_loop_throttle(orch)
 
@@ -177,9 +176,7 @@ class TestRegimeChangeCausesStrategyChange:
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
-        orch._current_regime = _make_regime(
-            MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID
-        )
+        orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
         orch._last_strategy_switch_at = 0.0
 
         await orch._update_active_strategies()

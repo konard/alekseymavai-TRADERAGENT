@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 from bot.orchestrator.market_regime import (
@@ -23,7 +22,6 @@ from bot.tests.backtesting.multi_tf_engine import (
 
 # Reuse ConcreteStrategy from existing tests
 from tests.strategies.test_base_strategy import ConcreteStrategy
-
 
 # =============================================================================
 # Helpers
@@ -124,12 +122,8 @@ class TestRegimeFilterBlocksWrongStrategy:
         strategy = ConcreteStrategy()  # strategy_type = "test"
 
         # Force regime to BULL_TREND (allowed: trend_follower, dca — NOT "test")
-        forced_regime = _make_regime_analysis(
-            MarketRegime.BULL_TREND, RecommendedStrategy.DCA
-        )
-        with patch.object(
-            MarketRegimeDetector, "analyze", return_value=forced_regime
-        ):
+        forced_regime = _make_regime_analysis(MarketRegime.BULL_TREND, RecommendedStrategy.DCA)
+        with patch.object(MarketRegimeDetector, "analyze", return_value=forced_regime):
             result = await engine.run(strategy, data_30days)
 
         # "test" not in BULL_TREND allowed types, so signals should be blocked
@@ -152,12 +146,8 @@ class TestRegimeFilterAllowsMatchingStrategy:
         strategy.get_strategy_type = lambda: "dca"  # type: ignore[assignment]
 
         # Force BEAR_TREND (allowed: dca, trend_follower)
-        forced_regime = _make_regime_analysis(
-            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA
-        )
-        with patch.object(
-            MarketRegimeDetector, "analyze", return_value=forced_regime
-        ):
+        forced_regime = _make_regime_analysis(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        with patch.object(MarketRegimeDetector, "analyze", return_value=forced_regime):
             result = await engine.run(strategy, data_30days)
 
         # dca IS allowed in BEAR_TREND — no regime blocks expected
@@ -191,9 +181,7 @@ class TestHoldAndReduceExposureBlockAll:
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = ConcreteStrategy()
 
-        forced = _make_regime_analysis(
-            MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD
-        )
+        forced = _make_regime_analysis(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD)
         with patch.object(MarketRegimeDetector, "analyze", return_value=forced):
             result = await engine.run(strategy, data_30days)
 

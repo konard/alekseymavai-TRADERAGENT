@@ -458,9 +458,9 @@ class TestReduceOnlyOnCloseOrders:
 
         mock_exchange.create_order.assert_called_once()
         call_kwargs = mock_exchange.create_order.call_args.kwargs
-        assert call_kwargs.get("params") == {"reduceOnly": True}, (
-            "Expected params={'reduceOnly': True} to be passed on trend_follower exit order"
-        )
+        assert call_kwargs.get("params") == {
+            "reduceOnly": True
+        }, "Expected params={'reduceOnly': True} to be passed on trend_follower exit order"
         # Side must be the opposite of LONG (i.e. sell)
         assert call_kwargs.get("side") == "sell"
 
@@ -505,9 +505,9 @@ class TestReduceOnlyOnCloseOrders:
 
         mock_exchange.create_order.assert_called_once()
         call_kwargs = mock_exchange.create_order.call_args.kwargs
-        assert call_kwargs.get("params") == {"reduceOnly": True}, (
-            "Expected params={'reduceOnly': True} to be passed on SMC exit order"
-        )
+        assert call_kwargs.get("params") == {
+            "reduceOnly": True
+        }, "Expected params={'reduceOnly': True} to be passed on SMC exit order"
         # Side must be opposite of long (i.e. sell)
         assert call_kwargs.get("side") == "sell"
 
