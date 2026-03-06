@@ -1,6 +1,7 @@
 # TRADERAGENT — План развития
 
-> Дата: 2026-03-06 · Версия: v2.0.0  
+> Дата: 2026-03-06 · Версия: v2.0.0
+> Обновлено: 2026-03-06 (Session 49)
 > На основе: [Анализ проекта](analysis.md)
 
 ---
@@ -9,12 +10,12 @@
 
 | Приоритет | Направление | Цель | Статус |
 |-----------|-------------|------|--------|
-| **P0** | Live↔Backtest синхронизация | Устранить расхождения движков | 🟡 В процессе |
-| **P0** | Синхронизация серверов с main | SMC-фикс на тестовом и продакшн | 🔴 Открыт |
-| **P0** | Реальные данные + Phase 1 перегон | Корректный baseline (данные готовы!) | 🔴 Готов к запуску |
+| **P0** | Live↔Backtest синхронизация | Устранить расхождения движков | ✅ P0.1-P0.5 готово |
+| **P0** | Синхронизация серверов с main | Деплой всех фиксов | 🟡 Тестовый ✅, Продакшн 🔴 |
+| **P0** | Реальные данные + Phase 1 перегон | Корректный baseline | 🔴 Ожидает деплоя |
 | **P1** | Phase 2 оптимизация параметров | Найти оптимальные конфиги | ⏳ После P0 |
 | **P1** | DCA оптимизация | 3-5% deviation, max 3 orders | ⏳ После P0 |
-| **P1** | Unified parameter model | Унификация параметров стратегий | ⏳ После P0 |
+| **P1** | Unified parameter model | Унификация параметров стратегий | 🟡 Частично (P0.2) |
 | **P2** | TrendFollower SHORT режим | Торговля в BEAR_TREND | ⏳ Планируется |
 | **P2** | Hybrid в backtest | Воспроизвести Grid↔DCA routing | ⏳ Планируется |
 | **P3** | Auto grid range update | Динамический диапазон Grid | ⏳ Низкий приоритет |
@@ -30,34 +31,42 @@
 
 ### Задачи по приоритетам
 
-**P0.1 — Синхронизация роутера** *(критично)*
-- Заменить `StrategyRouter` (advisory) на логику `HybridCoordinator` (mode-based)
-- В backtest: Grid и DCA не могут работать одновременно, только одна активна
-- Файл: `bot/tests/backtesting/strategy_router.py`, `orchestrator_engine.py`
-- Тест: количество одновременно активных стратегий ≤ 1 для Hybrid пар
+**~~P0.1 — Синхронизация роутера~~** ✅ ВЫПОЛНЕНО (`961126f`)
+- ~~Заменить `StrategyRouter` (advisory) на логику `HybridCoordinator` (mode-based)~~
+- Реализовано: вес `1.0` для активных стратегий, `0.0` для неактивных — Grid/DCA взаимоисключающие
+- Файлы: `orchestrator_engine.py` — `regime_weights`, skip signal if `weight == 0.0`
 
-**P0.2 — Унификация единиц позиции** *(критично)*
-- Перевести `max_position_size` на `% от текущего баланса` как универсальную единицу
-- Backtest: `position_value = current_balance × max_position_pct`
-- Live: `max_position_size` USD → конвертировать через текущий баланс при старте
-- Файлы: `OrchestratorBacktestConfig`, `bot_orchestrator.py`, `from_yaml_config()`
+**~~P0.2 — Унификация единиц позиции~~** ✅ ВЫПОЛНЕНО (`6b4eccf`)
+- ~~Перевести `max_position_size` на `% от текущего баланса`~~
+- Реализовано: `from_yaml_config(initial_balance)` — конвертация USD → % через реальный баланс
+- `max_position_pct` берётся с первого бота (не MAX), `max_position_size_pct` синхронизирован
+- `_cfg_from_yaml()` передаёт `initial_balance` во всех call sites
 
-**P0.3 — Синхронизация `max_daily_loss`** *(критично)*
-- Текущий backtest: `max_daily_loss = 25% × $10k = $2,500` (слишком мягко)
-- Live: `max_daily_loss = $600` (6% от баланса)
-- Решение: `max_daily_loss_pct = 0.006` (0.6% баланса), не хардкоженный %
+**~~P0.3 — Синхронизация `max_daily_loss`~~** ✅ ВЫПОЛНЕНО (`961126f`)
+- ~~Текущий backtest: 25% хардкод~~
+- Реализовано: `max_daily_loss_pct = max_daily_loss_usd / initial_balance` из YAML
+- BTC: $600 / $10k = 6%; масштабируется с `initial_balance`
 
-**~~P0.4 — Синхронизация частоты SMC-сигналов~~** ✅ ВЫПОЛНЕНО
+**~~P0.4 — Синхронизация частоты SMC-сигналов~~** ✅ ВЫПОЛНЕНО (`a730751`)
 - `smc_generate_signal_every_n`: `12` → `1` (каждый M5-бар, как в live)
 
-**P0.5 — DCA catch-up в backtest**
-- Скопировать логику `DCAStartupAnalyzer._run_dca_catchup()` в warmup-фазу backtest
-- Файл: `bot/tests/backtesting/orchestrator_engine.py`
+**~~P0.5 — DCA catch-up в backtest~~** ✅ ВЫПОЛНЕНО (`6b4eccf`)
+- ~~Скопировать логику `DCAStartupAnalyzer._run_dca_catchup()` в warmup-фазу backtest~~
+- Реализовано: `_run_dca_warmup_catchup()` в `BacktestOrchestratorEngine`
+- Step 1: `_recent_high` из последних 500 warmup-баров (live-пarity)
+- Step 2: pre-open catch-up ордера через `DCAStartupAnalyzer`
 
-**P0.6 — Верификационный тест Live vs Backtest**
-- Запустить live бота в dry_run на отрезке, для которого есть CSV-данные
-- Сравнить: количество сигналов, сделок, P&L
+**P0.6 — Верификационный тест Live vs Backtest** 🔴 *Следующий*
+- Запустить backtest на BTC/USDT (5000 баров) с `--live-config`
+- Проверить: DCA catch-up работает, `max_daily_loss=6%`, все стратегии дают сделки
+- Финальная проверка: сравнить число сигналов с live dry_run логами
 - Допустимое отклонение: ±10% по числу сделок
+
+> **Дополнительно выполнено (Session 48-49):**
+> - Нормализация символов: `BTCUSDT` / `BTC` → `BTC/USDT` в `_normalize_symbol()`
+> - Подавление debug-логов: `_suppress_strategy_logging()` (предотвращает 2.6M строк/прогон)
+> - `docs/architecture_livebot_vs_backtest.md` — диаграмма Live Bot vs BacktestOrchestratorEngine V3.0
+> - Исправлены pre-existing merge conflicts: `grid_engine.py`, `bybit_direct_client.py`, `bot/main.py`
 
 ---
 
@@ -68,27 +77,34 @@
 > **Статус сервера тестирования (158.160.215.57):**
 > ✅ 45 пар × 5m CSV, 5.4 GB, история с 2017-08-17 (BTC — 889k строк)
 > ✅ 16 CPU / 30 GB RAM / 87 GB свободно — готов к запуску
-> ⚠️ Git отстаёт от main на 7 коммитов (сессии 46-47) — нужно синхронизировать
+> ✅ Синхронизирован с main до коммита `a730751` (Session 48)
+> ⚠️ Нужен повторный `git pull` — ещё +7 коммитов (P0.2, P0.5, bugfixes, session 49)
 
 ### Задачи
 
-**P0.0 — Синхронизация серверов с main** *(сделать первым)*
-- Тестовый сервер (158.160.215.57): git pull origin main (отстаёт на 7 коммитов)
-- Продакшн сервер (185.233.200.13): git pull + tar xzf деплой (отстаёт на 8 коммитов)
-- Без этого SMC-баг (исправлен в сессии 47) останется на серверах
+**~~P0.0 — Синхронизация тестового сервера~~** ✅ ЧАСТИЧНО (`Session 48`)
+- ✅ Тестовый сервер (158.160.215.57): синхронизирован до `a730751`
+- 🔴 Тестовый сервер: нужен повторный `git pull` (ещё 7 коммитов: P0.2, P0.5, bugfixes)
+- 🔴 Продакшн сервер (185.233.200.13): отстаёт на ~14 коммитов, бот запущен
+- Команда: `git pull origin main && docker compose restart bot`
 
 **~~P0.1 — Сбор исторических данных~~** ✅ ВЫПОЛНЕНО
-- ~~Скачать 12 месяцев M5-данных для 37+ пар~~ — уже есть!
 - 45 пар × 5m CSV на тестовом сервере (5.4 GB, с 2017), путь: `data/historical/`
-- Дополнительная загрузка не требуется
 
-**P0.2 — Запустить Phase 1 с исправленным движком**
-- SMC баг исправлен (сессия 47) — нужен новый прогон после P0.0
-- Ожидаемый результат: SMC должен дать сделки на трендовых парах
-- Команда: `python scripts/run_backtest_v2.py --mode multi --live-config configs/phase7_demo.yaml --workers 14`
-- Использовать реальные CSV через адаптер `MultiTimeframeDataLoader`
+**P0.2 — Запустить Phase 1 с полными parity-фиксами** 🔴 *После git pull на тест. сервере*
+- Все P0.1-P0.5 фиксы включены — нужен чистый прогон
+- Ожидаемый результат: DCA catch-up срабатывает на день 0, SMC даёт сделки
+- Команда:
+  ```bash
+  python scripts/run_backtest_v2.py \
+    --mode multi \
+    --live-config configs/phase7_demo.yaml \
+    --data-dir data/historical \
+    --max-bars 50000 \
+    --workers 14
+  ```
 
-**P0.3 — Анализ Phase 1 результатов**
+**P0.3 — Анализ Phase 1 результатов** ⏳ *После P0.2*
 - Какие стратегии прибыльны на каких режимах рынка?
 - Какие пары ведут себя хорошо с Grid, DCA, TF, SMC?
 - Выявить аномальные пары (как FTTUSDT в предыдущем прогоне)
@@ -103,12 +119,11 @@
 
 ### Задачи
 
-**P1.1 — Unified parameter model**
-- Ввести нормализованный уровень риск-параметров:
-  - `risk_per_trade_pct` — единица для всех стратегий
-  - `max_position_pct` — единица позиции
-  - `max_daily_loss_pct` — единица дневного лимита
-- Обновить все адаптеры и `from_yaml_config()` для поддержки новой модели
+**P1.1 — Unified parameter model** 🟡 *Частично выполнено (P0.2)*
+- `max_position_pct` — ✅ унифицировано через `from_yaml_config(initial_balance)`
+- `max_daily_loss_pct` — ✅ унифицировано (P0.3)
+- `risk_per_trade_pct` — 🔴 ещё не унифицировано (разные поля у TF vs SMC)
+- Осталось: обновить адаптеры TF и SMC для единого `risk_per_trade_pct`
 
 **P1.2 — Grid оптимизация**
 - Параметрическая сетка: `profit_per_grid ∈ [0.5%, 2.0%]`, `num_levels ∈ [4, 12]`
@@ -204,24 +219,33 @@
 
 ## Метрики успеха
 
-| Задача | Метрика | Целевое значение |
-|--------|---------|-----------------|
-| Live↔Backtest sync | Отклонение числа сделок | ≤ 10% |
-| Phase 1 перегон | SMC сделок на BTC/USDT | > 0 |
-| Phase 2 оптимизация | Sharpe improvement | ≥ 0.5 vs baseline |
-| DCA оптимизация | Max drawdown | < 15% |
-| TF SHORT режим | Bear market return | > -5% |
-| Unified params | Параметров без аналога | 0 |
+| Задача | Метрика | Целевое значение | Статус |
+|--------|---------|-----------------|--------|
+| Live↔Backtest sync | Отклонение числа сделок | ≤ 10% | 🟡 P0.6 pending |
+| Phase 1 перегон | SMC сделок на BTC/USDT | > 0 | 🔴 Ожидает деплоя |
+| Phase 2 оптимизация | Sharpe improvement | ≥ 0.5 vs baseline | ⏳ |
+| DCA оптимизация | Max drawdown | < 15% | ⏳ |
+| TF SHORT режим | Bear market return | > -5% | ⏳ |
+| Unified params | Параметров без аналога | 0 | 🟡 2 из 3 готово |
+
+---
+
+## Текущий фокус (ближайшие шаги)
+
+1. **`git pull` на тестовом сервере** (158.160.215.57) — подтянуть P0.2, P0.5, bugfixes
+2. **P0.6 Smoke test** — BTC 5000 баров, проверить DCA catch-up + max_daily_loss=6%
+3. **Phase 1 full run** — 37-45 пар, 50k баров, 14 workers
+4. **Деплой на продакшн** (185.233.200.13) — `git pull` + `docker compose restart bot`
 
 ---
 
 ## Временная оценка (ориентировочно)
 
-| Направление | Задачи | Трудоёмкость |
-|-------------|--------|-------------|
-| Live↔Backtest sync | P0.1-P0.6 | 2-3 сессии |
-| Реальные данные + Phase 1 | P0.1-P0.3 | 1-2 сессии + время загрузки |
-| Phase 2 оптимизация | P1.1-P1.6 | 3-4 сессии |
-| TrendFollower SHORT | P2.1-P2.4 | 1-2 сессии |
-| Hybrid в backtest | P2.1-P2.2 | 1 сессия |
-| Инфраструктура | P2-P3 | По мере необходимости |
+| Направление | Задачи | Трудоёмкость | Статус |
+|-------------|--------|-------------|--------|
+| Live↔Backtest sync | P0.1-P0.6 | ~~2-3 сессии~~ | 🟡 P0.6 осталось |
+| Деплой + Phase 1 | git pull + run | 0.5 сессии | 🔴 Следующий |
+| Phase 2 оптимизация | P1.1-P1.6 | 3-4 сессии | ⏳ |
+| TrendFollower SHORT | P2.1-P2.4 | 1-2 сессии | ⏳ |
+| Hybrid в backtest | P2.1-P2.2 | 1 сессия | ⏳ |
+| Инфраструктура | P2-P3 | По мере необходимости | ⏳ |
