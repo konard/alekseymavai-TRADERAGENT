@@ -345,6 +345,18 @@ class DCAEngine:
 
         return actions
 
+    def get_total_invested(self) -> Decimal:
+        """
+        Get total capital currently invested in the open DCA position.
+
+        Returns the ``total_cost`` of the active position (quote currency),
+        which represents live exposure.  Returns ``Decimal("0")`` when no
+        position is open.
+        """
+        if self.position is None:
+            return Decimal("0")
+        return self.position.total_cost
+
     def get_position_status(self) -> dict:
         """
         Get current position status and statistics.
