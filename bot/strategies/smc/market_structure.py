@@ -177,12 +177,23 @@ class MarketStructureAnalyzer:
         )
         return result
 
-    def get_swings_df(self) -> None:
-        """
-        Kept for interface compatibility.
-        Returns None — confluence_zones now reads from get_smc_context().
-        """
-        return None
+    def get_swings_df(self) -> Optional[pd.DataFrame]:
+        """Return swing points as a DataFrame after analysis, or None before analysis."""
+        all_swings = self.swing_highs + self.swing_lows
+        if not all_swings:
+            return None
+        rows = []
+        for s in sorted(all_swings, key=lambda x: x.index):
+            rows.append(
+                {
+                    "HighLow": 1 if s.is_high else -1,
+                    "Level": float(s.price),
+                    "index": s.index,
+                    "timestamp": s.timestamp,
+                }
+            )
+        df = pd.DataFrame(rows).set_index("timestamp")
+        return df
 
     def get_smc_context(self) -> Optional[SMCContext]:
         """Return the most recently computed SMCContext."""

@@ -333,6 +333,49 @@ class ConfluenceZoneAnalyzer:
                 )
             )
 
+    def _update_zone_status(self, df: pd.DataFrame) -> None:
+        """Update status of zones based on latest price data.
+
+        Iterates through all order blocks and fair value gaps and updates
+        their status based on the latest candle in ``df``.
+        """
+        if df.empty:
+            return
+
+        latest = df.iloc[-1]
+        latest_close = Decimal(str(latest["close"]))
+        latest_high = Decimal(str(latest["high"]))
+        latest_low = Decimal(str(latest["low"]))
+
+        for ob in self.order_blocks:
+            if ob.status != ZoneStatus.ACTIVE:
+                continue
+            if ob.is_bullish:
+                if latest_close < ob.low:
+                    ob.status = ZoneStatus.INVALIDATED
+                    ob.invalidated_at = datetime.now()
+            else:
+                if latest_close > ob.high:
+                    ob.status = ZoneStatus.INVALIDATED
+                    ob.invalidated_at = datetime.now()
+
+        for fvg in self.fair_value_gaps:
+            if fvg.status == ZoneStatus.FILLED:
+                continue
+            gap_size = fvg.gap_high - fvg.gap_low
+            if gap_size <= 0:
+                continue
+            overlap_high = min(latest_high, fvg.gap_high)
+            overlap_low = max(latest_low, fvg.gap_low)
+            if overlap_high > overlap_low:
+                fill_pct = float((overlap_high - overlap_low) / gap_size) * 100.0
+                fvg.fill_percentage = max(fvg.fill_percentage, fill_pct)
+            if fvg.fill_percentage >= 100.0:
+                fvg.status = ZoneStatus.FILLED
+                fvg.filled_at = datetime.now()
+            elif fvg.fill_percentage > 0.0:
+                fvg.status = ZoneStatus.PARTIAL_FILL
+
     # ------------------------------------------------------------------
     # Zone strength scoring (unchanged from v1)
     # ------------------------------------------------------------------

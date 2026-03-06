@@ -402,9 +402,7 @@ class OrchestratorBacktestResult(BacktestResult):
             "per_strategy_pnl": self.per_strategy_pnl,
             "regime_routing_stats": self.regime_routing_stats,
             "cooldown_events": self.cooldown_events,
-            "per_strategy_metrics": {
-                k: v.to_dict() for k, v in self.per_strategy_metrics.items()
-            },
+            "per_strategy_metrics": {k: v.to_dict() for k, v in self.per_strategy_metrics.items()},
         }
         return base
 
@@ -1117,7 +1115,7 @@ class BacktestOrchestratorEngine:
         n = len(returns)
         mean_r = sum(returns) / n
         variance = sum((r - mean_r) ** 2 for r in returns) / n
-        std_r = variance ** 0.5
+        std_r = variance**0.5
         if std_r > 0:
             return (mean_r / std_r) * ((365 * 24 * 12) ** 0.5)
         return None
