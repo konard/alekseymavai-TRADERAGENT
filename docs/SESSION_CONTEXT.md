@@ -3863,3 +3863,31 @@ docker compose up webui-backend webui-frontend
 2. P0.6 Smoke test — DCA catch-up работает, max_daily_loss=6%, все стратегии дают сделки
 3. Деплой на продакшн (185.233.200.13)
 4. Phase 1 full run (37-45 пар, 50k баров)
+
+---
+
+## Session 49 — Дополнение: Bug fixes (2026-03-06)
+
+### Дополнительные исправления после тестового прогона
+
+**Pre-existing merge conflicts (3 файла):**
+- `bot/core/grid_engine.py` — конфликт в quantize(0.000001) разрешён в пользу upstream
+- `bot/api/bybit_direct_client.py` — убран дублирующий `import json` (уже есть на уровне модуля)
+- `bot/main.py` — оставлена логика upstream: ByBitDirectClient только для `bybit + sandbox`
+
+**Stale attribute reference:**
+- `bot/tests/backtesting/portfolio_engine.py` — `analyze_every_n` → `default_analyze_every_n`
+- Исправлен AttributeError в `TestCorrelationMatrix` (19/19 tests pass)
+
+### Финальный статус тестов (Session 49)
+| Suite | Результат |
+|-------|-----------|
+| `bot/tests/unit/test_backtest_config.py` | **40/40** ✅ |
+| `tests/backtesting/test_orchestrator_engine.py` | **9/9** ✅ |
+| `tests/backtesting/test_portfolio_engine.py` | **19/19** ✅ |
+| `tests/backtesting/test_strategy_router.py` | **15/15** ✅ |
+| `tests/web/`, `tests/loadtest/`, `tests/api/bybit_direct` | pre-existing, не регрессия |
+
+### Last Commit
+- `c7996a8` fix(portfolio): stale attribute reference
+- Предыдущие: `6b4eccf` P0.2+P0.5, `9508ae1` architecture doc
