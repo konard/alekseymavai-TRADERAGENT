@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
-
 from bot.core.trading_core import (
     CoordinatedDecision,
     HybridCoordinator,
@@ -13,7 +11,6 @@ from bot.core.trading_core import (
     TradingCoreConfig,
 )
 from bot.strategies.hybrid.hybrid_config import HybridMode
-
 
 # ---------------------------------------------------------------------------
 # TradingCoreConfig

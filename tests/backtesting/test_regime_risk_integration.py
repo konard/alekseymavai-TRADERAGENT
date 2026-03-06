@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 from bot.orchestrator.market_regime import (
@@ -23,7 +22,6 @@ from bot.tests.backtesting.multi_tf_engine import (
 
 # Reuse ConcreteStrategy from existing tests
 from tests.strategies.test_base_strategy import ConcreteStrategy
-
 
 # =============================================================================
 # Helpers

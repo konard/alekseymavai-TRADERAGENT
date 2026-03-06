@@ -15,9 +15,7 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
 from decimal import Decimal
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -26,14 +24,12 @@ import pytest
 from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 from bot.tests.backtesting.orchestrator_engine import (
     OrchestratorBacktestConfig,
-    OrchestratorBacktestResult,
 )
 from bot.tests.backtesting.portfolio_engine import (
     PortfolioBacktestConfig,
     PortfolioBacktestEngine,
     PortfolioBacktestResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -4,8 +4,6 @@ Unit tests for DCAStartupAnalyzer — catch-up mode.
 
 from decimal import Decimal
 
-import pytest
-
 from bot.strategies.dca.startup_analyzer import CatchUpPlan, DCALevel, DCAStartupAnalyzer
 
 

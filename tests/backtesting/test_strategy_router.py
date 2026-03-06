@@ -10,8 +10,6 @@ Tests cover:
 
 from datetime import datetime, timezone
 
-import pytest
-
 from bot.orchestrator.market_regime import (
     MarketRegime,
     RecommendedStrategy,

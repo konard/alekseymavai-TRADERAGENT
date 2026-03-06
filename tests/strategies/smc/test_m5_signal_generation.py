@@ -5,16 +5,14 @@ Tests for SMC M5 two-level entry: H1 structure → M5 precision entry.
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc.market_structure import TrendDirection
 from bot.strategies.smc.smc_strategy import SMCStrategy
-
 
 # ---------------------------------------------------------------------------
 # Helpers

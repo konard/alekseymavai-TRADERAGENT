@@ -8,15 +8,11 @@ Tests cover:
 
 from decimal import Decimal
 
-import pytest
-
 from bot.core.portfolio_risk_manager import (
-    BotAllocation,
     PortfolioRiskManager,
     RiskCheckStatus,
     SharedCapitalPool,
 )
-
 
 # ---------------------------------------------------------------------------
 # SharedCapitalPool

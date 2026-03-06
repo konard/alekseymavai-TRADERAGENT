@@ -8,11 +8,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from bot.database.models import Base, Bot, ExchangeCredential
 from bot.database.models import (
+    Base,
+    Bot,
     DCADeal,
     DCAOrder,
     DCASignal,
+    ExchangeCredential,
     Position,
     Signal,
     Strategy,

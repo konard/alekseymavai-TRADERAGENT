@@ -7,8 +7,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.database.manager import DatabaseManager
-from bot.database.models import Base
-from bot.database.models import BotStateSnapshot
+from bot.database.models import Base, BotStateSnapshot
 
 
 @pytest_asyncio.fixture

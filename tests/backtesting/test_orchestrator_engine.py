@@ -12,19 +12,17 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
 from bot.tests.backtesting.orchestrator_engine import (
     BacktestOrchestratorEngine,
     OrchestratorBacktestConfig,
     OrchestratorBacktestResult,
 )
-from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +55,7 @@ def _tiny_data(n: int = 200) -> MultiTimeframeData:
 
 def _make_noop_strategy():
     """Return a strategy instance that never generates signals."""
-    from bot.strategies.base import BaseStrategy, PositionInfo, StrategyPerformance
+    from bot.strategies.base import BaseStrategy, StrategyPerformance
 
     class NoOpStrategy(BaseStrategy):
         def get_strategy_name(self) -> str:

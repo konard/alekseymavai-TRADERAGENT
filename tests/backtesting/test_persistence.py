@@ -8,15 +8,11 @@ import json
 import tempfile
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
-
-import pytest
 
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.checkpoint import OptimizationCheckpoint
 from bot.tests.backtesting.job_store import JobStore
 from bot.tests.backtesting.preset_export import PresetExporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -10,14 +10,11 @@ Verifies:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-import pandas as pd
 import pytest
 
-from bot.scanner.market_scanner import MarketScanner, ScannerConfig, ScanResult
-
+from bot.scanner.market_scanner import MarketScanner, ScannerConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures / Helpers

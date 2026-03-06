@@ -359,6 +359,42 @@ class ConfluenceZoneAnalyzer:
         score += max(0, 20 - (age_hours / 24) * 20)
         return max(0.0, min(100.0, score))
 
+    def _update_zone_status(self, df: pd.DataFrame) -> None:
+        """Update zone status based on recent price action (last bar)."""
+        if len(df) == 0:
+            return
+        last = df.iloc[-1]
+        last_close = Decimal(str(float(last["close"])))
+        last_high = Decimal(str(float(last["high"])))
+        last_low = Decimal(str(float(last["low"])))
+
+        for ob in self.order_blocks:
+            if ob.status != ZoneStatus.ACTIVE:
+                continue
+            if ob.is_bullish and last_close < ob.low:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+            elif not ob.is_bullish and last_close > ob.high:
+                ob.status = ZoneStatus.INVALIDATED
+                ob.invalidated_at = datetime.now()
+
+        for fvg in self.fair_value_gaps:
+            if fvg.status not in (ZoneStatus.ACTIVE, ZoneStatus.PARTIAL_FILL):
+                continue
+            gap_size = float(fvg.gap_high - fvg.gap_low)
+            if gap_size <= 0:
+                continue
+            overlap_high = min(float(last_high), float(fvg.gap_high))
+            overlap_low = max(float(last_low), float(fvg.gap_low))
+            if overlap_high > overlap_low:
+                fill_pct = (overlap_high - overlap_low) / gap_size * 100.0
+                fvg.fill_percentage = min(100.0, fvg.fill_percentage + fill_pct)
+                if fvg.fill_percentage >= 100.0:
+                    fvg.status = ZoneStatus.FILLED
+                    fvg.filled_at = datetime.now()
+                else:
+                    fvg.status = ZoneStatus.PARTIAL_FILL
+
     def _cleanup_zones(self) -> None:
         self.order_blocks = [
             ob

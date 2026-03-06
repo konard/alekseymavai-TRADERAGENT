@@ -21,7 +21,6 @@ from bot.orchestrator.market_regime import (
     RegimeAnalysis,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -65,8 +64,8 @@ def _make_stub(
     orch._strategy_switch_cooldown = cooldown
     orch._strategy_locked = False
     orch._locked_strategies = None
-    # Throttle attributes
-    orch._last_active_strategies_update_at = 0.0
+    # Throttle attributes — use -inf so "first tick" condition always passes
+    orch._last_active_strategies_update_at = -float("inf")
     orch._regime_check_interval = regime_check_interval
     # Phase-0 attributes
     orch._last_regime_update_at = 1.0       # non-zero → skip eager fetch
@@ -102,7 +101,8 @@ class TestMainLoopThrottle:
         """_last_active_strategies_update_at == 0 → immediate call on first tick."""
         orch = _make_stub(regime_check_interval=3600.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_active_strategies_update_at = 0.0  # never updated
+        # Already set to -inf in _make_stub; explicit override is kept for clarity
+        orch._last_active_strategies_update_at = -float("inf")  # never updated
 
         await _run_main_loop_throttle(orch)
 
@@ -136,7 +136,7 @@ class TestMainLoopThrottle:
         orch = _make_stub(regime_check_interval=60.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         before = time.monotonic()
-        orch._last_active_strategies_update_at = 0.0
+        orch._last_active_strategies_update_at = -float("inf")
 
         await _run_main_loop_throttle(orch)
 

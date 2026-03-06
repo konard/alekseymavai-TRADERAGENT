@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 
 class ExecutionLayer(ABC):
@@ -138,7 +138,7 @@ class LiveExecutionLayer(ExecutionLayer):
         price: float | None = None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._client.create_order(symbol, order_type, side, amount, price, params)
+        return cast(dict[str, Any], await self._client.create_order(symbol, order_type, side, amount, price, params))
 
     async def cancel_order(
         self,
@@ -146,23 +146,23 @@ class LiveExecutionLayer(ExecutionLayer):
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._client.cancel_order(order_id, symbol, params)
+        return cast(dict[str, Any], await self._client.cancel_order(order_id, symbol, params))
 
     async def cancel_all_orders(self, symbol: str) -> list[dict[str, Any]]:
-        return await self._client.cancel_all_orders(symbol)
+        return cast(list[dict[str, Any]], await self._client.cancel_all_orders(symbol))
 
     async def fetch_open_orders(
         self,
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._client.fetch_open_orders(symbol, params or {})
+        return cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol, params or {}))
 
     async def fetch_balance(self) -> dict[str, Any]:
-        return await self._client.fetch_balance()
+        return cast(dict[str, Any], await self._client.fetch_balance())
 
     async def fetch_ticker(self, symbol: str) -> dict[str, Any]:
-        return await self._client.fetch_ticker(symbol)
+        return cast(dict[str, Any], await self._client.fetch_ticker(symbol))
 
 
 class BacktestExecutionLayer(ExecutionLayer):

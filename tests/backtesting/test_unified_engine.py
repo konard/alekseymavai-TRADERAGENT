@@ -14,7 +14,6 @@ from bot.tests.backtesting.unified_engine import (
     trading_core_to_backtest_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # trading_core_to_backtest_config
 # ---------------------------------------------------------------------------

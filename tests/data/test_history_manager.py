@@ -7,14 +7,12 @@ Uses in-memory mocking of session_factory and exchange to avoid a real DB.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 import pytest
 
 from bot.data.history_manager import HistoryManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

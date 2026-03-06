@@ -16,7 +16,6 @@ from bot.tests.backtesting.optimization import (
 )
 from bot.tests.backtesting.orchestrator_engine import OrchestratorBacktestConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

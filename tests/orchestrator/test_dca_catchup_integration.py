@@ -7,8 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.config.schemas import BotConfig, DCAConfig, ExchangeConfig, RiskManagementConfig, StrategyType
-
+from bot.config.schemas import (
+    BotConfig,
+    DCAConfig,
+    ExchangeConfig,
+    RiskManagementConfig,
+    StrategyType,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -63,8 +68,8 @@ def _make_exchange(current_price: float = 88.0) -> AsyncMock:
 
 @pytest.mark.asyncio
 async def test_catchup_disabled_skips_entire_flow():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=False)
     exchange = _make_exchange()
@@ -95,8 +100,8 @@ async def test_catchup_disabled_skips_entire_flow():
 
 @pytest.mark.asyncio
 async def test_catchup_builds_plan_but_no_orders_in_dry_run():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=True)
     exchange = _make_exchange(current_price=88.0)
@@ -126,8 +131,8 @@ async def test_catchup_builds_plan_but_no_orders_in_dry_run():
 
 @pytest.mark.asyncio
 async def test_catchup_respects_existing_exchange_orders():
-    from bot.orchestrator.bot_orchestrator import BotOrchestrator
     from bot.database.manager import DatabaseManager
+    from bot.orchestrator.bot_orchestrator import BotOrchestrator
 
     config = _make_bot_config(catch_up_enabled=True)
     exchange = _make_exchange(current_price=88.0)

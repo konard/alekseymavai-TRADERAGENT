@@ -10,7 +10,7 @@ Covers:
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,7 +20,6 @@ from bot.core.portfolio_risk_manager import (
     RiskCheckStatus,
 )
 from bot.orchestrator.bot_orchestrator import BotOrchestrator, BotState
-
 
 # ---------------------------------------------------------------------------
 # Stubs
