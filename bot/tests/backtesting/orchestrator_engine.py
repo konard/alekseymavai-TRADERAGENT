@@ -196,16 +196,20 @@ class OrchestratorBacktestConfig:
                 if bot.get("name", "").endswith("_m5"):
                     continue
                 s = bot["smc"]
+                # Support both new unified key (risk_per_trade_pct) and legacy key (risk_per_trade)
+                _smc_risk = (
+                    s.get("risk_per_trade_pct") or s.get("risk_per_trade")
+                )
                 smc_params = {
                     k: v for k, v in {
                         "swing_length": s.get("swing_length"),
-                        "risk_per_trade": Decimal(str(s["risk_per_trade"])) if "risk_per_trade" in s else None,
+                        "risk_per_trade_pct": Decimal(str(_smc_risk)) if _smc_risk is not None else None,
                         "min_risk_reward": Decimal(str(s["min_risk_reward"])) if "min_risk_reward" in s else None,
                         "max_position_size": Decimal(str(s["max_position_size"])) if "max_position_size" in s else None,
                     }.items() if v is not None
                 }
-                if "risk_per_trade" in s:
-                    risk_per_trade = Decimal(str(s["risk_per_trade"]))
+                if _smc_risk is not None:
+                    risk_per_trade = Decimal(str(_smc_risk))
 
             # --- risk_management: derive max_position_pct and max_daily_loss_pct ---
             # P0.2: convert absolute USD limits → % of initial_balance (not hardcoded $10k).

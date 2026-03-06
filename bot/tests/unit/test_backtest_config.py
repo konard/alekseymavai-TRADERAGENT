@@ -55,8 +55,8 @@ class TestFromYamlConfigBTC:
     def test_smc_swing_length(self):
         assert self.cfg.smc_params["swing_length"] == 10
 
-    def test_smc_risk_per_trade(self):
-        assert self.cfg.smc_params["risk_per_trade"] == Decimal("0.02")
+    def test_smc_risk_per_trade_pct(self):
+        assert self.cfg.smc_params["risk_per_trade_pct"] == Decimal("0.02")
 
     def test_smc_min_risk_reward(self):
         assert self.cfg.smc_params["min_risk_reward"] == Decimal("2.0")
