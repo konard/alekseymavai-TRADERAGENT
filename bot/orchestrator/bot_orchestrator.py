@@ -846,6 +846,7 @@ class BotOrchestrator:
                                 order_type="market",
                                 side=side,
                                 amount=base_amount,
+                                params={"reduceOnly": True},
                             )
                             pm.close_position(pos_id, self.current_price)
                     logger.info("transition_trend_follower_positions_closed")
@@ -868,6 +869,7 @@ class BotOrchestrator:
                                     order_type="market",
                                     side=side,
                                     amount=base_amount,
+                                    params={"reduceOnly": True},
                                 )
                     logger.info("transition_smc_positions_closed")
                 except Exception as e:
@@ -1623,6 +1625,7 @@ class BotOrchestrator:
                 order_type="market",
                 side=side,
                 amount=amount,
+                params={"reduceOnly": True},
             )
 
             logger.info(
@@ -1860,6 +1863,7 @@ class BotOrchestrator:
                 order_type="market",
                 side=side,
                 amount=amount,
+                params={"reduceOnly": True},
             )
 
             logger.info(
