@@ -1386,8 +1386,8 @@ class BotOrchestrator:
 
         # SMC: sum of all active position sizes (quote currency)
         if self.smc_strategy:
-            for pos in self.smc_strategy.get_active_positions():
-                exposure += pos.size
+            for smc_pos in self.smc_strategy.get_active_positions():
+                exposure += smc_pos.size
 
         return exposure
 
