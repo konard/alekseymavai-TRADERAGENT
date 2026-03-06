@@ -230,9 +230,7 @@ class SMCStrategy:
         # Limit to max 3 concurrent signals
         return filtered[:3]
 
-    def generate_signals_m5(
-        self, df_h1: pd.DataFrame, df_m5: pd.DataFrame
-    ) -> list[SMCSignal]:
+    def generate_signals_m5(self, df_h1: pd.DataFrame, df_m5: pd.DataFrame) -> list[SMCSignal]:
         """
         Two-level entry: H1 structure → M5 precision entry.
 

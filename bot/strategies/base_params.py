@@ -34,7 +34,7 @@ Usage::
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 
 
@@ -78,14 +78,18 @@ class UniversalStrategyParams:
 
     def __post_init__(self) -> None:
         # Ensure Decimal types for numeric fields that callers might pass as str/float.
-        for attr in ("risk_per_trade_pct", "max_position_pct", "max_daily_loss_pct",
-                     "min_volume_multiplier"):
+        for attr in (
+            "risk_per_trade_pct",
+            "max_position_pct",
+            "max_daily_loss_pct",
+            "min_volume_multiplier",
+        ):
             val = getattr(self, attr)
             if not isinstance(val, Decimal):
                 object.__setattr__(self, attr, Decimal(str(val)))
 
     @classmethod
-    def from_dict(cls, data: dict) -> "UniversalStrategyParams":
+    def from_dict(cls, data: dict) -> UniversalStrategyParams:
         """
         Create from a dict, accepting legacy field names with deprecation warnings.
 
@@ -116,7 +120,7 @@ class UniversalStrategyParams:
             d.pop("max_risk_per_trade_pct")  # silently drop duplicate
 
         # Only pass known fields
-        known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        known = set(cls.__dataclass_fields__)
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
 
@@ -149,14 +153,19 @@ class SharedPerformanceParams:
     trailing_activation_pct: Decimal = Decimal("0.015")
 
     def __post_init__(self) -> None:
-        for attr in ("min_risk_reward", "max_drawdown_pct", "min_sharpe_ratio",
-                     "min_profit_factor", "trailing_activation_pct"):
+        for attr in (
+            "min_risk_reward",
+            "max_drawdown_pct",
+            "min_sharpe_ratio",
+            "min_profit_factor",
+            "trailing_activation_pct",
+        ):
             val = getattr(self, attr)
             if not isinstance(val, Decimal):
                 object.__setattr__(self, attr, Decimal(str(val)))
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SharedPerformanceParams":
+    def from_dict(cls, data: dict) -> SharedPerformanceParams:
         """Create from a dict, accepting legacy field name variants."""
         d = dict(data)
 
@@ -182,6 +191,6 @@ class SharedPerformanceParams:
         elif "max_drawdown" in d:
             d.pop("max_drawdown")
 
-        known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        known = set(cls.__dataclass_fields__)
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)

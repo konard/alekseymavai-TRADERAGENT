@@ -493,13 +493,15 @@ class ScannerConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable market scanner")
     pairs: list[str] = Field(
         default_factory=lambda: [
-            "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT",
+            "BTC/USDT",
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "DOGE/USDT",
         ],
         description="Trading pairs to scan",
     )
-    interval_minutes: int = Field(
-        default=15, ge=1, le=1440, description="Scan interval in minutes"
-    )
+    interval_minutes: int = Field(default=15, ge=1, le=1440, description="Scan interval in minutes")
     timeframe: str = Field(default="1h", description="OHLCV timeframe for regime analysis")
     ohlcv_limit: int = Field(default=200, ge=50, le=1000, description="OHLCV candles to fetch")
     min_volume_usdt: float = Field(
@@ -557,7 +559,9 @@ class AppConfig(BaseModel):
     )
 
     # Scanner
-    scanner: ScannerConfig = Field(default_factory=ScannerConfig, description="Market scanner configuration")
+    scanner: ScannerConfig = Field(
+        default_factory=ScannerConfig, description="Market scanner configuration"
+    )
 
     # Auto-trade (multi-pair automation)
     auto_trade: AutoTradeConfig = Field(

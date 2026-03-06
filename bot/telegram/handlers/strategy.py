@@ -67,7 +67,9 @@ async def cmd_switch_strategy(message: Message) -> None:
             parse_mode="Markdown",
         )
     except Exception as e:
-        logger.error("switch_strategy_failed", bot_name=bot_name, strategy=strategy_id, error=str(e))
+        logger.error(
+            "switch_strategy_failed", bot_name=bot_name, strategy=strategy_id, error=str(e)
+        )
         await message.answer(f"❌ Failed to switch strategy: {str(e)}")
 
 
@@ -209,7 +211,9 @@ async def cb_strategy_switch(callback: CallbackQuery) -> None:
         await callback.answer(f"❌ {str(e)}", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("strat:") and c.data.endswith(":unlock"))
+@router.callback_query(
+    lambda c: c.data and c.data.startswith("strat:") and c.data.endswith(":unlock")
+)
 async def cb_strategy_unlock(callback: CallbackQuery) -> None:
     """Unlock strategy via inline button."""
     if not _check_auth(callback):

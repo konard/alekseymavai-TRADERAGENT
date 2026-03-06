@@ -15,6 +15,7 @@ The last opposing candle before an impulse move that created a structural event.
   BULL OB: last bearish candle (close < open) before a bullish BOS/CHoCH
   BEAR OB: last bullish candle (close > open) before a bearish BOS/CHoCH
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -90,36 +91,40 @@ class ImbalanceDetector:
             atr_val = self._atr_at(atr, i)
 
             # BULL FVG: candle i-2 high < candle i low
-            gap_low  = high[i - 2]
+            gap_low = high[i - 2]
             gap_high = low[i]
             if gap_high > gap_low:
                 size = gap_high - gap_low
                 if size >= self.min_fvg_atr * atr_val:
-                    results.append(FairValueGap(
-                        index=i - 1,   # middle candle
-                        fvg_type=FVGType.BULL,
-                        gap_high=float(gap_high),
-                        gap_low=float(gap_low),
-                        size=float(size),
-                    ))
+                    results.append(
+                        FairValueGap(
+                            index=i - 1,  # middle candle
+                            fvg_type=FVGType.BULL,
+                            gap_high=float(gap_high),
+                            gap_low=float(gap_low),
+                            size=float(size),
+                        )
+                    )
 
             # BEAR FVG: candle i-2 low > candle i high
             gap_high2 = low[i - 2]
-            gap_low2  = high[i]
+            gap_low2 = high[i]
             if gap_high2 > gap_low2:
                 size = gap_high2 - gap_low2
                 if size >= self.min_fvg_atr * atr_val:
-                    results.append(FairValueGap(
-                        index=i - 1,
-                        fvg_type=FVGType.BEAR,
-                        gap_high=float(gap_high2),
-                        gap_low=float(gap_low2),
-                        size=float(size),
-                    ))
+                    results.append(
+                        FairValueGap(
+                            index=i - 1,
+                            fvg_type=FVGType.BEAR,
+                            gap_high=float(gap_high2),
+                            gap_low=float(gap_low2),
+                            size=float(size),
+                        )
+                    )
 
         # Keep only most recent, sorted ascending
         results.sort(key=lambda f: f.index)
-        results = results[-self.max_fvg_count:]
+        results = results[-self.max_fvg_count :]
 
         # Mark filled FVGs (price has re-entered the gap) using last close
         last_close = float(close[-1])
@@ -128,10 +133,12 @@ class ImbalanceDetector:
             filled = fvg.contains_price(last_close)
             filled_results.append(fvg.model_copy(update={"filled": filled}))
 
-        logger.debug("fvg_detected",
-                     total=len(filled_results),
-                     bull=sum(1 for f in filled_results if f.fvg_type == FVGType.BULL),
-                     bear=sum(1 for f in filled_results if f.fvg_type == FVGType.BEAR))
+        logger.debug(
+            "fvg_detected",
+            total=len(filled_results),
+            bull=sum(1 for f in filled_results if f.fvg_type == FVGType.BULL),
+            bear=sum(1 for f in filled_results if f.fvg_type == FVGType.BEAR),
+        )
         return filled_results
 
     # ------------------------------------------------------------------
@@ -170,24 +177,26 @@ class ImbalanceDetector:
         for ob in results:
             seen[ob.index] = ob
         results = sorted(seen.values(), key=lambda o: o.index)
-        results = results[-self.max_ob_count:]
+        results = results[-self.max_ob_count :]
 
         # Mark invalidated OBs (price has closed through the zone)
         last_close = float(close[-1])
         valid_results: list[OrderBlock] = []
         for ob in results:
-            invalidated = (
-                (ob.ob_type == OBType.BULL and last_close < ob.low) or
-                (ob.ob_type == OBType.BEAR and last_close > ob.high)
+            invalidated = (ob.ob_type == OBType.BULL and last_close < ob.low) or (
+                ob.ob_type == OBType.BEAR and last_close > ob.high
             )
             touched = ob.contains_price(last_close)
-            valid_results.append(ob.model_copy(
-                update={"invalidated": invalidated, "touched": touched}
-            ))
+            valid_results.append(
+                ob.model_copy(update={"invalidated": invalidated, "touched": touched})
+            )
 
-        logger.debug("ob_detected", total=len(valid_results),
-                     bull=sum(1 for o in valid_results if o.ob_type == OBType.BULL),
-                     bear=sum(1 for o in valid_results if o.ob_type == OBType.BEAR))
+        logger.debug(
+            "ob_detected",
+            total=len(valid_results),
+            bull=sum(1 for o in valid_results if o.ob_type == OBType.BULL),
+            bear=sum(1 for o in valid_results if o.ob_type == OBType.BEAR),
+        )
         return valid_results
 
     # ------------------------------------------------------------------
@@ -211,7 +220,7 @@ class ImbalanceDetector:
             # Bullish event → look for last BEARISH candle (close < open)
             ob_type = OBType.BULL
             for i in range(bar - 1, lookback_start - 1, -1):
-                if close[i] < open_[i]:   # bearish candle
+                if close[i] < open_[i]:  # bearish candle
                     atr_val = self._atr_at(atr, i)
                     return OrderBlock(
                         index=i,
@@ -227,7 +236,7 @@ class ImbalanceDetector:
             # Bearish event → look for last BULLISH candle (close > open)
             ob_type = OBType.BEAR
             for i in range(bar - 1, lookback_start - 1, -1):
-                if close[i] > open_[i]:   # bullish candle
+                if close[i] > open_[i]:  # bullish candle
                     atr_val = self._atr_at(atr, i)
                     return OrderBlock(
                         index=i,

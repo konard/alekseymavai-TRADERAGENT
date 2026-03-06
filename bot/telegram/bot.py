@@ -14,6 +14,7 @@ from aiogram.types import BotCommand, CallbackQuery, Message
 
 from bot.orchestrator.bot_orchestrator import BotOrchestrator, BotState
 from bot.orchestrator.events import TradingEvent
+from bot.telegram import keyboards
 from bot.telegram.events import EventListener
 from bot.telegram.formatting import (
     IMPORTANT_EVENTS,
@@ -21,7 +22,6 @@ from bot.telegram.formatting import (
     format_status,
     get_state_emoji,
 )
-from bot.telegram import keyboards
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -132,13 +132,27 @@ class TelegramBot:
         r.callback_query(lambda c: c.data == "menu:portfolio")(self._cb_portfolio_menu)
 
         # Bot selectors  (ctl:<bot>, mon:<bot>, strat:<bot>)
-        r.callback_query(lambda c: c.data and c.data.startswith("ctl:") and c.data.count(":") == 1)(self._cb_control_bot)
-        r.callback_query(lambda c: c.data and c.data.startswith("ctl:") and c.data.count(":") == 2)(self._cb_control_action)
-        r.callback_query(lambda c: c.data and c.data.startswith("mon:") and c.data.count(":") == 1)(self._cb_monitoring_bot)
-        r.callback_query(lambda c: c.data and c.data.startswith("mon:") and c.data.count(":") == 2)(self._cb_monitoring_action)
-        r.callback_query(lambda c: c.data and c.data.startswith("strat:") and c.data.count(":") == 1)(self._cb_strategy_bot)
-        r.callback_query(lambda c: c.data and c.data.startswith("strat:") and ":switch:" in c.data)(self._cb_strategy_switch)
-        r.callback_query(lambda c: c.data and c.data.startswith("strat:") and c.data.endswith(":unlock"))(self._cb_strategy_unlock)
+        r.callback_query(lambda c: c.data and c.data.startswith("ctl:") and c.data.count(":") == 1)(
+            self._cb_control_bot
+        )
+        r.callback_query(lambda c: c.data and c.data.startswith("ctl:") and c.data.count(":") == 2)(
+            self._cb_control_action
+        )
+        r.callback_query(lambda c: c.data and c.data.startswith("mon:") and c.data.count(":") == 1)(
+            self._cb_monitoring_bot
+        )
+        r.callback_query(lambda c: c.data and c.data.startswith("mon:") and c.data.count(":") == 2)(
+            self._cb_monitoring_action
+        )
+        r.callback_query(
+            lambda c: c.data and c.data.startswith("strat:") and c.data.count(":") == 1
+        )(self._cb_strategy_bot)
+        r.callback_query(lambda c: c.data and c.data.startswith("strat:") and ":switch:" in c.data)(
+            self._cb_strategy_switch
+        )
+        r.callback_query(
+            lambda c: c.data and c.data.startswith("strat:") and c.data.endswith(":unlock")
+        )(self._cb_strategy_unlock)
 
         # Portfolio callbacks
         r.callback_query(lambda c: c.data == "port:overview")(self._cb_portfolio_overview)
@@ -503,7 +517,9 @@ class TelegramBot:
                 )
             if "trend_follower" in status:
                 tf = status["trend_follower"]
-                response += f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
+                response += (
+                    f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
+                )
                 stats = tf.get("statistics", {})
                 if stats:
                     response += (
@@ -534,7 +550,6 @@ class TelegramBot:
                     f"Active: {reg.get('active', 0)}\n"
                 )
             await message.answer(response, parse_mode="HTML")
-
 
     async def _cmd_trades(self, message: Message) -> None:
         """Handle /trades [name] [N] — show recent trade history."""
@@ -625,7 +640,9 @@ class TelegramBot:
                 parse_mode="HTML",
             )
         except Exception as e:
-            logger.error("switch_strategy_failed", bot_name=bot_name, strategy=strategy_id, error=str(e))
+            logger.error(
+                "switch_strategy_failed", bot_name=bot_name, strategy=strategy_id, error=str(e)
+            )
             await message.answer(f"❌ Failed to switch strategy: {str(e)}")
 
     async def _cmd_lock_strategy(self, message: Message) -> None:
@@ -736,7 +753,10 @@ class TelegramBot:
         try:
             base_cfg = main_config.bots[0]
             new_cfg = await template_mgr.create_config(
-                symbol=symbol, strategy=strat, exchange_client=exchange_client, base_config=base_cfg,
+                symbol=symbol,
+                strategy=strat,
+                exchange_client=exchange_client,
+                base_config=base_cfg,
             )
             orchestrator = await app.add_bot(new_cfg)
             if orchestrator:
@@ -1005,7 +1025,9 @@ class TelegramBot:
             if orch.risk_manager:
                 risk_status = orch.risk_manager.get_risk_status()
                 if risk_status["pnl_percentage"] is not None:
-                    response += f"<b>Overall:</b>\nP&amp;L %: {float(risk_status['pnl_percentage']):.2%}\n"
+                    response += (
+                        f"<b>Overall:</b>\nP&amp;L %: {float(risk_status['pnl_percentage']):.2%}\n"
+                    )
             return response
 
         if action == "positions":
@@ -1091,7 +1113,9 @@ class TelegramBot:
                 )
             if "trend_follower" in status:
                 tf = status["trend_follower"]
-                response += f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
+                response += (
+                    f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
+                )
                 stats = tf.get("statistics", {})
                 if stats:
                     response += (
@@ -1281,30 +1305,31 @@ class TelegramBot:
 
     async def start(self) -> None:
         logger.info("starting_telegram_bot")
-        await self.bot.set_my_commands([
-            BotCommand(command="status", description="Bot status"),
-            BotCommand(command="list", description="List all bots"),
-            BotCommand(command="start_bot", description="Start a bot"),
-            BotCommand(command="stop_bot", description="Stop a bot"),
-            BotCommand(command="pause", description="Pause a bot"),
-            BotCommand(command="resume", description="Resume a bot"),
-            BotCommand(command="switch_strategy", description="Switch strategy"),
-            BotCommand(command="lock_strategy", description="Lock strategy"),
-            BotCommand(command="unlock_strategy", description="Unlock strategy"),
-            BotCommand(command="balance", description="Current balance"),
-            BotCommand(command="orders", description="Open orders"),
-            BotCommand(command="positions", description="Open positions"),
-            BotCommand(command="pnl", description="Profit and Loss"),
-            BotCommand(command="report", description="Performance report"),
-            BotCommand(command="trades", description="Trade history"),
-            BotCommand(command="scan", description="Scan market"),
-            BotCommand(command="portfolio", description="Portfolio overview"),
-            BotCommand(command="help", description="Help"),
-        ])
+        await self.bot.set_my_commands(
+            [
+                BotCommand(command="status", description="Bot status"),
+                BotCommand(command="list", description="List all bots"),
+                BotCommand(command="start_bot", description="Start a bot"),
+                BotCommand(command="stop_bot", description="Stop a bot"),
+                BotCommand(command="pause", description="Pause a bot"),
+                BotCommand(command="resume", description="Resume a bot"),
+                BotCommand(command="switch_strategy", description="Switch strategy"),
+                BotCommand(command="lock_strategy", description="Lock strategy"),
+                BotCommand(command="unlock_strategy", description="Unlock strategy"),
+                BotCommand(command="balance", description="Current balance"),
+                BotCommand(command="orders", description="Open orders"),
+                BotCommand(command="positions", description="Open positions"),
+                BotCommand(command="pnl", description="Profit and Loss"),
+                BotCommand(command="report", description="Performance report"),
+                BotCommand(command="trades", description="Trade history"),
+                BotCommand(command="scan", description="Scan market"),
+                BotCommand(command="portfolio", description="Portfolio overview"),
+                BotCommand(command="help", description="Help"),
+            ]
+        )
         self._event_listener.start()
         self.event_listener_task = self._event_listener.task
         await self.dp.start_polling(self.bot)
-
 
     async def stop(self) -> None:
         logger.info("stopping_telegram_bot")

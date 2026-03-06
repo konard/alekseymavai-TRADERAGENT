@@ -8,6 +8,7 @@ Warmup requirement: at least min_warmup_bars (default 200) bars before
 returning a meaningful context. Returns an empty SMCContext with
 warmup_complete=False until then.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,8 +27,9 @@ logger = get_logger(__name__)
 _DEFAULT_ATR_PERIOD = 14
 
 
-def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                 period: int = _DEFAULT_ATR_PERIOD) -> np.ndarray:
+def _compute_atr(
+    high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = _DEFAULT_ATR_PERIOD
+) -> np.ndarray:
     """Compute ATR using Wilder's smoothing (EWM with alpha=1/period)."""
     n = len(close)
     tr = np.empty(n)
@@ -36,7 +38,7 @@ def _compute_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray,
         tr[i] = max(
             high[i] - low[i],
             abs(high[i] - close[i - 1]),
-            abs(low[i]  - close[i - 1]),
+            abs(low[i] - close[i - 1]),
         )
     # EWM smoothing
     atr = np.empty(n)
@@ -124,8 +126,8 @@ class SMCAnalyzer:
                 bar_index=n - 1 if n > 0 else 0,
             )
 
-        high  = df["high"].to_numpy(dtype=np.float64)
-        low   = df["low"].to_numpy(dtype=np.float64)
+        high = df["high"].to_numpy(dtype=np.float64)
+        low = df["low"].to_numpy(dtype=np.float64)
         open_ = df["open"].to_numpy(dtype=np.float64)
         close = df["close"].to_numpy(dtype=np.float64)
 
@@ -137,15 +139,15 @@ class SMCAnalyzer:
 
         # 1. Swing detection
         swing_points = find_swing_points(high, low, strength=self.swing_strength)
-        swing_highs  = [s for s in swing_points if s.is_high]
-        swing_lows   = [s for s in swing_points if s.is_low]
+        swing_highs = [s for s in swing_points if s.is_high]
+        swing_lows = [s for s in swing_points if s.is_low]
 
         # 2. Structural events
         structure_events = self._structural.detect(swing_points, close, atr)
 
         # 3. FVG + OB
         fvgs = self._imbalance.detect_fvg(open_, high, low, close, atr)
-        obs  = self._imbalance.detect_ob(open_, high, low, close, atr, structure_events)
+        obs = self._imbalance.detect_ob(open_, high, low, close, atr, structure_events)
 
         # 4. Liquidity levels
         liquidity = self._sd.detect(swing_highs, swing_lows, obs, close)
@@ -172,7 +174,7 @@ class SMCAnalyzer:
         return SMCContext(
             swing_highs=swing_highs,
             swing_lows=swing_lows,
-            structure_events=list(reversed(structure_events)),   # most recent first
+            structure_events=list(reversed(structure_events)),  # most recent first
             order_blocks=obs,
             fair_value_gaps=fvgs,
             liquidity_levels=liquidity,
@@ -189,7 +191,8 @@ class SMCAnalyzer:
     # ------------------------------------------------------------------
 
     def _derive_phase(
-        self, structure_events: list,
+        self,
+        structure_events: list,
     ) -> tuple[SMCPhase, float]:
         """
         Derive market phase from the sequence of structural events.
@@ -208,11 +211,12 @@ class SMCAnalyzer:
         recent = structure_events[-10:]
         bull_count = sum(1 for e in recent if e.is_bullish)
         bear_count = len(recent) - bull_count
-        raw_bias = (bull_count - bear_count) / len(recent)   # in [-1, 1]
+        raw_bias = (bull_count - bear_count) / len(recent)  # in [-1, 1]
         trend_bias = float(np.clip(raw_bias, -1.0, 1.0))
 
         last = structure_events[-1]
         from bot.core.smc.models import StructureType
+
         if last.structure_type == StructureType.BOS_BULL:
             return SMCPhase.BULL_TREND, trend_bias
         if last.structure_type == StructureType.BOS_BEAR:

@@ -49,7 +49,7 @@ class GridAdapter(BaseStrategy):
         # Level 1 — Universal parameter (P1.1 unification)
         risk_per_trade_pct: Optional[Decimal] = None,
     ) -> None:
-        import warnings as _w
+
         self._symbol = symbol
         self._name = name
         self._num_levels = num_levels

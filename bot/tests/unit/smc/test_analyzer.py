@@ -1,17 +1,17 @@
 """
 Integration tests for bot/core/smc/analyzer.py
 """
+
 import numpy as np
 import pandas as pd
-import pytest
 
 from bot.core.smc.analyzer import SMCAnalyzer
 from bot.core.smc.models import SMCContext, SMCPhase
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_df(n: int, trend: str = "bull") -> pd.DataFrame:
     """
@@ -32,23 +32,26 @@ def _make_df(n: int, trend: str = "bull") -> pd.DataFrame:
         close = base + rng.normal(0, 3, n).cumsum()
 
     close = np.clip(close, 10.0, None)
-    high  = close + rng.uniform(1, 5, n)
-    low   = close - rng.uniform(1, 5, n)
-    low   = np.clip(low, 1.0, None)
+    high = close + rng.uniform(1, 5, n)
+    low = close - rng.uniform(1, 5, n)
+    low = np.clip(low, 1.0, None)
     open_ = close + rng.normal(0, 2, n)
 
-    return pd.DataFrame({
-        "open":   open_,
-        "high":   high,
-        "low":    low,
-        "close":  close,
-        "volume": rng.uniform(1000, 5000, n),
-    })
+    return pd.DataFrame(
+        {
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": rng.uniform(1000, 5000, n),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSMCAnalyzer:
     def setup_method(self):
@@ -121,9 +124,18 @@ class TestSMCAnalyzer:
         df = _make_df(100)
         ctx = self.analyzer.analyze(df)
         d = ctx.to_dict()
-        required = ["phase", "trend_bias", "warmup_complete", "bars_analyzed",
-                    "swing_highs", "swing_lows", "structure_events",
-                    "order_blocks", "fair_value_gaps", "liquidity_levels"]
+        required = [
+            "phase",
+            "trend_bias",
+            "warmup_complete",
+            "bars_analyzed",
+            "swing_highs",
+            "swing_lows",
+            "structure_events",
+            "order_blocks",
+            "fair_value_gaps",
+            "liquidity_levels",
+        ]
         for key in required:
             assert key in d, f"Missing key: {key}"
 

@@ -34,7 +34,7 @@ _BYBIT_DEMO_WS_URL = "wss://stream-demo.bybit.com/v5/public/linear"
 
 # Reconnect delay on connection loss
 _RECONNECT_DELAY = 5  # seconds
-_PING_INTERVAL = 20   # seconds
+_PING_INTERVAL = 20  # seconds
 
 
 class CandleWSFeed:
@@ -173,15 +173,15 @@ class CandleWSFeed:
                 ts_ms = int(kline["start"])
                 candles_to_save.append(
                     {
-                        "time":     datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc),
+                        "time": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc),
                         "exchange": self._exchange_name,
-                        "symbol":   self._symbol,
+                        "symbol": self._symbol,
                         "interval": self._interval,
-                        "open":     float(kline["open"]),
-                        "high":     float(kline["high"]),
-                        "low":      float(kline["low"]),
-                        "close":    float(kline["close"]),
-                        "volume":   float(kline["volume"]),
+                        "open": float(kline["open"]),
+                        "high": float(kline["high"]),
+                        "low": float(kline["low"]),
+                        "close": float(kline["close"]),
+                        "volume": float(kline["volume"]),
                     }
                 )
             except (KeyError, ValueError) as e:
@@ -200,8 +200,18 @@ class CandleWSFeed:
     def _to_bybit_interval(ccxt_interval: str) -> str:
         """Convert CCXT-style interval to Bybit WS interval string."""
         mapping = {
-            "1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30",
-            "1h": "60", "2h": "120", "4h": "240", "6h": "360", "12h": "720",
-            "1d": "D", "1w": "W", "1M": "M",
+            "1m": "1",
+            "3m": "3",
+            "5m": "5",
+            "15m": "15",
+            "30m": "30",
+            "1h": "60",
+            "2h": "120",
+            "4h": "240",
+            "6h": "360",
+            "12h": "720",
+            "1d": "D",
+            "1w": "W",
+            "1M": "M",
         }
         return mapping.get(ccxt_interval, ccxt_interval)

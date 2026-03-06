@@ -29,15 +29,15 @@ class CoordinatedDecision:
     reason: str = ""
 
     @classmethod
-    def grid_only(cls, reason: str = "") -> "CoordinatedDecision":
+    def grid_only(cls, reason: str = "") -> CoordinatedDecision:
         return cls(mode=HybridMode.GRID_ONLY, run_grid=True, run_dca=False, reason=reason)
 
     @classmethod
-    def dca_active(cls, reason: str = "") -> "CoordinatedDecision":
+    def dca_active(cls, reason: str = "") -> CoordinatedDecision:
         return cls(mode=HybridMode.DCA_ACTIVE, run_grid=False, run_dca=True, reason=reason)
 
     @classmethod
-    def both_active(cls, reason: str = "") -> "CoordinatedDecision":
+    def both_active(cls, reason: str = "") -> CoordinatedDecision:
         return cls(mode=HybridMode.GRID_ONLY, run_grid=True, run_dca=True, reason=reason)
 
 

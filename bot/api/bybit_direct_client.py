@@ -458,7 +458,13 @@ class ByBitDirectClient:
                 },
                 "precision": {
                     "amount": abs(
-                        Decimal(lot_size_filter.get("qtyStep", lot_size_filter.get("basePrecision", "0.01"))).as_tuple().exponent
+                        Decimal(
+                            lot_size_filter.get(
+                                "qtyStep", lot_size_filter.get("basePrecision", "0.01")
+                            )
+                        )
+                        .as_tuple()
+                        .exponent
                     ),
                     "price": abs(Decimal(price_filter.get("tickSize", "0.01")).as_tuple().exponent),
                 },

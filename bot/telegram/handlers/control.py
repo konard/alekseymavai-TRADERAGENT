@@ -4,7 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 
-from bot.orchestrator.bot_orchestrator import BotOrchestrator, BotState
+from bot.orchestrator.bot_orchestrator import BotOrchestrator
 from bot.telegram import keyboards
 from bot.telegram.formatting import get_state_emoji
 from bot.utils.logger import get_logger
@@ -39,8 +39,7 @@ async def cmd_start(message: Message) -> None:
         return
 
     await message.answer(
-        "🤖 *TRADERAGENT Bot Manager*\n\n"
-        "Выберите раздел:",
+        "🤖 *TRADERAGENT Bot Manager*\n\n" "Выберите раздел:",
         parse_mode="Markdown",
         reply_markup=keyboards.main_menu(),
     )

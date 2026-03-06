@@ -10,6 +10,7 @@ Detects:
 Liquidity is where stop orders cluster — primarily at EQH/EQL and at
 previous swing extremes that have been tested multiple times.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -17,8 +18,8 @@ import numpy as np
 from bot.core.smc.models import (
     LiquidityLevel,
     LiquidityType,
-    OrderBlock,
     OBType,
+    OrderBlock,
     SwingPoint,
 )
 from bot.utils.logger import get_logger
@@ -70,42 +71,42 @@ class SupplyDemandDetector:
         last_close = float(close[-1]) if len(close) > 0 else 0.0
 
         # 1. Equal Highs
-        levels.extend(self._detect_equal_levels(
-            swing_highs, LiquidityType.EQH, last_close
-        ))
+        levels.extend(self._detect_equal_levels(swing_highs, LiquidityType.EQH, last_close))
 
         # 2. Equal Lows
-        levels.extend(self._detect_equal_levels(
-            swing_lows, LiquidityType.EQL, last_close
-        ))
+        levels.extend(self._detect_equal_levels(swing_lows, LiquidityType.EQL, last_close))
 
         # 3. Supply zones from bearish OBs
         for ob in order_blocks:
             if ob.ob_type == OBType.BEAR and not ob.invalidated:
-                levels.append(LiquidityLevel(
-                    price=ob.high,
-                    liquidity_type=LiquidityType.SUPPLY,
-                    strength=0.7,
-                    touch_count=1,
-                    last_touch_index=ob.index,
-                    swept=ob.invalidated,
-                ))
+                levels.append(
+                    LiquidityLevel(
+                        price=ob.high,
+                        liquidity_type=LiquidityType.SUPPLY,
+                        strength=0.7,
+                        touch_count=1,
+                        last_touch_index=ob.index,
+                        swept=ob.invalidated,
+                    )
+                )
 
         # 4. Demand zones from bullish OBs
         for ob in order_blocks:
             if ob.ob_type == OBType.BULL and not ob.invalidated:
-                levels.append(LiquidityLevel(
-                    price=ob.low,
-                    liquidity_type=LiquidityType.DEMAND,
-                    strength=0.7,
-                    touch_count=1,
-                    last_touch_index=ob.index,
-                    swept=ob.invalidated,
-                ))
+                levels.append(
+                    LiquidityLevel(
+                        price=ob.low,
+                        liquidity_type=LiquidityType.DEMAND,
+                        strength=0.7,
+                        touch_count=1,
+                        last_touch_index=ob.index,
+                        swept=ob.invalidated,
+                    )
+                )
 
         # Sort by price, cap
         levels.sort(key=lambda lv: lv.price)
-        levels = levels[-self.max_levels:]
+        levels = levels[-self.max_levels :]
 
         logger.debug(
             "liquidity_levels_detected",
@@ -162,18 +163,19 @@ class SupplyDemandDetector:
             # strength proportional to touches (capped at 1.0)
             strength = min(1.0, touch_count / 5.0)
             # swept if last close has moved through the level
-            swept = (
-                (liq_type == LiquidityType.EQH and last_close > avg_price * 1.001) or
-                (liq_type == LiquidityType.EQL and last_close < avg_price * 0.999)
+            swept = (liq_type == LiquidityType.EQH and last_close > avg_price * 1.001) or (
+                liq_type == LiquidityType.EQL and last_close < avg_price * 0.999
             )
-            result.append(LiquidityLevel(
-                price=float(avg_price),
-                liquidity_type=liq_type,
-                strength=strength,
-                touch_count=touch_count,
-                last_touch_index=last_index,
-                swept=swept,
-            ))
+            result.append(
+                LiquidityLevel(
+                    price=float(avg_price),
+                    liquidity_type=liq_type,
+                    strength=strength,
+                    touch_count=touch_count,
+                    last_touch_index=last_index,
+                    swept=swept,
+                )
+            )
 
         return result
 
@@ -182,25 +184,25 @@ class SupplyDemandDetector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def nearest_resistance(
-        levels: list[LiquidityLevel], price: float
-    ) -> LiquidityLevel | None:
+    def nearest_resistance(levels: list[LiquidityLevel], price: float) -> LiquidityLevel | None:
         """Nearest EQH or SUPPLY level above the current price."""
         candidates = [
-            lv for lv in levels
-            if lv.price > price and not lv.swept
+            lv
+            for lv in levels
+            if lv.price > price
+            and not lv.swept
             and lv.liquidity_type in (LiquidityType.EQH, LiquidityType.SUPPLY)
         ]
         return min(candidates, key=lambda lv: lv.price, default=None)
 
     @staticmethod
-    def nearest_support(
-        levels: list[LiquidityLevel], price: float
-    ) -> LiquidityLevel | None:
+    def nearest_support(levels: list[LiquidityLevel], price: float) -> LiquidityLevel | None:
         """Nearest EQL or DEMAND level below the current price."""
         candidates = [
-            lv for lv in levels
-            if lv.price < price and not lv.swept
+            lv
+            for lv in levels
+            if lv.price < price
+            and not lv.swept
             and lv.liquidity_type in (LiquidityType.EQL, LiquidityType.DEMAND)
         ]
         return max(candidates, key=lambda lv: lv.price, default=None)

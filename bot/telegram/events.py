@@ -46,9 +46,7 @@ class EventListener:
         """Listen to Redis events and send notifications."""
         logger.info("event_listener_started")
 
-        self.redis_client = redis.from_url(
-            self.redis_url, encoding="utf-8", decode_responses=True
-        )
+        self.redis_client = redis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
 
         pubsub = self.redis_client.pubsub()
         for bot_name in self.bot_names:
@@ -92,6 +90,4 @@ class EventListener:
                 try:
                     await self.bot.send_message(chat_id=chat_id, text=notification)
                 except Exception as e:
-                    logger.error(
-                        "notification_send_failed", chat_id=chat_id, error=str(e)
-                    )
+                    logger.error("notification_send_failed", chat_id=chat_id, error=str(e))

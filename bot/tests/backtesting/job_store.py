@@ -84,9 +84,7 @@ class JobStore:
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         """Get a job by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         if row is None:
             return None
         return self._row_to_dict(row)
@@ -118,9 +116,7 @@ class JobStore:
     def cleanup_old(self, days: int = 30) -> int:
         """Delete jobs older than N days. Returns count deleted."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = self._conn.execute(
-            "DELETE FROM jobs WHERE created_at < ?", (cutoff,)
-        )
+        cursor = self._conn.execute("DELETE FROM jobs WHERE created_at < ?", (cutoff,))
         self._conn.commit()
         return cursor.rowcount
 

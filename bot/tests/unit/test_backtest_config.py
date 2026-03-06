@@ -11,10 +11,9 @@ Covers:
 - P1.1: strategy_params block provides universal defaults for all strategies
 - P1.1: UniversalStrategyParams and SharedPerformanceParams dataclasses
 """
+
 from decimal import Decimal
 from pathlib import Path
-
-import pytest
 
 from bot.tests.backtesting.orchestrator_engine import OrchestratorBacktestConfig
 
@@ -25,6 +24,7 @@ _YAML = str(Path(__file__).parents[3] / "configs" / "phase7_demo.yaml")
 # ---------------------------------------------------------------------------
 # from_yaml_config — BTC/USDT
 # ---------------------------------------------------------------------------
+
 
 class TestFromYamlConfigBTC:
     def setup_method(self):
@@ -108,6 +108,7 @@ class TestFromYamlConfigBTC:
 # from_yaml_config — ETH/USDT (grid only)
 # ---------------------------------------------------------------------------
 
+
 class TestFromYamlConfigETH:
     def setup_method(self):
         self.cfg = OrchestratorBacktestConfig.from_yaml_config(_YAML, "ETH/USDT")
@@ -131,6 +132,7 @@ class TestFromYamlConfigETH:
 # ---------------------------------------------------------------------------
 # from_yaml_config — SOL/USDT (dca only)
 # ---------------------------------------------------------------------------
+
 
 class TestFromYamlConfigSOL:
     def setup_method(self):
@@ -156,6 +158,7 @@ class TestFromYamlConfigSOL:
 # from_yaml_config — unknown symbol returns empty params
 # ---------------------------------------------------------------------------
 
+
 class TestFromYamlConfigUnknown:
     def test_unknown_symbol_empty_params(self):
         cfg = OrchestratorBacktestConfig.from_yaml_config(_YAML, "XYZ/USDT")
@@ -174,9 +177,11 @@ class TestFromYamlConfigUnknown:
 # Adapter constructor defaults match live YAML values
 # ---------------------------------------------------------------------------
 
+
 class TestAdapterDefaults:
     def test_grid_adapter_defaults_match_live(self):
         from bot.strategies.grid_adapter import GridAdapter
+
         a = GridAdapter()
         assert a._num_levels == 6
         assert a._amount_per_grid == Decimal("150")
@@ -184,6 +189,7 @@ class TestAdapterDefaults:
 
     def test_dca_adapter_defaults_match_live(self):
         from bot.strategies.dca_adapter import DCAAdapter
+
         a = DCAAdapter()
         assert a._max_safety_orders == 4
         assert a._price_deviation_pct == Decimal("0.04")
@@ -194,12 +200,14 @@ class TestAdapterDefaults:
 # _cfg_from_yaml helper (from run_backtest_v2 script)
 # ---------------------------------------------------------------------------
 
+
 class TestCfgFromYaml:
     """Tests for the _cfg_from_yaml() helper in run_backtest_v2."""
 
     def _import_helper(self):
-        import importlib.util, sys
+        import importlib.util
         from pathlib import Path as _P
+
         script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
         spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
         mod = importlib.util.module_from_spec(spec)
@@ -257,12 +265,14 @@ class TestCfgFromYaml:
 # Integration: run_backtest_v2 propagates live params to factories
 # ---------------------------------------------------------------------------
 
+
 class TestScriptFactoryIntegration:
     """Verify that _make_strategy_factories receives live params from the script."""
 
     def _load_script(self):
         import importlib.util
         from pathlib import Path as _P
+
         script = _P(__file__).parents[3] / "scripts" / "run_backtest_v2.py"
         spec = importlib.util.spec_from_file_location("run_backtest_v2", script)
         mod = importlib.util.module_from_spec(spec)
@@ -308,11 +318,13 @@ class TestScriptFactoryIntegration:
 # P1.1 — Unified Strategy Parameter Model: UniversalStrategyParams
 # ---------------------------------------------------------------------------
 
+
 class TestUniversalStrategyParams:
     """Tests for the UniversalStrategyParams dataclass (base_params.py)."""
 
     def test_default_construction(self):
         from bot.strategies.base_params import UniversalStrategyParams
+
         p = UniversalStrategyParams()
         assert p.symbol == "BTC/USDT"
         assert p.risk_per_trade_pct == Decimal("0.01")
@@ -324,12 +336,15 @@ class TestUniversalStrategyParams:
 
     def test_from_dict_basic(self):
         from bot.strategies.base_params import UniversalStrategyParams
-        p = UniversalStrategyParams.from_dict({
-            "symbol": "ETH/USDT",
-            "risk_per_trade_pct": "0.02",
-            "max_position_pct": "0.20",
-            "max_positions": 5,
-        })
+
+        p = UniversalStrategyParams.from_dict(
+            {
+                "symbol": "ETH/USDT",
+                "risk_per_trade_pct": "0.02",
+                "max_position_pct": "0.20",
+                "max_positions": 5,
+            }
+        )
         assert p.symbol == "ETH/USDT"
         assert p.risk_per_trade_pct == Decimal("0.02")
         assert p.max_position_pct == Decimal("0.20")
@@ -338,7 +353,9 @@ class TestUniversalStrategyParams:
     def test_from_dict_legacy_risk_per_trade(self):
         """Legacy 'risk_per_trade' key is mapped to 'risk_per_trade_pct' with warning."""
         import warnings
+
         from bot.strategies.base_params import UniversalStrategyParams
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             p = UniversalStrategyParams.from_dict({"risk_per_trade": "0.03"})
@@ -348,7 +365,9 @@ class TestUniversalStrategyParams:
     def test_from_dict_legacy_max_risk_per_trade_pct(self):
         """Legacy 'max_risk_per_trade_pct' key is mapped to 'risk_per_trade_pct' with warning."""
         import warnings
+
         from bot.strategies.base_params import UniversalStrategyParams
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             p = UniversalStrategyParams.from_dict({"max_risk_per_trade_pct": "0.015"})
@@ -358,6 +377,7 @@ class TestUniversalStrategyParams:
     def test_decimal_coercion_from_string(self):
         """String values are auto-converted to Decimal."""
         from bot.strategies.base_params import UniversalStrategyParams
+
         p = UniversalStrategyParams(risk_per_trade_pct="0.02")  # type: ignore[arg-type]
         assert isinstance(p.risk_per_trade_pct, Decimal)
         assert p.risk_per_trade_pct == Decimal("0.02")
@@ -365,6 +385,7 @@ class TestUniversalStrategyParams:
     def test_decimal_coercion_from_float(self):
         """Float values are auto-converted to Decimal."""
         from bot.strategies.base_params import UniversalStrategyParams
+
         p = UniversalStrategyParams(max_position_pct=0.35)  # type: ignore[arg-type]
         assert isinstance(p.max_position_pct, Decimal)
 
@@ -373,11 +394,13 @@ class TestUniversalStrategyParams:
 # P1.1 — Unified Strategy Parameter Model: SharedPerformanceParams
 # ---------------------------------------------------------------------------
 
+
 class TestSharedPerformanceParams:
     """Tests for the SharedPerformanceParams dataclass (base_params.py)."""
 
     def test_default_construction(self):
         from bot.strategies.base_params import SharedPerformanceParams
+
         p = SharedPerformanceParams()
         assert p.min_risk_reward == Decimal("2.0")
         assert p.max_drawdown_pct == Decimal("0.15")
@@ -388,11 +411,14 @@ class TestSharedPerformanceParams:
 
     def test_from_dict_basic(self):
         from bot.strategies.base_params import SharedPerformanceParams
-        p = SharedPerformanceParams.from_dict({
-            "min_risk_reward": "3.0",
-            "max_drawdown_pct": "0.20",
-            "enable_trailing_stop": False,
-        })
+
+        p = SharedPerformanceParams.from_dict(
+            {
+                "min_risk_reward": "3.0",
+                "max_drawdown_pct": "0.20",
+                "enable_trailing_stop": False,
+            }
+        )
         assert p.min_risk_reward == Decimal("3.0")
         assert p.max_drawdown_pct == Decimal("0.20")
         assert p.enable_trailing_stop is False
@@ -400,7 +426,9 @@ class TestSharedPerformanceParams:
     def test_from_dict_legacy_use_trailing_stop(self):
         """Legacy 'use_trailing_stop' key is mapped to 'enable_trailing_stop' with warning."""
         import warnings
+
         from bot.strategies.base_params import SharedPerformanceParams
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             p = SharedPerformanceParams.from_dict({"use_trailing_stop": False})
@@ -410,7 +438,9 @@ class TestSharedPerformanceParams:
     def test_from_dict_legacy_max_drawdown(self):
         """Legacy 'max_drawdown' key is mapped to 'max_drawdown_pct' with warning."""
         import warnings
+
         from bot.strategies.base_params import SharedPerformanceParams
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             p = SharedPerformanceParams.from_dict({"max_drawdown": "0.25"})
@@ -421,6 +451,7 @@ class TestSharedPerformanceParams:
 # ---------------------------------------------------------------------------
 # P1.1 — strategy_params block in YAML: universal defaults propagation
 # ---------------------------------------------------------------------------
+
 
 class TestStrategyParamsBlock:
     """
@@ -459,39 +490,47 @@ class TestStrategyParamsBlock:
 
     def test_same_risk_per_trade_pct_for_grid_and_dca(self):
         """P1.1 acceptance criterion: Grid and DCA use the same risk_per_trade_pct."""
-        assert self.cfg.grid_params["risk_per_trade_pct"] == self.cfg.dca_params["risk_per_trade_pct"]
+        assert (
+            self.cfg.grid_params["risk_per_trade_pct"] == self.cfg.dca_params["risk_per_trade_pct"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # P1.1 — Adapters accept risk_per_trade_pct parameter
 # ---------------------------------------------------------------------------
 
+
 class TestAdapterRiskPerTradePct:
     """Verify that GridAdapter and DCAAdapter accept risk_per_trade_pct."""
 
     def test_grid_adapter_accepts_risk_per_trade_pct(self):
         from bot.strategies.grid_adapter import GridAdapter
+
         a = GridAdapter(risk_per_trade_pct=Decimal("0.01"))
         assert a._risk_per_trade_pct == Decimal("0.01")
 
     def test_grid_adapter_risk_per_trade_pct_default_is_none(self):
         from bot.strategies.grid_adapter import GridAdapter
+
         a = GridAdapter()
         assert a._risk_per_trade_pct is None
 
     def test_dca_adapter_accepts_risk_per_trade_pct(self):
         from bot.strategies.dca_adapter import DCAAdapter
+
         a = DCAAdapter(risk_per_trade_pct=Decimal("0.01"))
         assert a._risk_per_trade_pct == Decimal("0.01")
 
     def test_dca_adapter_risk_per_trade_pct_default_is_none(self):
         from bot.strategies.dca_adapter import DCAAdapter
+
         a = DCAAdapter()
         assert a._risk_per_trade_pct is None
 
     def test_grid_factory_propagates_risk_per_trade_pct(self):
         """Factory instantiated with risk_per_trade_pct passes it to GridAdapter."""
         from bot.strategies.grid_adapter import GridAdapter
+
         params = {"risk_per_trade_pct": Decimal("0.01"), "num_levels": 6}
         a = GridAdapter(symbol="BTC/USDT", **params)
         assert a._risk_per_trade_pct == Decimal("0.01")
@@ -499,6 +538,7 @@ class TestAdapterRiskPerTradePct:
     def test_dca_factory_propagates_risk_per_trade_pct(self):
         """Factory instantiated with risk_per_trade_pct passes it to DCAAdapter."""
         from bot.strategies.dca_adapter import DCAAdapter
+
         params = {"risk_per_trade_pct": Decimal("0.01"), "max_safety_orders": 4}
         a = DCAAdapter(symbol="BTC/USDT", **params)
         assert a._risk_per_trade_pct == Decimal("0.01")

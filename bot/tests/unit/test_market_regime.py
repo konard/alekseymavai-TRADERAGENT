@@ -9,9 +9,9 @@ Covers:
 - _calculate_confidence() for new regimes
 - _REGIME_TO_STRATEGIES includes SMC
 """
+
 import numpy as np
 import pandas as pd
-import pytest
 
 from bot.core.smc.models import SMCContext, SMCPhase
 from bot.orchestrator.market_regime import (
@@ -20,10 +20,10 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_df(n: int = 300, trend: str = "flat") -> pd.DataFrame:
     rng = np.random.default_rng(42)
@@ -63,6 +63,7 @@ def _smc_ctx(phase: SMCPhase, warmup: bool = True, bias: float = 0.0) -> SMCCont
 # Enum tests
 # ---------------------------------------------------------------------------
 
+
 class TestEnums:
     def test_accumulation_in_market_regime(self):
         assert MarketRegime.ACCUMULATION.value == "accumulation"
@@ -81,6 +82,7 @@ class TestEnums:
 # ---------------------------------------------------------------------------
 # _recommend_strategy
 # ---------------------------------------------------------------------------
+
 
 class TestRecommendStrategy:
     def setup_method(self):
@@ -106,6 +108,7 @@ class TestRecommendStrategy:
 # ---------------------------------------------------------------------------
 # _calculate_confidence
 # ---------------------------------------------------------------------------
+
 
 class TestCalculateConfidence:
     def setup_method(self):
@@ -152,6 +155,7 @@ class TestCalculateConfidence:
 # ---------------------------------------------------------------------------
 # analyze_with_smc
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyzeWithSmc:
     def setup_method(self):
@@ -219,6 +223,7 @@ class TestAnalyzeWithSmc:
 
     def test_returns_regime_analysis_object(self):
         from bot.orchestrator.market_regime import RegimeAnalysis
+
         ctx = _smc_ctx(SMCPhase.DISTRIBUTION, warmup=True)
         result = self.det.analyze_with_smc(self.df, ctx)
         assert isinstance(result, RegimeAnalysis)
@@ -227,6 +232,7 @@ class TestAnalyzeWithSmc:
 # ---------------------------------------------------------------------------
 # Volatility guard (P1.3)
 # ---------------------------------------------------------------------------
+
 
 class TestVolatilityGuard:
     """
@@ -237,20 +243,22 @@ class TestVolatilityGuard:
 
     def test_max_volatility_constant_exists(self):
         from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
         assert hasattr(BotOrchestrator, "_MAX_VOLATILITY_ATR_PCT")
         assert BotOrchestrator._MAX_VOLATILITY_ATR_PCT > 0
 
     def test_max_volatility_default_is_3_pct(self):
         from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
         assert BotOrchestrator._MAX_VOLATILITY_ATR_PCT == 3.0
 
     def test_set_expansion_semantics(self):
         """Guard uses `strategies > prev` (proper superset) to detect expansion."""
         prev = {"grid"}
-        assert {"grid", "smc"} > prev          # adding smc → expansion → blocked
-        assert not ({"grid"} > prev)            # same → not blocked
-        assert not ({"smc"} > prev)             # switch, not superset → not blocked
-        assert not (set() > prev)               # reduction → not blocked
+        assert {"grid", "smc"} > prev  # adding smc → expansion → blocked
+        assert not ({"grid"} > prev)  # same → not blocked
+        assert not ({"smc"} > prev)  # switch, not superset → not blocked
+        assert not (set() > prev)  # reduction → not blocked
 
     def test_reduction_not_blocked_by_guard_semantics(self):
         """Deactivation (prev → subset) is never a proper superset — guard passes."""

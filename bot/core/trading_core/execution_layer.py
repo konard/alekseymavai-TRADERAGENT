@@ -138,9 +138,7 @@ class LiveExecutionLayer(ExecutionLayer):
         price: float | None = None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._client.create_order(
-            symbol, order_type, side, amount, price, params
-        )
+        return await self._client.create_order(symbol, order_type, side, amount, price, params)
 
     async def cancel_order(
         self,
@@ -246,10 +244,7 @@ class BacktestExecutionLayer(ExecutionLayer):
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return [
-            o for o in self._orders
-            if o["symbol"] == symbol and o["status"] == "open"
-        ]
+        return [o for o in self._orders if o["symbol"] == symbol and o["status"] == "open"]
 
     async def fetch_balance(self) -> dict[str, Any]:
         return dict(self._balance)

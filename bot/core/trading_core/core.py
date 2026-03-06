@@ -8,7 +8,7 @@ cooldowns, and risk thresholds are guaranteed to be identical.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from bot.core.trading_core.config import TradingCoreConfig
 from bot.core.trading_core.hybrid_coordinator import HybridCoordinator
@@ -35,7 +35,7 @@ class TradingCore:
     hybrid_coordinator: HybridCoordinator
 
     @classmethod
-    def from_config(cls, config: TradingCoreConfig) -> "TradingCore":
+    def from_config(cls, config: TradingCoreConfig) -> TradingCore:
         """
         Build a TradingCore from a TradingCoreConfig.
 

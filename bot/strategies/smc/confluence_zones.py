@@ -178,26 +178,26 @@ class ConfluenceZoneAnalyzer:
         return self.get_zones_summary()
 
     def get_zones_summary(self) -> dict:
-        active_obs  = [ob  for ob  in self.order_blocks   if ob.status  == ZoneStatus.ACTIVE]
+        active_obs = [ob for ob in self.order_blocks if ob.status == ZoneStatus.ACTIVE]
         active_fvgs = [fvg for fvg in self.fair_value_gaps if fvg.status == ZoneStatus.ACTIVE]
-        active_liq  = [lz  for lz  in self.liquidity_zones if not lz.swept]
+        active_liq = [lz for lz in self.liquidity_zones if not lz.swept]
         return {
             "order_blocks": {
-                "total":   len(self.order_blocks),
-                "active":  len(active_obs),
+                "total": len(self.order_blocks),
+                "active": len(active_obs),
                 "bullish": len([ob for ob in active_obs if ob.is_bullish]),
                 "bearish": len([ob for ob in active_obs if not ob.is_bullish]),
             },
             "fair_value_gaps": {
-                "total":   len(self.fair_value_gaps),
-                "active":  len(active_fvgs),
+                "total": len(self.fair_value_gaps),
+                "active": len(active_fvgs),
                 "bullish": len([fvg for fvg in active_fvgs if fvg.is_bullish]),
                 "bearish": len([fvg for fvg in active_fvgs if not fvg.is_bullish]),
             },
             "liquidity_zones": {
-                "total":     len(self.liquidity_zones),
-                "active":    len(active_liq),
-                "buy_side":  len([lz for lz in active_liq if lz.is_bullish]),
+                "total": len(self.liquidity_zones),
+                "active": len(active_liq),
+                "buy_side": len([lz for lz in active_liq if lz.is_bullish]),
                 "sell_side": len([lz for lz in active_liq if not lz.is_bullish]),
             },
         }
@@ -216,26 +216,24 @@ class ConfluenceZoneAnalyzer:
         fvgs.sort(key=lambda x: x.strength_score, reverse=True)
         return fvgs
 
-    def get_active_liquidity_zones(
-        self, is_bullish: Optional[bool] = None
-    ) -> list[LiquidityZone]:
+    def get_active_liquidity_zones(self, is_bullish: Optional[bool] = None) -> list[LiquidityZone]:
         zones = [lz for lz in self.liquidity_zones if not lz.swept]
         if is_bullish is not None:
             zones = [lz for lz in zones if lz.is_bullish == is_bullish]
         return zones
 
-    def find_confluence_at_price(
-        self, price: Decimal, tolerance: Decimal = Decimal("0.5")
-    ) -> dict:
+    def find_confluence_at_price(self, price: Decimal, tolerance: Decimal = Decimal("0.5")) -> dict:
         tolerance_range = price * (tolerance / Decimal("100"))
-        price_low  = price - tolerance_range
+        price_low = price - tolerance_range
         price_high = price + tolerance_range
-        nearby_obs  = [
-            ob for ob in self.get_active_order_blocks()
+        nearby_obs = [
+            ob
+            for ob in self.get_active_order_blocks()
             if ob.low <= price_high and ob.high >= price_low
         ]
         nearby_fvgs = [
-            fvg for fvg in self.get_active_fvgs()
+            fvg
+            for fvg in self.get_active_fvgs()
             if fvg.gap_low <= price_high and fvg.gap_high >= price_low
         ]
         return {
@@ -319,21 +317,21 @@ class ConfluenceZoneAnalyzer:
         self.liquidity_zones.clear()
         for core_liq in ctx.liquidity_levels:
             # EQH / SUPPLY → buy-side (above price)
-            is_bullish = core_liq.liquidity_type in (
-                LiquidityType.EQH, LiquidityType.SUPPLY
-            )
+            is_bullish = core_liq.liquidity_type in (LiquidityType.EQH, LiquidityType.SUPPLY)
             idx = min(core_liq.last_touch_index, len(df) - 1)
             ts = _to_ts(df.index[idx])
-            self.liquidity_zones.append(LiquidityZone(
-                is_bullish=is_bullish,
-                level=Decimal(str(round(core_liq.price, 8))),
-                end_index=core_liq.last_touch_index,
-                swept=core_liq.swept,
-                index=core_liq.last_touch_index,
-                timestamp=ts,
-                timeframe=self.timeframe,
-                strength_score=core_liq.strength * 100,
-            ))
+            self.liquidity_zones.append(
+                LiquidityZone(
+                    is_bullish=is_bullish,
+                    level=Decimal(str(round(core_liq.price, 8))),
+                    end_index=core_liq.last_touch_index,
+                    swept=core_liq.swept,
+                    index=core_liq.last_touch_index,
+                    timestamp=ts,
+                    timeframe=self.timeframe,
+                    strength_score=core_liq.strength * 100,
+                )
+            )
 
     # ------------------------------------------------------------------
     # Zone strength scoring (unchanged from v1)
@@ -363,12 +361,14 @@ class ConfluenceZoneAnalyzer:
 
     def _cleanup_zones(self) -> None:
         self.order_blocks = [
-            ob for ob in self.order_blocks
+            ob
+            for ob in self.order_blocks
             if ob.status == ZoneStatus.ACTIVE
             or (ob.invalidated_at and (datetime.now() - ob.invalidated_at).days < 1)
         ][: self.max_active_zones]
         self.fair_value_gaps = [
-            fvg for fvg in self.fair_value_gaps
+            fvg
+            for fvg in self.fair_value_gaps
             if fvg.status in (ZoneStatus.ACTIVE, ZoneStatus.PARTIAL_FILL)
             or (fvg.filled_at and (datetime.now() - fvg.filled_at).days < 1)
         ][: self.max_active_zones]
@@ -387,6 +387,7 @@ class ConfluenceZoneAnalyzer:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_ts(val) -> pd.Timestamp:
     if isinstance(val, pd.Timestamp):
