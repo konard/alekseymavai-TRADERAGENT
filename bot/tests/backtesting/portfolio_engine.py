@@ -147,7 +147,7 @@ class PortfolioBacktestEngine:
                 initial_balance=per_pair_capital,
                 lookback=template.lookback,
                 warmup_bars=template.warmup_bars,
-                analyze_every_n=template.analyze_every_n,
+                default_analyze_every_n=template.default_analyze_every_n,
                 enable_grid=template.enable_grid,
                 enable_dca=template.enable_dca,
                 enable_trend_follower=template.enable_trend_follower,
