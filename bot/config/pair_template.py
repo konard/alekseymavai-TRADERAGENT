@@ -179,14 +179,14 @@ class PairTemplateManager:
                 true_ranges.append(tr)
 
             period = min(14, len(true_ranges))
-            atr = sum(true_ranges[-period:]) / period
+            atr: Decimal = sum(true_ranges[-period:], Decimal(0)) / period
 
             logger.info(
-                "atr_computed",
-                symbol=symbol,
-                current_price=float(current_price),
-                atr=float(atr),
-                atr_pct=float(atr / current_price * 100),
+                "atr_computed symbol=%s current_price=%s atr=%s atr_pct=%s",
+                symbol,
+                float(current_price),
+                float(atr),
+                float(atr / current_price * 100),
             )
             return current_price, atr
 

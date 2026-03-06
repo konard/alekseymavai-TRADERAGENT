@@ -138,7 +138,7 @@ class LiveExecutionLayer(ExecutionLayer):
         price: float | None = None,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._client.create_order(symbol, order_type, side, amount, price, params)
+        return await self._client.create_order(symbol, order_type, side, amount, price, params)  # type: ignore[no-any-return]
 
     async def cancel_order(
         self,
@@ -146,23 +146,23 @@ class LiveExecutionLayer(ExecutionLayer):
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await self._client.cancel_order(order_id, symbol, params)
+        return await self._client.cancel_order(order_id, symbol, params)  # type: ignore[no-any-return]
 
     async def cancel_all_orders(self, symbol: str) -> list[dict[str, Any]]:
-        return await self._client.cancel_all_orders(symbol)
+        return await self._client.cancel_all_orders(symbol)  # type: ignore[no-any-return]
 
     async def fetch_open_orders(
         self,
         symbol: str,
         params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._client.fetch_open_orders(symbol, params or {})
+        return await self._client.fetch_open_orders(symbol, params or {})  # type: ignore[no-any-return]
 
     async def fetch_balance(self) -> dict[str, Any]:
-        return await self._client.fetch_balance()
+        return await self._client.fetch_balance()  # type: ignore[no-any-return]
 
     async def fetch_ticker(self, symbol: str) -> dict[str, Any]:
-        return await self._client.fetch_ticker(symbol)
+        return await self._client.fetch_ticker(symbol)  # type: ignore[no-any-return]
 
 
 class BacktestExecutionLayer(ExecutionLayer):

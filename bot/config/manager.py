@@ -7,10 +7,11 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import ValidationError
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
 
 from bot.config.schemas import AppConfig, BotConfig
 from bot.utils.logger import LoggerMixin
@@ -39,7 +40,7 @@ class ConfigManager(LoggerMixin):
         self._config: AppConfig | None = None
         self._config_hash: str | None = None
         self._reload_callbacks: list[Callable[[AppConfig], None]] = []
-        self._observer: Observer | None = None  # type: ignore[valid-type]
+        self._observer: BaseObserver | None = None
         self._watch_enabled = False
 
         self.logger.info("Initializing ConfigManager", path=str(config_path))

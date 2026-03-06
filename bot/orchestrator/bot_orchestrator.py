@@ -341,7 +341,7 @@ class BotOrchestrator:
                 close_mitigation=pydantic_smc.close_mitigation,
                 join_consecutive_fvg=pydantic_smc.join_consecutive_fvg,
                 liquidity_range_percent=pydantic_smc.liquidity_range_percent,
-                risk_per_trade=pydantic_smc.risk_per_trade,
+                risk_per_trade_pct=pydantic_smc.risk_per_trade,
                 min_risk_reward=pydantic_smc.min_risk_reward,
                 max_position_size=pydantic_smc.max_position_size,
                 require_volume_confirmation=pydantic_smc.require_volume_confirmation,
@@ -840,14 +840,18 @@ class BotOrchestrator:
                         pos = pm.active_positions[pos_id]
                         if self.current_price:
                             base_amount = float(pos.size / self.current_price)
-                            side = "sell" if pos.direction.value == "long" else "buy"
+                            side = "sell" if pos.signal_type.value == "long" else "buy"
                             await self.exchange.create_order(
                                 symbol=self.config.symbol,
                                 order_type="market",
                                 side=side,
                                 amount=base_amount,
                             )
-                            pm.close_position(pos_id, self.current_price)
+                            from bot.strategies.trend_follower.position_manager import (
+                                ExitReason as TFExitReason,
+                            )
+
+                            pm.close_position(pos_id, TFExitReason.MANUAL)
                     logger.info("transition_trend_follower_positions_closed")
                 except Exception as e:
                     logger.error("transition_tf_close_failed", error=str(e))
@@ -1009,7 +1013,7 @@ class BotOrchestrator:
         # Extract ADX from regime analysis if available
         adx: float | None = None
         if self._current_regime and hasattr(self._current_regime, "adx"):
-            adx = self._current_regime.adx  # type: ignore[attr-defined]
+            adx = self._current_regime.adx
 
         # Use TradingCore.hybrid_coordinator for the routing decision
         # (stateless, identical logic to what BacktestOrchestratorEngine uses)

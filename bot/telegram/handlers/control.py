@@ -16,7 +16,7 @@ router = Router()
 
 def _get_orchestrators(obj: Message | CallbackQuery) -> dict[str, BotOrchestrator]:
     """Retrieve orchestrators dict from the bot instance attached to dispatcher."""
-    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[union-attr]
+    return obj.bot._tg_bot_ref.orchestrators  # type: ignore[no-any-return]
 
 
 def _check_auth(obj: Message | CallbackQuery) -> bool:
@@ -25,7 +25,7 @@ def _check_auth(obj: Message | CallbackQuery) -> bool:
     if user is None:
         return False
     chat_id = obj.message.chat.id if isinstance(obj, CallbackQuery) else obj.chat.id
-    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids  # type: ignore[union-attr]
+    return chat_id in obj.bot._tg_bot_ref.allowed_chat_ids
 
 
 # ── Text commands ──────────────────────────────────────────────────────────
