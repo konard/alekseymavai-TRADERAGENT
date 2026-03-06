@@ -586,7 +586,6 @@ def _cfg_from_backtest_yaml(
         "max_safety_orders": int(dca_cfg.get("max_steps", 4)),
         "take_profit_pct": Decimal(str(dca_cfg.get("take_profit_pct", 0.08))),
         "safety_order_size": Decimal(str(dca_cfg.get("safety_order_size", 50))),
-        "catch_up_enabled": bool(dca_cfg.get("catch_up_enabled", True)),
     } if dca_cfg.get("enabled", True) else {}
 
     tf_params = {
