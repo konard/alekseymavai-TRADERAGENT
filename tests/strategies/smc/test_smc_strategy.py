@@ -36,9 +36,9 @@ class TestSMCStrategyInit:
         assert strategy.current_trend == TrendDirection.RANGING
 
     def test_custom_config(self):
-        config = SMCConfig(risk_per_trade=Decimal("0.03"))
+        config = SMCConfig(risk_per_trade_pct=Decimal("0.03"))
         strategy = SMCStrategy(config=config, account_balance=Decimal("50000"))
-        assert strategy.config.risk_per_trade == Decimal("0.03")
+        assert strategy.config.risk_per_trade_pct == Decimal("0.03")
 
     def test_components_initialized(self):
         strategy = SMCStrategy()
@@ -168,10 +168,10 @@ class TestSMCGetState:
         assert "config" in state
 
     def test_state_config_values(self):
-        config = SMCConfig(risk_per_trade=Decimal("0.03"))
+        config = SMCConfig(risk_per_trade_pct=Decimal("0.03"))
         strategy = SMCStrategy(config=config)
         state = strategy.get_strategy_state()
-        assert state["config"]["risk_per_trade"] == Decimal("0.03")
+        assert state["config"]["risk_per_trade_pct"] == Decimal("0.03")
 
 
 class TestSMCPerformanceReport:
@@ -206,7 +206,7 @@ class TestSMCConfigDataclass:
         assert cfg.structure_timeframe == "4h"
         assert cfg.working_timeframe == "1h"
         assert cfg.entry_timeframe == "15m"
-        assert cfg.risk_per_trade == Decimal("0.02")
+        assert cfg.risk_per_trade_pct == Decimal("0.02")
         assert cfg.min_risk_reward == Decimal("2.5")
         assert cfg.swing_length == 10
         assert cfg.close_break is True

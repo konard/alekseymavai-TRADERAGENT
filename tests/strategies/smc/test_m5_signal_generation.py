@@ -5,20 +5,19 @@ Tests for SMC M5 two-level entry: H1 structure → M5 precision entry.
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc.market_structure import TrendDirection
 from bot.strategies.smc.smc_strategy import SMCStrategy
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_df(n: int = 200, trend: str = "up", base: float = 50000.0) -> pd.DataFrame:
     """Create a simple trending OHLCV DataFrame."""
@@ -32,10 +31,10 @@ def _make_df(n: int = 200, trend: str = "up", base: float = 50000.0) -> pd.DataF
 
     df = pd.DataFrame(
         {
-            "open":   closes * 0.999,
-            "high":   closes * 1.005,
-            "low":    closes * 0.995,
-            "close":  closes,
+            "open": closes * 0.999,
+            "high": closes * 1.005,
+            "low": closes * 0.995,
+            "close": closes,
             "volume": np.random.uniform(100, 1000, n),
         },
         index=pd.date_range("2024-01-01", periods=n, freq="5min"),
@@ -61,6 +60,7 @@ def _make_strategy(swing_length_m5: int = 20, swing_length_h1: int = 10) -> SMCS
 # 1. SMCConfig has the new fields
 # ---------------------------------------------------------------------------
 
+
 def test_smc_config_has_m5_fields():
     config = SMCConfig()
     assert hasattr(config, "swing_length_m5")
@@ -81,6 +81,7 @@ def test_smc_config_m5_defaults():
 # 2. generate_signals_m5 method exists
 # ---------------------------------------------------------------------------
 
+
 def test_strategy_has_generate_signals_m5():
     strategy = _make_strategy()
     assert hasattr(strategy, "generate_signals_m5")
@@ -91,6 +92,7 @@ def test_strategy_has_generate_signals_m5():
 # 3. Empty DataFrames return empty list
 # ---------------------------------------------------------------------------
 
+
 def test_m5_returns_empty_for_empty_dfs():
     strategy = _make_strategy()
     result = strategy.generate_signals_m5(pd.DataFrame(), pd.DataFrame())
@@ -100,6 +102,7 @@ def test_m5_returns_empty_for_empty_dfs():
 # ---------------------------------------------------------------------------
 # 4. Ranging H1 → no signals (no directional bias)
 # ---------------------------------------------------------------------------
+
 
 def test_no_entry_when_h1_is_ranging():
     strategy = _make_strategy()
@@ -122,6 +125,7 @@ def test_no_entry_when_h1_is_ranging():
 # 5. Swing length M5 is respected (config value flows through)
 # ---------------------------------------------------------------------------
 
+
 def test_swing_length_m5_respected():
     config = SMCConfig(swing_length_m5=30, warmup_bars=0)
     object.__setattr__(config, "warmup_bars", 0)
@@ -133,6 +137,7 @@ def test_swing_length_m5_respected():
 # ---------------------------------------------------------------------------
 # 6. In warmup → no signals
 # ---------------------------------------------------------------------------
+
 
 def test_no_signals_during_warmup():
     config = SMCConfig(warmup_bars=100, swing_length_m5=20)
@@ -149,6 +154,7 @@ def test_no_signals_during_warmup():
 # ---------------------------------------------------------------------------
 # 7. Adapter uses generate_signals_m5 when M5 cache available
 # ---------------------------------------------------------------------------
+
 
 def test_adapter_uses_m5_when_cached():
     from bot.strategies.smc_adapter import SMCStrategyAdapter
@@ -183,6 +189,7 @@ def test_adapter_uses_m5_when_cached():
 # 8. Adapter falls back to legacy when no M5 cache
 # ---------------------------------------------------------------------------
 
+
 def test_adapter_falls_back_to_legacy_without_m5_cache():
     from bot.strategies.smc_adapter import SMCStrategyAdapter
 
@@ -193,12 +200,12 @@ def test_adapter_falls_back_to_legacy_without_m5_cache():
     df_h1 = _make_df(n=200, trend="up")
     df_m15 = _make_df(n=200, trend="up")
 
-    # No M5 in cache (empty)
+    # No M5 in cache (empty); pass empty df so adapter falls back to legacy H1/M15 path
     adapter._cached_dfs = {"h1": df_h1, "m15": df_m15}
 
     with patch.object(adapter._strategy, "generate_signals_m5", return_value=[]) as mock_m5:
         with patch.object(adapter._strategy, "generate_signals", return_value=[]) as mock_legacy:
-            adapter.generate_signal(df_m15, Decimal("10000"))
+            adapter.generate_signal(pd.DataFrame(), Decimal("10000"))
 
     mock_m5.assert_not_called()
     mock_legacy.assert_called_once()

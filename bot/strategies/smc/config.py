@@ -27,8 +27,8 @@ class SMCConfig:
     swing_length_h1: int = 10  # H1: 10 bars (current default, backward compat)
 
     # OHLCV limits for each timeframe
-    m5_limit: int = 1000    # 1000 M5 candles ≈ 3.5 days history
-    h1_limit: int = 200     # H1 candles for structure (unchanged)
+    m5_limit: int = 1000  # 1000 M5 candles ≈ 3.5 days history
+    h1_limit: int = 200  # H1 candles for structure (unchanged)
 
     # Warmup — skip signal generation for first N calls to build structure
     warmup_bars: int = 100  # auto-computed as max(swing_length * 4, 100) in __post_init__
@@ -45,8 +45,10 @@ class SMCConfig:
     liquidity_range_percent: float = 0.01  # Liquidity: % range for grouping swing clusters
 
     # Risk Management
-    risk_per_trade_pct: Decimal = Decimal("0.02")  # 2% risk per trade (fraction of balance, e.g. 0.02 = 2%)
-    min_risk_reward: Decimal = Decimal("2.0")  # Minimum R:R ratio
+    risk_per_trade_pct: Decimal = Decimal(
+        "0.02"
+    )  # 2% risk per trade (fraction of balance, e.g. 0.02 = 2%)
+    min_risk_reward: Decimal = Decimal("2.5")  # Minimum R:R ratio
     max_position_size: Decimal = Decimal("10000")  # Max position in USD
 
     # Entry Signal parameters

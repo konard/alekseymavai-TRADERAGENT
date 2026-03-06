@@ -312,16 +312,13 @@ class TestMarketStructureAnalyzer(unittest.TestCase):
             elapsed_time, 5000, f"Analysis took {elapsed_time:.2f}ms, should be < 5000ms"
         )
 
-    def test_get_swings_df_returns_dataframe(self):
-        """Test get_swings_df returns valid DataFrame after analysis"""
+    def test_get_swings_df_returns_none_after_analysis(self):
+        """get_swings_df always returns None — swings are now in get_smc_context()."""
         df = self._create_sample_data("uptrend", length=100)
         self.analyzer.analyze(df)
 
-        swings_df = self.analyzer.get_swings_df()
-        self.assertIsNotNone(swings_df)
-        self.assertIsInstance(swings_df, pd.DataFrame)
-        self.assertIn("HighLow", swings_df.columns)
-        self.assertIn("Level", swings_df.columns)
+        # get_swings_df() was replaced by get_smc_context(); always returns None
+        self.assertIsNone(self.analyzer.get_swings_df())
 
     def test_get_swings_df_none_before_analysis(self):
         """Test get_swings_df returns None before analysis"""
