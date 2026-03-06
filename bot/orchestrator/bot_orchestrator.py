@@ -175,7 +175,7 @@ class BotOrchestrator:
         self._regime_stale_threshold: float = 2.0 * self._regime_check_interval
         self._active_strategies: set[str] = set()  # strategies active for current regime
         self._last_strategy_switch_at: float = 0.0  # monotonic timestamp of last switch
-        self._last_active_strategies_update_at: float = 0.0  # throttle _update_active_strategies
+        self._last_active_strategies_update_at: float = -float("inf")  # throttle _update_active_strategies; -inf ensures first tick always runs regardless of system uptime
         # Cooldown also sourced from TradingCore (single source of truth with backtest).
         self._strategy_switch_cooldown: float = float(self._trading_core.config.cooldown_seconds)
 
@@ -915,7 +915,7 @@ class BotOrchestrator:
                 # Update which strategies should run based on regime (#283, #292).
                 # Throttled to _regime_check_interval so we don't re-evaluate every tick —
                 # regime data itself only refreshes that often.  The first iteration always
-                # runs (monotonic() ≫ 0, so now - 0.0 is always ≥ interval).
+                # runs because _last_active_strategies_update_at is initialised to -inf.
                 _now = time.monotonic()
                 if _now - self._last_active_strategies_update_at >= self._regime_check_interval:
                     await self._update_active_strategies()
