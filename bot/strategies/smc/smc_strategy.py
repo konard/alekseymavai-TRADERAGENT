@@ -259,7 +259,7 @@ class SMCStrategy:
 
         # 1. Determine H1 trend/direction (uses existing market_structure analyser)
         h1_structure = self.market_structure.analyze(df_h1)
-        h1_trend = h1_structure.get("trend", self.current_trend)
+        h1_trend = h1_structure.get("current_trend", self.current_trend)
 
         # No strong directional bias — skip
         if h1_trend == TrendDirection.RANGING:
