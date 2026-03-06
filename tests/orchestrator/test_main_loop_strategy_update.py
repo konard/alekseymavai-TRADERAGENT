@@ -21,7 +21,6 @@ from bot.orchestrator.market_regime import (
     RegimeAnalysis,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -69,7 +68,7 @@ def _make_stub(
     orch._last_active_strategies_update_at = 0.0
     orch._regime_check_interval = regime_check_interval
     # Phase-0 attributes
-    orch._last_regime_update_at = 1.0       # non-zero → skip eager fetch
+    orch._last_regime_update_at = 1.0  # non-zero → skip eager fetch
     orch._regime_stale_threshold = 2.0 * regime_check_interval
     orch.detect_market_regime = AsyncMock(return_value=None)
     # Mocked async helpers
@@ -99,8 +98,12 @@ class TestMainLoopThrottle:
 
     @pytest.mark.asyncio
     async def test_update_called_on_first_tick(self):
-        """_last_active_strategies_update_at == 0 → immediate call on first tick."""
-        orch = _make_stub(regime_check_interval=3600.0)
+        """_last_active_strategies_update_at == 0 → immediate call on first tick.
+
+        Use regime_check_interval=0.0 so the elapsed-time check always passes
+        regardless of system uptime (avoids flakiness on fresh CI runners).
+        """
+        orch = _make_stub(regime_check_interval=0.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         orch._last_active_strategies_update_at = 0.0  # never updated
 
@@ -177,9 +180,7 @@ class TestRegimeChangeCausesStrategyChange:
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
-        orch._current_regime = _make_regime(
-            MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID
-        )
+        orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
         orch._last_strategy_switch_at = 0.0
 
         await orch._update_active_strategies()

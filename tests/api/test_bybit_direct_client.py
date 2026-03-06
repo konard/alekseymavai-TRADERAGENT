@@ -136,13 +136,15 @@ class TestSessionLifecycle:
     async def test_initialize_creates_session(self):
         client = ByBitDirectClient(api_key="k", api_secret="s")
         assert client._session is None
-        await client.initialize()
+        with patch.object(client, "fetch_markets", new_callable=AsyncMock, return_value={}):
+            await client.initialize()
         assert client._session is not None
         await client.close()
 
     async def test_close_cleans_session(self):
         client = ByBitDirectClient(api_key="k", api_secret="s")
-        await client.initialize()
+        with patch.object(client, "fetch_markets", new_callable=AsyncMock, return_value={}):
+            await client.initialize()
         await client.close()
         assert client._session is None
 
@@ -300,6 +302,7 @@ class TestFetchMarkets:
                     "baseCoin": "BTC",
                     "quoteCoin": "USDT",
                     "status": "Trading",
+                    "contractType": "LinearPerpetual",
                     "lotSizeFilter": {
                         "minOrderQty": "0.001",
                         "maxOrderQty": "100",
