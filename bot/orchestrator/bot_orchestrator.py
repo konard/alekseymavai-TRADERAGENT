@@ -7,10 +7,11 @@ Manages Grid, DCA, SMC, and Trend-Follower engines with dynamic strategy selecti
 
 import asyncio
 import time
+from collections.abc import Awaitable
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import redis.asyncio as redis
@@ -204,7 +205,7 @@ class BotOrchestrator:
         # Connect to Redis
         self.redis_client = redis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
         assert self.redis_client is not None
-        await self.redis_client.ping()  # type: ignore[misc]
+        await cast(Awaitable[bool], self.redis_client.ping())
         logger.info("redis_connected")
 
         # Initialize risk manager
