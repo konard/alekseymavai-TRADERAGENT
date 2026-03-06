@@ -156,28 +156,29 @@ class TelegramBot:
             await message.answer("⛔ Unauthorized access")
             return
         await message.answer(
-            "🤖 *TRADERAGENT Bot Manager*\n\n"
+            "🤖 <b>TRADERAGENT Bot Manager</b>\n\n"
             "Welcome to the trading bot management interface.\n\n"
-            "*Available Commands:*\n\n"
-            "*Control:*\n"
-            "/start\\_bot <name> - Start a trading bot\n"
-            "/stop\\_bot <name> - Stop a trading bot\n"
-            "/pause <name> - Pause trading bot\n"
-            "/resume <name> - Resume trading bot\n"
-            "/switch\\_strategy <name> <strategy> - Switch strategy\n"
-            "/lock\\_strategy <name> <strategy> - Lock to a strategy\n"
-            "/unlock\\_strategy <name> - Unlock (auto mode)\n\n"
-            "*Monitoring:*\n"
+            "<b>Available Commands:</b>\n\n"
+            "<b>Control:</b>\n"
+            "/start_bot name - Start a trading bot\n"
+            "/stop_bot name - Stop a trading bot\n"
+            "/pause name - Pause trading bot\n"
+            "/resume name - Resume trading bot\n"
+            "/switch_strategy name strategy - Switch strategy\n"
+            "/lock_strategy name strategy - Lock to a strategy\n"
+            "/unlock_strategy name - Unlock (auto mode)\n\n"
+            "<b>Monitoring:</b>\n"
             "/status [name] - Bot status (all bots if no name)\n"
-            "/balance <name> - Current balance\n"
-            "/orders <name> - Open orders\n"
-            "/positions <name> - Open positions\n"
-            "/pnl <name> - Profit and Loss\n"
-            "/report [name] - Performance report\n/trades [name] [N] - Trade history\n"
+            "/balance name - Current balance\n"
+            "/orders name - Open orders\n"
+            "/positions name - Open positions\n"
+            "/pnl name - Profit and Loss\n"
+            "/report [name] - Performance report\n"
+            "/trades [name] [N] - Trade history\n"
             "/list - List all bots\n\n"
-            "*Other:*\n"
+            "<b>Other:</b>\n"
             "/help - Show this help message\n",
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=keyboards.main_menu(),
         )
 
@@ -194,16 +195,16 @@ class TelegramBot:
         if not self.orchestrators:
             await message.answer("📋 No bots configured")
             return
-        response = "📋 *Available Bots:*\n\n"
+        response = "📋 <b>Available Bots:</b>\n\n"
         for name, orch in self.orchestrators.items():
             state_emoji = get_state_emoji(orch.state)
             response += (
-                f"{state_emoji} *{name}*\n"
+                f"{state_emoji} <b>{name}</b>\n"
                 f"  Symbol: {orch.config.symbol}\n"
                 f"  Strategy: {orch.config.strategy}\n"
                 f"  State: {orch.state.value}\n\n"
             )
-        await message.answer(response, parse_mode="Markdown")
+        await message.answer(response, parse_mode="HTML")
 
     async def _cmd_status(self, message: Message) -> None:
         if not self._check_auth(message):
@@ -216,18 +217,18 @@ class TelegramBot:
                 await message.answer(f"❌ Bot '{bot_name}' not found")
                 return
             status = await self.orchestrators[bot_name].get_status()
-            await message.answer(format_status(status), parse_mode="Markdown")
+            await message.answer(format_status(status), parse_mode="HTML")
         else:
             if not self.orchestrators:
                 await message.answer("📋 No bots configured")
                 return
-            response = "📊 *Bot Status Summary:*\n\n"
+            response = "📊 <b>Bot Status Summary:</b>\n\n"
             for name, orch in self.orchestrators.items():
                 se = get_state_emoji(orch.state)
                 lock_icon = "🔒" if orch._strategy_locked else "🔄"
-                response += f"{se} *{name}*: {orch.state.value} {lock_icon}\n"
-            response += "\nUse `/status <bot_name>` for detailed info"
-            await message.answer(response, parse_mode="Markdown")
+                response += f"{se} <b>{name}</b>: {orch.state.value} {lock_icon}\n"
+            response += "\nUse /status bot_name for detailed info"
+            await message.answer(response, parse_mode="HTML")
 
     async def _cmd_start_bot(self, message: Message) -> None:
         if not self._check_auth(message):
@@ -235,7 +236,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /start_bot <bot_name>")
+            await message.answer("Usage: /start_bot bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -254,7 +255,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /stop_bot <bot_name>")
+            await message.answer("Usage: /stop_bot bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -273,7 +274,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /pause <bot_name>")
+            await message.answer("Usage: /pause bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -292,7 +293,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /resume <bot_name>")
+            await message.answer("Usage: /resume bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -311,7 +312,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /balance <bot_name>")
+            await message.answer("Usage: /balance bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -323,20 +324,20 @@ class TelegramBot:
             quote_currency = orch.config.symbol.split("/")[1]
             available = balance.get(quote_currency, 0)
             response = (
-                f"💰 *Balance for {bot_name}*\n\n"
+                f"💰 <b>Balance for {bot_name}</b>\n\n"
                 f"Currency: {quote_currency}\n"
                 f"Available: {available}\n"
             )
             if orch.risk_manager:
                 risk_status = orch.risk_manager.get_risk_status()
                 response += (
-                    f"\n*Risk Status:*\n"
+                    f"\n<b>Risk Status:</b>\n"
                     f"Initial Balance: {risk_status['initial_balance']}\n"
                     f"Current Balance: {risk_status['current_balance']}\n"
                 )
                 if risk_status["drawdown"] is not None:
                     response += f"Drawdown: {float(risk_status['drawdown']):.2%}\n"
-            await message.answer(response, parse_mode="Markdown")
+            await message.answer(response, parse_mode="HTML")
         except Exception as e:
             logger.error("balance_fetch_failed", bot_name=bot_name, error=str(e))
             await message.answer(f"❌ Failed to fetch balance: {str(e)}")
@@ -347,7 +348,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /orders <bot_name>")
+            await message.answer("Usage: /orders bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -359,17 +360,17 @@ class TelegramBot:
             if not orders:
                 await message.answer(f"📋 No open orders for {bot_name}")
                 return
-            response = f"📋 *Open Orders for {bot_name}*\n\n"
+            response = f"📋 <b>Open Orders for {bot_name}</b>\n\n"
             for order in orders[:10]:
                 response += (
-                    f"ID: `{order['id']}`\n"
+                    f"ID: <code>{order['id']}</code>\n"
                     f"Side: {order['side'].upper()}\n"
                     f"Price: {order['price']}\n"
                     f"Amount: {order['amount']}\n\n"
                 )
             if len(orders) > 10:
                 response += f"... and {len(orders) - 10} more orders"
-            await message.answer(response, parse_mode="Markdown")
+            await message.answer(response, parse_mode="HTML")
         except Exception as e:
             logger.error("orders_fetch_failed", bot_name=bot_name, error=str(e))
             await message.answer(f"❌ Failed to fetch orders: {str(e)}")
@@ -380,18 +381,18 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /pnl <bot_name>")
+            await message.answer("Usage: /pnl bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
             await message.answer(f"❌ Bot '{bot_name}' not found")
             return
         orch = self.orchestrators[bot_name]
-        response = f"📊 *P&L for {bot_name}*\n\n"
+        response = f"📊 <b>P&amp;L for {bot_name}</b>\n\n"
         if orch.grid_engine:
             grid_status = orch.grid_engine.get_grid_status()
             response += (
-                f"*Grid Trading:*\n"
+                f"<b>Grid Trading:</b>\n"
                 f"Total Profit: {grid_status['total_profit']}\n"
                 f"Buy Count: {grid_status['buy_count']}\n"
                 f"Sell Count: {grid_status['sell_count']}\n\n"
@@ -401,7 +402,7 @@ class TelegramBot:
             pnl = orch.dca_engine.position.get_pnl(orch.current_price)
             pnl_pct = orch.dca_engine.position.get_pnl_percentage(orch.current_price)
             response += (
-                f"*DCA Position:*\n"
+                f"<b>DCA Position:</b>\n"
                 f"P&L: {pnl}\n"
                 f"P&L %: {float(pnl_pct):.2%}\n"
                 f"Avg Entry: {dca_status['avg_entry_price']}\n"
@@ -410,8 +411,8 @@ class TelegramBot:
         if orch.risk_manager:
             risk_status = orch.risk_manager.get_risk_status()
             if risk_status["pnl_percentage"] is not None:
-                response += f"*Overall:*\nP&L %: {float(risk_status['pnl_percentage']):.2%}\n"
-        await message.answer(response, parse_mode="Markdown")
+                response += f"<b>Overall:</b>\nP&L %: {float(risk_status['pnl_percentage']):.2%}\n"
+        await message.answer(response, parse_mode="HTML")
 
     async def _cmd_positions(self, message: Message) -> None:
         if not self._check_auth(message):
@@ -419,20 +420,20 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /positions <bot_name>")
+            await message.answer("Usage: /positions bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
             await message.answer(f"❌ Bot '{bot_name}' not found")
             return
         orch = self.orchestrators[bot_name]
-        response = f"📊 *Positions for {bot_name}*\n\n"
+        response = f"📊 <b>Positions for {bot_name}</b>\n\n"
         has_positions = False
         if orch.dca_engine and orch.dca_engine.position:
             has_positions = True
             pos = orch.dca_engine.position
             response += (
-                f"*DCA Position:*\n"
+                f"<b>DCA Position:</b>\n"
                 f"Symbol: {orch.config.symbol}\n"
                 f"Entry: {pos.avg_entry_price}\n"
                 f"Amount: {pos.total_amount}\n"
@@ -447,10 +448,10 @@ class TelegramBot:
             active = orch.trend_follower_strategy.position_manager.active_positions
             if active:
                 has_positions = True
-                response += f"*Trend-Follower ({len(active)} active):*\n"
+                response += f"<b>Trend-Follower ({len(active)} active):</b>\n"
                 for pid, pos in list(active.items())[:5]:
                     response += (
-                        f"ID: `{pid[:8]}`\n"
+                        f"ID: <code>{pid[:8]}</code>\n"
                         f"  Type: {pos.signal_type.value}\n"
                         f"  Entry: {pos.entry_price}\n"
                         f"  Size: {pos.size}\n\n"
@@ -460,14 +461,14 @@ class TelegramBot:
         if orch.grid_engine and orch.grid_engine.active_orders:
             has_positions = True
             orders = orch.grid_engine.active_orders
-            response += f"*Grid Orders ({len(orders)} active):*\n"
+            response += f"<b>Grid Orders ({len(orders)} active):</b>\n"
             for _oid, order in list(orders.items())[:5]:
                 response += f"  {order.side.upper()} @ {order.price}\n"
             if len(orders) > 5:
                 response += f"  ... and {len(orders) - 5} more\n"
         if not has_positions:
             response += "No open positions"
-        await message.answer(response, parse_mode="Markdown")
+        await message.answer(response, parse_mode="HTML")
 
     async def _cmd_report(self, message: Message) -> None:
         if not self._check_auth(message):
@@ -480,7 +481,7 @@ class TelegramBot:
             return
         targets = {bot_name: self.orchestrators[bot_name]} if bot_name else self.orchestrators
         for name, orch in targets.items():
-            response = f"📈 *Performance Report: {name}*\n\n"
+            response = f"📈 <b>Performance Report: {name}</b>\n\n"
             status = await orch.get_status()
             response += f"State: {status['state']}\nStrategy: {status['strategy']}\n"
             if status.get("current_price"):
@@ -488,7 +489,7 @@ class TelegramBot:
             if "grid" in status:
                 grid = status["grid"]
                 response += (
-                    f"\n*Grid:*\n"
+                    f"\n<b>Grid:</b>\n"
                     f"Total Profit: {grid.get('total_profit', 0)}\n"
                     f"Buy Count: {grid.get('buy_count', 0)}\n"
                     f"Sell Count: {grid.get('sell_count', 0)}\n"
@@ -496,13 +497,13 @@ class TelegramBot:
             if "dca" in status:
                 dca = status["dca"]
                 response += (
-                    f"\n*DCA:*\n"
+                    f"\n<b>DCA:</b>\n"
                     f"Position: {'Yes' if dca.get('has_position') else 'No'}\n"
                     f"Steps: {dca.get('current_step', 0)}/{dca.get('max_steps', 0)}\n"
                 )
             if "trend_follower" in status:
                 tf = status["trend_follower"]
-                response += f"\n*Trend-Follower:*\nActive Positions: {tf.get('active_positions', 0)}\n"
+                response += f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
                 stats = tf.get("statistics", {})
                 if stats:
                     response += (
@@ -512,7 +513,7 @@ class TelegramBot:
                     )
             if "risk" in status:
                 risk = status["risk"]
-                response += "\n*Risk:*\n"
+                response += "\n<b>Risk:</b>\n"
                 if risk.get("drawdown") is not None:
                     response += f"Drawdown: {float(risk['drawdown']):.2%}\n"
                 if risk.get("pnl_percentage") is not None:
@@ -521,18 +522,18 @@ class TelegramBot:
             if "market_regime" in status:
                 regime = status["market_regime"]
                 response += (
-                    f"\n*Market Regime:*\n"
+                    f"\n<b>Market Regime:</b>\n"
                     f"Regime: {regime.get('regime', 'unknown')}\n"
                     f"Confidence: {regime.get('confidence', 0):.1%}\n"
                 )
             if "strategy_registry" in status:
                 reg = status["strategy_registry"]
                 response += (
-                    f"\n*Strategies:*\n"
+                    f"\n<b>Strategies:</b>\n"
                     f"Total: {reg.get('total', 0)}\n"
                     f"Active: {reg.get('active', 0)}\n"
                 )
-            await message.answer(response, parse_mode="Markdown")
+            await message.answer(response, parse_mode="HTML")
 
 
     async def _cmd_trades(self, message: Message) -> None:
@@ -589,13 +590,13 @@ class TelegramBot:
                     trades.append(f"TF | {active_count} active (no closed history)")
 
             if not trades:
-                await message.answer(f"📜 *{name}*: No trade history", parse_mode="Markdown")
+                await message.answer(f"📜 <b>{name}</b>: No trade history", parse_mode="HTML")
                 continue
 
-            response = f"📜 *Trade History: {name}* (last {limit})\n\n"
+            response = f"📜 <b>Trade History: {name}</b> (last {limit})\n\n"
             for t in trades[:limit]:
-                response += f"`{t}`\n"
-            await message.answer(response, parse_mode="Markdown")
+                response += f"<code>{t}</code>\n"
+            await message.answer(response, parse_mode="HTML")
 
     async def _cmd_switch_strategy(self, message: Message) -> None:
         if not self._check_auth(message):
@@ -604,8 +605,8 @@ class TelegramBot:
         args = message.text.split() if message.text else []
         if len(args) < 3:
             await message.answer(
-                "Usage: /switch\\_strategy <bot\\_name> <strategy\\_id>\n\n"
-                "Available strategies: grid, dca, trend\\_follower, smc"
+                "Usage: /switch_strategy bot_name strategy_id\n\n"
+                "Available strategies: grid, dca, trend_follower, smc"
             )
             return
         bot_name, strategy_id = args[1], args[2]
@@ -620,8 +621,8 @@ class TelegramBot:
             orch.register_strategy(strategy_id=strategy_id, strategy_type=strategy_id)
             await orch.start_strategy(strategy_id)
             await message.answer(
-                f"✅ Strategy switched to *{strategy_id}* for bot *{bot_name}*",
-                parse_mode="Markdown",
+                f"✅ Strategy switched to <b>{strategy_id}</b> for bot <b>{bot_name}</b>",
+                parse_mode="HTML",
             )
         except Exception as e:
             logger.error("switch_strategy_failed", bot_name=bot_name, strategy=strategy_id, error=str(e))
@@ -634,8 +635,8 @@ class TelegramBot:
         args = message.text.split() if message.text else []
         if len(args) < 3:
             await message.answer(
-                "Usage: /lock\\_strategy <bot\\_name> <strategy1> [strategy2...]\n\n"
-                "Valid strategies: grid, dca, trend\\_follower, smc"
+                "Usage: /lock_strategy bot_name strategy1 [strategy2...]\n\n"
+                "Valid strategies: grid, dca, trend_follower, smc"
             )
             return
         bot_name = args[1]
@@ -652,8 +653,8 @@ class TelegramBot:
             return
         self.orchestrators[bot_name].lock_strategy(requested)
         await message.answer(
-            f"🔒 Bot *{bot_name}* locked to: {', '.join(sorted(requested))}",
-            parse_mode="Markdown",
+            f"🔒 Bot <b>{bot_name}</b> locked to: {', '.join(sorted(requested))}",
+            parse_mode="HTML",
         )
 
     async def _cmd_unlock_strategy(self, message: Message) -> None:
@@ -662,7 +663,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /unlock\\_strategy <bot\\_name>")
+            await message.answer("Usage: /unlock_strategy bot_name")
             return
         bot_name = args[1]
         if bot_name not in self.orchestrators:
@@ -670,8 +671,8 @@ class TelegramBot:
             return
         self.orchestrators[bot_name].unlock_strategy()
         await message.answer(
-            f"🔓 Bot *{bot_name}* unlocked — auto mode resumed",
-            parse_mode="Markdown",
+            f"🔓 Bot <b>{bot_name}</b> unlocked — auto mode resumed",
+            parse_mode="HTML",
         )
 
     async def _cmd_scan(self, message: Message) -> None:
@@ -715,7 +716,7 @@ class TelegramBot:
         args = message.text.split() if message.text else []
         if len(args) < 3:
             await message.answer(
-                "Usage: /create_bot <symbol> <strategy>\n\n"
+                "Usage: /create_bot symbol strategy\n\n"
                 "Example: /create_bot ETH/USDT hybrid\n"
                 "Strategies: grid, dca, hybrid, trend_follower"
             )
@@ -752,7 +753,7 @@ class TelegramBot:
             return
         args = message.text.split() if message.text else []
         if len(args) < 2:
-            await message.answer("Usage: /delete_bot <bot_name>\n\nUse /list to see current bots.")
+            await message.answer("Usage: /delete_bot bot_name\n\nUse /list to see current bots.")
             return
         bot_name = args[1]
         app = getattr(self, "_app", None)
@@ -938,25 +939,220 @@ class TelegramBot:
         if bot_name not in self.orchestrators:
             await callback.answer("Bot not found", show_alert=True)
             return
-        # Reuse text-command handlers by constructing a message
-        msg = callback.message
-        msg.text = f"/{action} {bot_name}"
-        msg.from_user = callback.from_user
-        handler_map = {
-            "status": self._cmd_status,
-            "balance": self._cmd_balance,
-            "pnl": self._cmd_pnl,
-            "positions": self._cmd_positions,
-            "orders": self._cmd_orders,
-            "report": self._cmd_report,
-            "trades": self._cmd_trades,
-        }
-        handler = handler_map.get(action)
-        if handler:
-            await handler(msg)
-        else:
-            await callback.answer("Unknown action", show_alert=True)
+        chat_id = callback.message.chat.id
+        try:
+            response = await self._get_monitoring_response(bot_name, action)
+            await self.bot.send_message(
+                chat_id=chat_id,
+                text=response,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error("monitoring_action_failed", bot_name=bot_name, action=action, error=str(e))
+            await callback.answer(f"Error: {str(e)[:100]}", show_alert=True)
+            return
         await callback.answer()
+
+    async def _get_monitoring_response(self, bot_name: str, action: str) -> str:
+        """Generate monitoring response text for a given bot and action."""
+        orch = self.orchestrators[bot_name]
+
+        if action == "status":
+            status = await orch.get_status()
+            return format_status(status)
+
+        if action == "balance":
+            balance = await orch.exchange.get_balance()
+            quote_currency = orch.config.symbol.split("/")[1]
+            available = balance.get(quote_currency, 0)
+            response = (
+                f"💰 <b>Balance for {bot_name}</b>\n\n"
+                f"Currency: {quote_currency}\n"
+                f"Available: {available}\n"
+            )
+            if orch.risk_manager:
+                risk_status = orch.risk_manager.get_risk_status()
+                response += (
+                    f"\n<b>Risk Status:</b>\n"
+                    f"Initial Balance: {risk_status['initial_balance']}\n"
+                    f"Current Balance: {risk_status['current_balance']}\n"
+                )
+                if risk_status["drawdown"] is not None:
+                    response += f"Drawdown: {float(risk_status['drawdown']):.2%}\n"
+            return response
+
+        if action == "pnl":
+            response = f"📊 <b>P&amp;L for {bot_name}</b>\n\n"
+            if orch.grid_engine:
+                grid_status = orch.grid_engine.get_grid_status()
+                response += (
+                    f"<b>Grid Trading:</b>\n"
+                    f"Total Profit: {grid_status['total_profit']}\n"
+                    f"Buy Count: {grid_status['buy_count']}\n"
+                    f"Sell Count: {grid_status['sell_count']}\n\n"
+                )
+            if orch.dca_engine and orch.dca_engine.position and orch.current_price:
+                dca_status = orch.dca_engine.get_position_status()
+                pnl = orch.dca_engine.position.get_pnl(orch.current_price)
+                pnl_pct = orch.dca_engine.position.get_pnl_percentage(orch.current_price)
+                response += (
+                    f"<b>DCA Position:</b>\n"
+                    f"P&amp;L: {pnl}\n"
+                    f"P&amp;L %: {float(pnl_pct):.2%}\n"
+                    f"Avg Entry: {dca_status['avg_entry_price']}\n"
+                    f"Current Price: {orch.current_price}\n\n"
+                )
+            if orch.risk_manager:
+                risk_status = orch.risk_manager.get_risk_status()
+                if risk_status["pnl_percentage"] is not None:
+                    response += f"<b>Overall:</b>\nP&amp;L %: {float(risk_status['pnl_percentage']):.2%}\n"
+            return response
+
+        if action == "positions":
+            response = f"📊 <b>Positions for {bot_name}</b>\n\n"
+            has_positions = False
+            if orch.dca_engine and orch.dca_engine.position:
+                has_positions = True
+                pos = orch.dca_engine.position
+                response += (
+                    f"<b>DCA Position:</b>\n"
+                    f"Symbol: {orch.config.symbol}\n"
+                    f"Entry: {pos.avg_entry_price}\n"
+                    f"Amount: {pos.total_amount}\n"
+                    f"Steps: {orch.dca_engine.current_step}/{orch.dca_engine.max_steps}\n"
+                )
+                if orch.current_price:
+                    pnl = pos.get_pnl(orch.current_price)
+                    pnl_pct = pos.get_pnl_percentage(orch.current_price)
+                    response += f"P&amp;L: {pnl} ({float(pnl_pct):.2%})\n"
+                response += "\n"
+            if orch.trend_follower_strategy:
+                active = orch.trend_follower_strategy.position_manager.active_positions
+                if active:
+                    has_positions = True
+                    response += f"<b>Trend-Follower ({len(active)} active):</b>\n"
+                    for pid, pos in list(active.items())[:5]:
+                        response += (
+                            f"ID: <code>{pid[:8]}</code>\n"
+                            f"  Type: {pos.signal_type.value}\n"
+                            f"  Entry: {pos.entry_price}\n"
+                            f"  Size: {pos.size}\n\n"
+                        )
+                    if len(active) > 5:
+                        response += f"... and {len(active) - 5} more positions\n"
+            if orch.grid_engine and orch.grid_engine.active_orders:
+                has_positions = True
+                orders = orch.grid_engine.active_orders
+                response += f"<b>Grid Orders ({len(orders)} active):</b>\n"
+                for _oid, order in list(orders.items())[:5]:
+                    response += f"  {order.side.upper()} @ {order.price}\n"
+                if len(orders) > 5:
+                    response += f"  ... and {len(orders) - 5} more\n"
+            if not has_positions:
+                response += "No open positions"
+            return response
+
+        if action == "orders":
+            orders = await orch.exchange.fetch_open_orders(orch.config.symbol)
+            if not orders:
+                return f"📋 No open orders for {bot_name}"
+            response = f"📋 <b>Open Orders for {bot_name}</b>\n\n"
+            for order in orders[:10]:
+                response += (
+                    f"ID: <code>{order['id']}</code>\n"
+                    f"Side: {order['side'].upper()}\n"
+                    f"Price: {order['price']}\n"
+                    f"Amount: {order['amount']}\n\n"
+                )
+            if len(orders) > 10:
+                response += f"... and {len(orders) - 10} more orders"
+            return response
+
+        if action == "report":
+            response = f"📈 <b>Performance Report: {bot_name}</b>\n\n"
+            status = await orch.get_status()
+            response += f"State: {status['state']}\nStrategy: {status['strategy']}\n"
+            if status.get("current_price"):
+                response += f"Current Price: {status['current_price']}\n"
+            if "grid" in status:
+                grid = status["grid"]
+                response += (
+                    f"\n<b>Grid:</b>\n"
+                    f"Total Profit: {grid.get('total_profit', 0)}\n"
+                    f"Buy Count: {grid.get('buy_count', 0)}\n"
+                    f"Sell Count: {grid.get('sell_count', 0)}\n"
+                )
+            if "dca" in status:
+                dca = status["dca"]
+                response += (
+                    f"\n<b>DCA:</b>\n"
+                    f"Position: {'Yes' if dca.get('has_position') else 'No'}\n"
+                    f"Steps: {dca.get('current_step', 0)}/{dca.get('max_steps', 0)}\n"
+                )
+            if "trend_follower" in status:
+                tf = status["trend_follower"]
+                response += f"\n<b>Trend-Follower:</b>\nActive Positions: {tf.get('active_positions', 0)}\n"
+                stats = tf.get("statistics", {})
+                if stats:
+                    response += (
+                        f"Total Trades: {stats.get('total_trades', 0)}\n"
+                        f"Win Rate: {stats.get('win_rate', 0):.1%}\n"
+                        f"Total P&amp;L: {stats.get('total_pnl', 0)}\n"
+                    )
+            if "risk" in status:
+                risk = status["risk"]
+                response += "\n<b>Risk:</b>\n"
+                if risk.get("drawdown") is not None:
+                    response += f"Drawdown: {float(risk['drawdown']):.2%}\n"
+                if risk.get("pnl_percentage") is not None:
+                    response += f"P&amp;L: {float(risk['pnl_percentage']):.2%}\n"
+                response += f"Halted: {'Yes' if risk.get('is_halted') else 'No'}\n"
+            if "market_regime" in status:
+                regime = status["market_regime"]
+                response += (
+                    f"\n<b>Market Regime:</b>\n"
+                    f"Regime: {regime.get('regime', 'unknown')}\n"
+                    f"Confidence: {regime.get('confidence', 0):.1%}\n"
+                )
+            if "strategy_registry" in status:
+                reg = status["strategy_registry"]
+                response += (
+                    f"\n<b>Strategies:</b>\n"
+                    f"Total: {reg.get('total', 0)}\n"
+                    f"Active: {reg.get('active', 0)}\n"
+                )
+            return response
+
+        if action == "trades":
+            trades: list[str] = []
+            if orch.smc_strategy:
+                for pos in reversed(orch.smc_strategy.position_manager.closed_positions[-10:]):
+                    pnl_sign = "+" if pos.realized_pnl >= 0 else ""
+                    exit_r = pos.exit_reason or "?"
+                    hold = f"{pos.hold_time_hours:.1f}h" if pos.hold_time_hours else "?"
+                    trades.append(
+                        f"SMC | {pos.entry_price} → {pos.current_price} | "
+                        f"{pnl_sign}{pos.realized_pnl} | {exit_r} | {hold}"
+                    )
+            if orch.grid_engine:
+                for order in reversed(orch.grid_engine.filled_orders[-10:]):
+                    trades.append(
+                        f"Grid | {order.side.upper()} @ {order.price} | "
+                        f"qty {order.amount} | lvl {order.level}"
+                    )
+            if orch.trend_follower_strategy:
+                pm = orch.trend_follower_strategy.position_manager
+                active_count = len(pm.active_positions)
+                if active_count > 0:
+                    trades.append(f"TF | {active_count} active (no closed history)")
+            if not trades:
+                return f"📜 <b>{bot_name}</b>: No trade history"
+            response = f"📜 <b>Trade History: {bot_name}</b> (last 10)\n\n"
+            for t in trades[:10]:
+                response += f"<code>{t}</code>\n"
+            return response
+
+        return f"Unknown action: {action}"
 
     async def _cb_strategy_bot(self, callback: CallbackQuery) -> None:
         if not self._check_auth_cb(callback):

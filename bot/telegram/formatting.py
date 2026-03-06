@@ -20,11 +20,11 @@ def get_state_emoji(state: BotState) -> str:
 
 
 def format_status(status: dict[str, Any]) -> str:
-    """Format bot status as a Markdown message."""
+    """Format bot status as an HTML message."""
     state_emoji = get_state_emoji(BotState(status["state"]))
 
     message = (
-        f"{state_emoji} *Bot Status: {status['bot_name']}*\n\n"
+        f"{state_emoji} <b>Bot Status: {status['bot_name']}</b>\n\n"
         f"Symbol: {status['symbol']}\n"
         f"Strategy: {status['strategy']}\n"
         f"State: {status['state']}\n"
@@ -47,7 +47,7 @@ def format_status(status: dict[str, Any]) -> str:
     if "grid" in status:
         grid = status["grid"]
         message += (
-            f"\n*Grid Status:*\n"
+            f"\n<b>Grid Status:</b>\n"
             f"Active Orders: {grid['active_orders']}\n"
             f"Total Profit: {grid['total_profit']}\n"
         )
@@ -56,14 +56,14 @@ def format_status(status: dict[str, Any]) -> str:
         dca = status["dca"]
         if dca["has_position"]:
             message += (
-                f"\n*DCA Position:*\n"
+                f"\n<b>DCA Position:</b>\n"
                 f"Steps: {dca['current_step']}/{dca['max_steps']}\n"
                 f"Avg Entry: {dca['avg_entry_price']}\n"
             )
 
     if "risk" in status:
         risk = status["risk"]
-        message += f"\n*Risk Status:*\nHalted: {'Yes' if risk['halted'] else 'No'}\n"
+        message += f"\n<b>Risk Status:</b>\nHalted: {'Yes' if risk['halted'] else 'No'}\n"
         if risk["drawdown"]:
             message += f"Drawdown: {float(risk['drawdown']):.2%}\n"
 
@@ -112,12 +112,12 @@ def format_event_notification(event: TradingEvent) -> str:
     emoji = _EVENT_EMOJI_MAP.get(event.event_type, "ℹ️")
     title = event.event_type.value.replace("_", " ").title()
 
-    message = f"{emoji} *{title}*\n\n"
+    message = f"{emoji} <b>{title}</b>\n\n"
     message += f"Bot: {event.bot_name}\n"
     message += f"Time: {event.timestamp}\n"
 
     if event.data:
-        message += "\n*Details:*\n"
+        message += "\n<b>Details:</b>\n"
         for key, value in event.data.items():
             message += f"{key}: {value}\n"
 
