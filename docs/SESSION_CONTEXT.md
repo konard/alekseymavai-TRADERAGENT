@@ -3821,3 +3821,45 @@ docker compose up webui-backend webui-frontend
 - **Historical Data:** 450 CSV (45 pairs × 10 TF, 5.4 GB) на тестовом сервере (с 2017)
 - **Next Action:** Дождаться Phase 1 → Deploy SMC-фикс на продакшн → P0.1 Router sync
 - **Co-Authored:** Claude Sonnet 4.6
+
+---
+
+## Session 49 — P0.2 + P0.5 (2026-03-06)
+
+### Changes
+
+**P0.2 — Унификация единиц позиции** (`orchestrator_engine.py`, `run_backtest_v2.py`):
+- `from_yaml_config()` принимает `initial_balance` (не хардкоженные $10k)
+- `max_position_pct` = первый бот's `max_position_size / initial_balance`
+- `max_position_size_pct` синхронизирован с `max_position_pct` (RiskManager ≡ position sizing)
+- `_cfg_from_yaml()` передаёт `initial_balance` во всех call sites
+- 3 новых теста в `test_backtest_config.py`
+
+**P0.5 — DCA catch-up в warmup** (`orchestrator_engine.py`):
+- `_run_dca_warmup_catchup()` — новый метод в `BacktestOrchestratorEngine`
+- Устанавливает `_recent_high` из последних 500 warmup-баров
+- `DCAStartupAnalyzer` определяет уровни для pre-open (эквивалент live `_run_dca_catchup()`)
+
+**Архитектурный документ** (`docs/architecture_livebot_vs_backtest.md`):
+- ASCII-диаграммы Live Bot vs BacktestOrchestratorEngine V3.0
+- Таблица сравнения 17 параметров
+
+### P0 Checklist
+| # | Задача | Статус |
+|---|--------|--------|
+| P0.1 | Router hard weights | ✅ `961126f` |
+| P0.2 | Position units % баланса | ✅ `6b4eccf` |
+| P0.3 | max_daily_loss из YAML | ✅ `961126f` |
+| P0.4 | SMC frequency every M5 | ✅ `a730751` |
+| P0.5 | DCA catch-up в warmup | ✅ `6b4eccf` |
+| P0.6 | Верификационный smoke test | 🔴 Следующий |
+
+### Last Commit
+- `6b4eccf` feat(backtest): P0.2+P0.5
+- Tests: 49/49 in `test_backtest_config.py` + `test_orchestrator_engine.py`
+
+### Next Actions
+1. Деплой на тестовый сервер — `git pull` (phase1 smoke BTC 5000 баров)
+2. P0.6 Smoke test — DCA catch-up работает, max_daily_loss=6%, все стратегии дают сделки
+3. Деплой на продакшн (185.233.200.13)
+4. Phase 1 full run (37-45 пар, 50k баров)
