@@ -341,7 +341,7 @@ class BotOrchestrator:
                 close_mitigation=pydantic_smc.close_mitigation,
                 join_consecutive_fvg=pydantic_smc.join_consecutive_fvg,
                 liquidity_range_percent=pydantic_smc.liquidity_range_percent,
-                risk_per_trade=pydantic_smc.risk_per_trade,
+                risk_per_trade_pct=pydantic_smc.risk_per_trade_pct,
                 min_risk_reward=pydantic_smc.min_risk_reward,
                 max_position_size=pydantic_smc.max_position_size,
                 require_volume_confirmation=pydantic_smc.require_volume_confirmation,
