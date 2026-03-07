@@ -1,424 +1,206 @@
-# TRADERAGENT — Интерактивный план развития
+# TRADERAGENT — План развития
 
 > Дата: 2026-03-07 · Версия: v2.0.0
 > На основе: [Анализ проекта](analysis.md) | [Архитектура](architecture.md)
 
 ---
 
-## Как заполнять
+## Обзор направлений
 
-Для каждой задачи заполните три поля:
-
-| Поле | Как заполнить | Пример |
-|------|--------------|--------|
-| **Включить** | замените `[ ]` на `[+]` (да) или `[-]` (нет) | `[+]` |
-| **Очерёдность** | впишите число (1 = первый) | `1` |
-| **Комментарий** | впишите текст после `>` | `> начать с BTC` |
-
-Когда заполните — попросите меня прочитать файл и я скорректирую план.
-
----
-
-## Направление A: Backtest Fix
-
-> P0 — блокирует всё остальное. TF и SMC показывают 0 PnL из-за трёх багов ниже.
+| Направление | Цель | Горизонт |
+|-------------|------|---------|
+| **A. Backtest Fix** | Достоверный P&L для TF и SMC | Неделя 1 |
+| **B. Phase 2 Оптимизация** | Оптимальные параметры для топ-10 пар | Неделя 2–3 |
+| **C. Live↔Backtest Sync** | Единая логика routing в live и backtest | Неделя 1–2 |
+| **D. Phase 3 Портфель** | Multi-pair portfolio backtest | Неделя 4 |
+| **E. Prod Deploy** | Обновить live-боты с оптимальными параметрами | Неделя 5 |
+| **F. AdaptiveRecoveryGrid** | Grid→DCA cascade при пробое нижней границы | Неделя 6+ |
+| **G. Web UI** | Equity curves, live dashboard | Параллельно |
 
 ---
 
-### A1. force_close_all() для TF и SMC
+## Направление A: Backtest Fix (P0 — блокирует всё остальное)
 
-**Что делать:** добавить закрытие всех открытых позиций при деактивации стратегии роутером.
-**Файлы:** `trend_follower_adapter.py`, `smc_adapter.py`
-**Аналог:** `grid_adapter.py:force_close_all()`
-**Эффект:** TF/SMC realized_pnl перестанет быть 0
+### Задачи по приоритету
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**A1. force_close_all() для TF и SMC** 🔴 ПЕРВЫЙ
+- Файлы: `bot/strategies/trend_follower_adapter.py`, `bot/strategies/smc_adapter.py`
+- Логика: при деактивации роутером закрыть все открытые позиции по текущей цене
+- Аналог: `grid_adapter.py:force_close_all()`
+- Тест: добавить тест `test_force_close_all_tf_smc` в `test_multi_strategy_backtesting.py`
+- Ожидаемый результат: TF/SMC realized_pnl ≠ 0
 
----
+**A2. strat_trades — closed round-trips вместо сигналов** 🔴
+- Файл: `bot/tests/backtesting/orchestrator_engine.py:636`
+- Изменение: `strat_trades[strat_name] += 1` переместить в `_handle_exits()`
+- Ожидаемый результат: BATUSDT SMC trades: 4971 → ~50 (реалистично)
 
-### A2. strat_trades — считать закрытые round-trips, не сигналы
+**A3. router_cooldown_bars=2** 🟡
+- Файл: `bot/tests/backtesting/orchestrator_engine.py` (дефолт) + `configs/backtest_phase1.yaml`
+- Изменение: `router_cooldown_bars: 120` → `router_cooldown_bars: 2` (600 сек / 300 сек = 2 бара M5)
+- Обоснование: live-бот cooldown = 600 сек = 2 M5 бара
 
-**Что делать:** перенести `strat_trades += 1` из `_handle_entries()` в `_handle_exits()`.
-**Файл:** `orchestrator_engine.py:636`
-**Эффект:** BATUSDT SMC: 4971 сделок → ~50 (реалистичные цифры)
+**A4. Унифицировать routing: exclusive в live-боте** 🟡
+- Файл: `bot/orchestrator/bot_orchestrator.py:675–695`
+- Изменение: заменить аддитивную логику (TF+SMC добавляются) на exclusive (один режим → одна стратегия)
+- Синхронизировать с `StrategyRouter._compute_target_strategies()`
+- Риск: может изменить поведение live-ботов — тестировать в dry_run
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### A3. router_cooldown_bars: 120 → 2
-
-**Что делать:** исправить дефолтный cooldown на 2 бара (600 сек ÷ 300 сек/бар = 2).
-**Файл:** `orchestrator_engine.py` дефолт + `configs/backtest_phase1.yaml`
-**Эффект:** backtest совпадёт с live-ботом (cooldown = 600 сек)
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### A4. Унифицировать routing: exclusive в live-боте
-
-**Что делать:** заменить аддитивную логику (TF+SMC добавляются) на exclusive (один режим → одна стратегия).
-**Файл:** `bot_orchestrator.py:675–695`
-**Риск:** изменит поведение live-ботов — тестировать в dry_run
-**Эффект:** live и backtest используют одинаковую логику routing
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### A5. win_rate — per-trade расчёт
-
-**Что делать:** трекать выигрышные/убыточные трейды в `_handle_exits()` по-стратегийно.
-**Файл:** `orchestrator_engine.py:_calculate_win_rate_from_pnl`
-**Эффект:** win_rate станет реальным процентом вместо 100%/0%
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**A5. win_rate — per-trade расчёт** 🟠
+- Файл: `bot/tests/backtesting/orchestrator_engine.py:_calculate_win_rate_from_pnl`
+- Изменение: трекать winning/losing трейды в `_handle_exits()` по-стратегийно
 
 ---
 
 ## Направление B: Phase 2 — Оптимизация параметров
 
-> Требует: A1, A2 завершены.
+**Требует**: A1, A2 завершены
 
----
+### Задачи по приоритету
 
-### B1. Определить топ-10 пар для оптимизации
+**B1. Определить топ-10 пар для оптимизации** 🔴
+- Из Phase 1 results: LDOUSDT, SANDUSDT, BCHUSDT, XEMUSDT, BATUSDT, ZILUSDT, SOLUSDT, LTCUSDT, BTCUSDT, HBARUSDT
+- Критерии: Grid Sharpe > 1.5 ИЛИ DCA Sharpe > 2.5
 
-**Что делать:** из Phase 1 results выбрать пары (Grid Sharpe > 1.5 или DCA Sharpe > 2.5).
-**Кандидаты:** LDOUSDT, SANDUSDT, BCHUSDT, XEMUSDT, BATUSDT, ZILUSDT, SOLUSDT, LTCUSDT, BTCUSDT, HBARUSDT
+**B2. Grid search — Grid стратегия** 🔴
+- Параметры: `num_levels` ∈ [4, 6, 8, 10], `profit_per_grid` ∈ [0.008, 0.012, 0.016, 0.02]
+- Запуск: `--mode multi --phases 2` через `run_backtest_v2.py`
+- Метрика оптимизации: Sharpe при `bars_active > 500`
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**B3. Grid search — DCA стратегия** 🔴
+- Параметры: `trigger_pct` ∈ [0.03, 0.04, 0.05], `max_steps` ∈ [3, 4, 5], `take_profit_pct` ∈ [0.06, 0.08, 0.10]
 
----
+**B4. Grid search — TrendFollower** 🟡
+- Параметры: `ema_fast` ∈ [10, 20, 30], `ema_slow` ∈ [40, 50, 60], `risk_per_trade_pct` ∈ [0.005, 0.01, 0.02]
+- Требует: A1 завершён
 
-### B2. Grid search — Grid стратегия
+**B5. Grid search — SMC** 🟡
+- Параметры: `swing_length` ∈ [5, 10, 20], `min_risk_reward` ∈ [1.5, 2.0, 2.5]
+- Требует: A1 завершён
 
-**Параметры:** `num_levels` ∈ [4,6,8,10], `profit_per_grid` ∈ [0.008,0.012,0.016,0.02]
-**Метрика:** Sharpe при `bars_active > 500`
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### B3. Grid search — DCA стратегия
-
-**Параметры:** `trigger_pct` ∈ [0.03,0.04,0.05], `max_steps` ∈ [3,4,5], `take_profit_pct` ∈ [0.06,0.08,0.10]
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### B4. Grid search — TrendFollower
-
-**Параметры:** `ema_fast` ∈ [10,20,30], `ema_slow` ∈ [40,50,60], `risk_per_trade_pct` ∈ [0.005,0.01,0.02]
-**Требует:** A1 завершён
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### B5. Grid search — SMC
-
-**Параметры:** `swing_length` ∈ [5,10,20], `min_risk_reward` ∈ [1.5,2.0,2.5]
-**Требует:** A1 завершён
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### B6. initial_balance=$10,000 для Phase 2
-
-**Что делать:** поднять начальный баланс с $1k до $10k.
-**Эффект:** ложные DAILY LOSS LIMIT срабатывания исчезнут ($600 при $10k vs $60 при $1k)
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**B6. initial_balance=$10,000 для Phase 2** 🟡
+- Избежать ложных DAILY LOSS LIMIT срабатываний ($600 при $10k vs $60 при $1k)
 
 ---
 
 ## Направление C: Live↔Backtest Synchronization
 
----
+**Задачи**
 
-### C1. Exclusive routing в live-боте
+**C1. Exclusive routing в live-боте** 🔴
+- Зависит от: A4
 
-**Зависит от:** A4
+**C2. from_yaml_config() полная синхронизация** 🟡
+- Добавить: `smc.min_risk_reward`, `tf.warmup_bars` в синхронизацию
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### C2. from_yaml_config() — полная синхронизация
-
-**Что делать:** добавить `smc.min_risk_reward`, `tf.warmup_bars` в TradingCore синхронизацию
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### C3. Automated parity tests
-
-**Что делать:** создать `tests/integration/test_live_backtest_parity.py`
-**Проверяет:** идентичность параметров TradingCore и OrchestratorBacktestConfig
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**C3. Automated parity tests** 🟠
+- `tests/integration/test_live_backtest_parity.py`
+- Проверяет: идентичность параметров TradingCore и OrchestratorBacktestConfig
 
 ---
 
 ## Направление D: Phase 3 — Portfolio Backtest
 
-> Требует: B завершён.
+**Требует**: B завершён
 
----
+**D1. Выбор топ-5 пар для портфеля** 🔴
+- После B: выбрать пары с лучшим Sharpe per strategy
+- Цель: Grid × 3 пары + DCA × 2 пары, или TF × 2 + Grid × 3
 
-### D1. Выбор топ-5 пар для портфеля
+**D2. Запустить PortfolioBacktestEngine** 🔴
+- Файл: `bot/tests/backtesting/portfolio_engine.py`
+- SharedCapitalPool: $10,000 / 5 пар = $2,000 на пару
 
-**Цель:** Grid × 3 пары + DCA × 2 пары, или TF × 2 + Grid × 3
+**D3. Корреляционный анализ** 🟡
+- Пары с низкой корреляцией лучше для портфеля
+- Уже реализовано в `PortfolioBacktestEngine.run_correlation_analysis()`
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### D2. Запустить PortfolioBacktestEngine
-
-**Файл:** `bot/tests/backtesting/portfolio_engine.py`
-**Конфиг:** SharedCapitalPool: $10,000 / 5 пар = $2,000 на пару
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### D3. Корреляционный анализ пар
-
-**Уже реализовано:** `PortfolioBacktestEngine.run_correlation_analysis()`
-**Цель:** выбрать пары с низкой взаимной корреляцией
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### D4. Drawdown и portfolio Sharpe
-
-**Критерии:** max portfolio drawdown < 20%, Portfolio Sharpe > 1.0
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**D4. Drawdown и portfolio Sharpe** 🟡
+- Max portfolio drawdown должен быть < 20%
+- Portfolio Sharpe > 1.0
 
 ---
 
 ## Направление E: Production Deploy
 
-> Требует: C, D завершены.
+**Требует**: C, D завершены
+
+**E1. Обновить configs/phase7_demo.yaml** 🔴
+- Применить оптимальные параметры из Phase 2
+- Exclusive routing в live-боте
+
+**E2. Docker rebuild и deploy** 🔴
+- `docker build -t traderagent-bot .` на 185.233.200.13
+- Smoke test перед переключением
+
+**E3. Мониторинг после деплоя** 🟡
+- Сравнить live metrics с backtest предсказаниями
+- KPI: win_rate > 55%, max_drawdown < 10%
 
 ---
 
-### E1. Обновить configs/phase7_demo.yaml
+## Направление F: AdaptiveRecoveryGrid (Future Feature)
 
-**Что делать:** применить оптимальные параметры из Phase 2 + exclusive routing
+**Концепция**: Grid достигает нижней границы → запускается DCA cascade до уровня поддержки SMC → TP при совокупной позиции +1%.
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**Задачи**
 
----
+**F1. SMC.get_nearest_support()** 🟠
+- Добавить метод в `SMCStrategyAdapter`
+- Возвращает: ближайший Order Block ниже текущей цены
 
-### E2. Docker rebuild и deploy на 185.233.200.13
+**F2. CombinedPositionManager** 🟠
+- Отслеживает суммарную позицию Grid+DCA
+- Вычисляет breakeven и динамический TP
 
-**Что делать:** `docker build`, smoke test, переключение
+**F3. Grid→DCA event bus** 🟠
+- При `grid_lower_boundary_hit` событие передаётся в DCA
+- DCA запускает cascade до SMC support level
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### E3. Мониторинг после деплоя
-
-**KPI:** win_rate > 55%, max_drawdown < 10%
-**Действие:** сравнить live metrics с backtest предсказаниями
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-## Направление F: AdaptiveRecoveryGrid
-
-> Концепция: Grid достигает нижней границы → запускается DCA cascade до уровня поддержки SMC → TP при совокупной позиции +1%.
-
----
-
-### F1. SMC.get_nearest_support()
-
-**Что делать:** добавить метод в `SMCStrategyAdapter` — ближайший Order Block ниже текущей цены
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### F2. CombinedPositionManager
-
-**Что делать:** трекать суммарную позицию Grid+DCA, вычислять breakeven и динамический TP
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### F3. Grid→DCA event bus
-
-**Что делать:** при `grid_lower_boundary_hit` — событие передаётся в DCA, который запускает cascade
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### F4. Restart Grid после TP
-
-**Что делать:** после достижения combined TP — закрыть DCA, перезапустить Grid
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**F4. Restart Grid после TP** 🟠
+- После достижения combined TP: закрыть DCA, перезапустить Grid
 
 ---
 
 ## Направление G: Web UI
 
----
+**Задачи**
 
-### G1. Equity curves
+**G1. Equity curves** 🟠
+- lightweight-charts для визуализации backtest results
+- Уже есть: `web/frontend/node_modules/lightweight-charts/`
 
-**Стек:** lightweight-charts (уже есть `web/frontend/node_modules/`)
-**Что делать:** визуализация backtest results
+**G2. Live dashboard** 🟠
+- Текущие позиции, PnL, режим рынка
+- FastAPI backend уже реализован (`web/`)
 
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
-
----
-
-### G2. Live dashboard
-
-**Что делать:** текущие позиции, PnL, режим рынка
-**Стек:** FastAPI backend уже реализован (`web/`)
-
-```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
-```
+**G3. Backtest comparison UI** 🟠
+- Сравнение Phase 1/2/3 результатов по парам и стратегиям
 
 ---
 
-### G3. Backtest comparison UI
-
-**Что делать:** сравнение Phase 1/2/3 результатов по парам и стратегиям
+## Дорожная карта (Timeline)
 
 ```
-Включить:    [ ]   (+/-)
-Очерёдность: ___
-Комментарий: >
+Неделя 1:  A1, A2, A3 (force_close_all + trades counter + cooldown fix)
+Неделя 2:  A4 (routing sync), B1, B2 (Phase 2 Grid optimization)
+Неделя 3:  B3, B4, B5 (Phase 2 DCA/TF/SMC optimization)
+Неделя 4:  D1, D2, D3 (Phase 3 portfolio)
+Неделя 5:  E1, E2, E3 (production deploy)
+Неделя 6+: F (AdaptiveRecoveryGrid), G (Web UI)
 ```
 
 ---
 
-## Общий комментарий к плану
+## Критерии успеха
 
-> (напишите здесь если есть общие замечания, не привязанные к конкретному пункту)
+| Milestone | Критерий |
+|-----------|---------|
+| Phase 2 готов | TF/SMC pnl ≠ 0 на 80%+ пар |
+| Оптимизация завершена | Sharpe > 1.5 для топ-5 пар |
+| Phase 3 портфель | Portfolio Sharpe > 1.0, drawdown < 20% |
+| Production deploy | Live метрики ≈ backtest предсказания ±30% |
+| AdaptiveRecoveryGrid | Тест на BTC: меньше стоп-лоссов vs чистый Grid |
 
 ---
 
