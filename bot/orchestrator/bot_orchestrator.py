@@ -608,13 +608,16 @@ class BotOrchestrator:
 
     # --- Regime-aware strategy selection ---
 
-    _REGIME_TO_STRATEGIES: dict[RecommendedStrategy, set[str]] = {
-        RecommendedStrategy.GRID: {"grid"},
-        RecommendedStrategy.DCA: {"dca"},
-        RecommendedStrategy.HYBRID: {"grid", "dca"},
-        RecommendedStrategy.SMC: {"smc"},
-        RecommendedStrategy.HOLD: set(),
-        RecommendedStrategy.REDUCE_EXPOSURE: set(),
+    # Keys are string values (not enum instances) to avoid Python 3.11 str-Enum hash
+    # edge-cases when looking up by regime.recommended_strategy.value.
+    # Values are frozenset to prevent accidental mutation of the module-level mapping.
+    _REGIME_TO_STRATEGIES: dict[str, frozenset[str]] = {
+        RecommendedStrategy.GRID.value: frozenset({"grid"}),
+        RecommendedStrategy.DCA.value: frozenset({"dca"}),
+        RecommendedStrategy.HYBRID.value: frozenset({"grid", "dca"}),
+        RecommendedStrategy.SMC.value: frozenset({"smc"}),
+        RecommendedStrategy.HOLD.value: frozenset(),
+        RecommendedStrategy.REDUCE_EXPOSURE.value: frozenset(),
     }
 
     # Minimum confidence score [0.0–1.0] required before a strategy switch is
@@ -669,7 +672,7 @@ class BotOrchestrator:
             self._active_strategies = {"grid", "dca", "trend_follower", "smc"}
             return
 
-        strategies = self._REGIME_TO_STRATEGIES.get(recommendation, set()).copy()
+        strategies = set(self._REGIME_TO_STRATEGIES.get(recommendation.value, frozenset()))
 
         # Trend Follower is recommended for trending regimes
         if self._current_regime and self._current_regime.regime.value in (
