@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,6 +23,8 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.strategy_registry import StrategyRegistry
+from bot.orchestrator.strategy_selector import StrategySelector
 
 
 def _make_regime(
@@ -92,6 +94,19 @@ def _make_orchestrator_with_exchange(
     orch.redis_client = None
     orch._publish_event = AsyncMock()
 
+    # StrategySelector: single source of truth for regime→strategy routing.
+    # Pre-register all four strategy types so execute_transition() can start/stop them.
+    registry = StrategyRegistry(max_strategies=10)
+    registry.register("grid-1", "grid", {})
+    registry.register("dca-1", "dca", {})
+    registry.register("trend-1", "trend_follower", {})
+    registry.register("smc-1", "smc", {})
+    orch.strategy_selector = StrategySelector(
+        registry=registry,
+        transition_cooldown_seconds=cooldown,
+        min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+    )
+
     return orch
 
 
@@ -104,12 +119,13 @@ class TestGracefulTransitionOrderCancellation:
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()  # grid engine exists
 
-        # Start with grid active
-        orch._active_strategies = {"grid"}
+        # Step 1: Establish grid as active via StrategySelector
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0  # allow switch
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+        orch.exchange.cancel_all_orders.reset_mock()  # clear setup call counts
 
-        # Switch to DCA (deactivates grid)
+        # Step 2: Switch to DCA regime (deactivates grid)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -122,10 +138,12 @@ class TestGracefulTransitionOrderCancellation:
         orch = _make_orchestrator_with_exchange(dry_run=True)
         orch.grid_engine = MagicMock()
 
-        orch._active_strategies = {"grid"}
+        # Establish grid as active via StrategySelector
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
 
+        # Switch to DCA — in dry_run, no exchange calls
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -137,10 +155,12 @@ class TestGracefulTransitionOrderCancellation:
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = None  # no grid engine
 
-        orch._active_strategies = {"grid"}
+        # Establish grid as active via StrategySelector
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
 
+        # Switch to DCA — no grid_engine so no cancel called
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -151,12 +171,16 @@ class TestGracefulTransitionOrderCancellation:
         """If cancel_all_orders fails, transition still completes."""
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
+
+        # Establish grid as active via StrategySelector
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+
+        # Now make cancel fail
         orch.exchange.cancel_all_orders = AsyncMock(side_effect=Exception("Exchange error"))
 
-        orch._active_strategies = {"grid"}
-        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0
-
+        # Switch to DCA — cancel fails but transition completes
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -176,10 +200,12 @@ class TestGracefulTransitionPositionHandling:
         orch.dca_engine.position = MagicMock()  # has open position
         orch.dca_engine.position.amount = Decimal("500")
 
-        orch._active_strategies = {"dca", "trend_follower", "smc"}
+        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
 
+        # Switch to TIGHT_RANGE (deactivates dca+trend_follower, activates grid)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
@@ -194,13 +220,15 @@ class TestGracefulTransitionPositionHandling:
         orch.dca_engine.position = MagicMock()
         orch.dca_engine.position.amount = Decimal("500")
 
-        orch._active_strategies = {"dca", "trend_follower", "smc"}
+        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
 
         # Patch _close_dca_position to verify it's called
         orch._close_dca_position = AsyncMock()
 
+        # Switch to TIGHT_RANGE — dca deactivated, position should close
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
@@ -214,10 +242,12 @@ class TestGracefulTransitionPositionHandling:
         orch.dca_engine.position = MagicMock()
         orch.dca_engine.position.amount = Decimal("500")
 
-        orch._active_strategies = {"dca", "trend_follower", "smc"}
+        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "dca" in orch._active_strategies
 
+        # Switch to TIGHT_RANGE — in dry_run, no position close calls
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
@@ -233,10 +263,13 @@ class TestGracefulTransitionEvents:
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
 
-        orch._active_strategies = {"grid"}
+        # Establish grid as active via StrategySelector
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+        orch._publish_event.reset_mock()  # clear setup call history
 
+        # Switch to DCA — triggers transition events
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -251,10 +284,13 @@ class TestGracefulTransitionEvents:
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
 
-        orch._active_strategies = {"grid"}
+        # Establish grid as active via StrategySelector
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_strategy_switch_at = 0.0
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+        orch._publish_event.reset_mock()  # clear setup call history
 
+        # Switch to DCA
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
 
@@ -309,24 +345,25 @@ class TestGracefulTransitionIntegration:
 
     @pytest.mark.asyncio
     async def test_full_regime_switch_dca_to_hold(self) -> None:
-        """Regime → HOLD: all strategies deactivated, orders cancelled."""
+        """Regime → HOLD: strategies are kept (HOLD means no-change per StrategySelector)."""
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
         orch.dca_engine = MagicMock()
 
-        # Start with DCA + trend_follower + smc active
+        # Start with DCA + trend_follower active (BEAR_TREND)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
         assert "dca" in orch._active_strategies
 
-        # Regime changes to HOLD
+        # Regime transitions to QUIET_TRANSITION with HOLD recommendation
+        # HOLD means "keep current" — no strategies are deactivated
         orch._current_regime = _make_regime(
             MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD
         )
         await orch._update_active_strategies()
 
-        # All strategies deactivated
-        assert orch._active_strategies == set()
+        # HOLD preserves current strategies (no change in active set)
+        assert "dca" in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_no_fund_loss_on_cancel_failure(self) -> None:

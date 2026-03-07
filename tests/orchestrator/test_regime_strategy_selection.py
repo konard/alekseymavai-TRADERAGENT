@@ -15,6 +15,8 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.strategy_registry import StrategyRegistry
+from bot.orchestrator.strategy_selector import StrategySelector
 
 
 def _make_regime(
@@ -63,6 +65,12 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
+    # StrategySelector: single source of truth for regime→strategy routing
+    orch.strategy_selector = StrategySelector(
+        registry=StrategyRegistry(),
+        transition_cooldown_seconds=cooldown,
+        min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+    )
     return orch
 
 
@@ -100,37 +108,56 @@ class TestRegimeToStrategyMapping:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
+        # StrategySelector routes BULL_TREND → trend_follower + dca (no hardcoded SMC)
         assert "dca" in orch._active_strategies
         assert "trend_follower" in orch._active_strategies
-        assert "smc" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_bull_trend_hybrid_selects_grid_dca_tf_smc(self) -> None:
+    async def test_bull_trend_hybrid_selects_grid_dca_tf(self) -> None:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
         await orch._update_active_strategies()
+        # HYBRID_STRATEGY_WEIGHTS: dca + grid + trend_follower (no SMC)
         assert "grid" in orch._active_strategies
         assert "dca" in orch._active_strategies
         assert "trend_follower" in orch._active_strategies
-        assert "smc" in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_bear_trend_selects_dca_tf_smc(self) -> None:
+    async def test_bear_trend_selects_dca_and_trend_follower(self) -> None:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
+        # StrategySelector routes BEAR_TREND → dca + trend_follower (no hardcoded SMC)
         assert "dca" in orch._active_strategies
         assert "trend_follower" in orch._active_strategies
-        assert "smc" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_quiet_transition_hold_deactivates_all(self) -> None:
+    async def test_quiet_transition_hold_keeps_current(self) -> None:
+        """HOLD recommendation keeps current strategies (no-change behavior)."""
         orch = _make_orchestrator_stub()
-        orch._current_regime = _make_regime(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD)
+        # First establish a prior active state (tight_range → grid)
+        orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
-        assert orch._active_strategies == set()
+        assert "grid" in orch._active_strategies
+        # HOLD on QUIET_TRANSITION keeps current set — grid stays active
+        orch._current_regime = _make_regime(
+            MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD
+        )
+        await orch._update_active_strategies()
+        assert "grid" in orch._active_strategies
+
+    @pytest.mark.asyncio
+    async def test_quiet_transition_grid_activates_grid(self) -> None:
+        """QUIET_TRANSITION with GRID recommendation activates grid strategy."""
+        orch = _make_orchestrator_stub()
+        orch._current_regime = _make_regime(
+            MarketRegime.QUIET_TRANSITION, RecommendedStrategy.GRID
+        )
+        await orch._update_active_strategies()
+        # StrategySelector routes QUIET_TRANSITION → grid (fixes Conflict #2)
+        assert "grid" in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_volatile_transition_reduce_deactivates_all(self) -> None:
@@ -139,8 +166,8 @@ class TestRegimeToStrategyMapping:
             MarketRegime.VOLATILE_TRANSITION, RecommendedStrategy.REDUCE_EXPOSURE
         )
         await orch._update_active_strategies()
-        # volatile_transition enables SMC
-        assert "smc" in orch._active_strategies
+        # REDUCE_EXPOSURE → empty set (no strategies active; fixes Conflict #3)
+        assert "smc" not in orch._active_strategies
         assert "grid" not in orch._active_strategies
         assert "dca" not in orch._active_strategies
 

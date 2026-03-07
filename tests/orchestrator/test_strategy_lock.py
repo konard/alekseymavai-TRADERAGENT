@@ -13,6 +13,8 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.strategy_registry import StrategyRegistry
+from bot.orchestrator.strategy_selector import StrategySelector
 
 
 def _make_regime(
@@ -58,6 +60,12 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
+    # StrategySelector: single source of truth for regime→strategy routing
+    orch.strategy_selector = StrategySelector(
+        registry=StrategyRegistry(),
+        transition_cooldown_seconds=cooldown,
+        min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+    )
     return orch
 
 
