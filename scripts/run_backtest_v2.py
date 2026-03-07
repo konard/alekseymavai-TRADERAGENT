@@ -270,9 +270,12 @@ def _load_data(
                         csv_path,
                         skiprows=range(1, skip + 1) if skip > 0 else None,
                     )
-                    # Parse timestamp from first column (milliseconds epoch)
+                    # Parse timestamp from first column — auto-detect ms epoch vs string
                     ts_col = _df_m5.columns[0]
-                    _df_m5["_ts"] = _pd.to_datetime(_df_m5[ts_col], unit="ms", utc=True)
+                    try:
+                        _df_m5["_ts"] = _pd.to_datetime(_df_m5[ts_col], unit="ms", utc=True)
+                    except (ValueError, TypeError):
+                        _df_m5["_ts"] = _pd.to_datetime(_df_m5[ts_col], utc=True)
                     _df_m5 = _df_m5.set_index("_ts").sort_index()
                     _df_m5 = _df_m5[["open", "high", "low", "close", "volume"]].apply(
                         _pd.to_numeric, errors="coerce"
