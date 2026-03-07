@@ -263,7 +263,7 @@ class TestSelectMethod:
         assert not result.transition_needed
         assert "cooldown" in result.reason.lower()
 
-    def test_transition_blocked_by_short_regime(self):
+    async def test_transition_blocked_by_short_regime(self):
         registry = _make_registry_with_strategies()
         selector = StrategySelector(
             registry,
@@ -271,6 +271,16 @@ class TestSelectMethod:
             min_regime_duration_seconds=120.0,
         )
 
+        # Establish a prior regime first (duration/confidence gates only apply after first call)
+        first = _make_analysis(
+            regime=MarketRegime.TIGHT_RANGE,
+            recommended=RecommendedStrategy.GRID,
+            regime_duration=300,
+        )
+        first_result = selector.select(first)
+        await selector.execute_transition(first_result)
+
+        # Now a young regime should be blocked
         analysis = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
@@ -281,7 +291,7 @@ class TestSelectMethod:
         assert not result.transition_needed
         assert "too young" in result.reason.lower()
 
-    def test_transition_blocked_by_low_confidence(self):
+    async def test_transition_blocked_by_low_confidence(self):
         registry = _make_registry_with_strategies()
         selector = StrategySelector(
             registry,
@@ -289,6 +299,16 @@ class TestSelectMethod:
             min_regime_duration_seconds=0,
         )
 
+        # Establish a prior regime first (duration/confidence gates only apply after first call)
+        first = _make_analysis(
+            regime=MarketRegime.TIGHT_RANGE,
+            recommended=RecommendedStrategy.GRID,
+            confidence=0.8,
+        )
+        first_result = selector.select(first)
+        await selector.execute_transition(first_result)
+
+        # Now a low-confidence analysis should be blocked
         analysis = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
@@ -514,3 +534,209 @@ class TestGetStatus:
         assert status["current_regime"] == "tight_range"
         assert status["last_transition"] is not None
         assert status["history_count"] == 1
+
+
+class TestIntegrationWithBotOrchestrator:
+    """
+    Integration tests verifying StrategySelector is the authoritative router
+    in BotOrchestrator._update_active_strategies() (issue #352).
+
+    Confirms the three conflicts are resolved:
+    - Conflict #1: Single mapping source (DEFAULT_REGIME_STRATEGIES)
+    - Conflict #2: QUIET_TRANSITION routes to grid, not empty set
+    - Conflict #3: VOLATILE_TRANSITION/REDUCE_EXPOSURE → empty (no SMC contradiction)
+    """
+
+    async def test_orchestrator_delegates_to_strategy_selector(self):
+        """BotOrchestrator._update_active_strategies uses StrategySelector."""
+        from unittest.mock import AsyncMock
+
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
+        orch = object.__new__(BotOrchestrator)
+        orch._current_regime = None
+        orch._active_strategies = set()
+        orch._last_strategy_switch_at = 0.0
+        orch._strategy_switch_cooldown = 0.0
+        orch._strategy_locked = False
+        orch._locked_strategies = None
+        orch._last_regime_update_at = 1.0
+        orch._regime_stale_threshold = 120.0
+        orch.detect_market_regime = AsyncMock(return_value=None)
+        orch._publish_event = AsyncMock()
+        orch._graceful_transition = AsyncMock()
+        orch.strategy_selector = StrategySelector(
+            registry=StrategyRegistry(),
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=0.0,
+        )
+
+        # Verify strategy_selector attribute exists
+        assert hasattr(orch, "strategy_selector")
+        assert isinstance(orch.strategy_selector, StrategySelector)
+
+    async def test_conflict1_single_mapping_source(self):
+        """Conflict #1: BULL_TREND uses DEFAULT_REGIME_STRATEGIES, not _REGIME_TO_STRATEGIES."""
+        from unittest.mock import AsyncMock
+
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
+        orch = object.__new__(BotOrchestrator)
+        orch._current_regime = None
+        orch._active_strategies = set()
+        orch._last_strategy_switch_at = 0.0
+        orch._strategy_switch_cooldown = 0.0
+        orch._strategy_locked = False
+        orch._locked_strategies = None
+        orch._last_regime_update_at = 1.0
+        orch._regime_stale_threshold = 120.0
+        orch.detect_market_regime = AsyncMock(return_value=None)
+        orch._publish_event = AsyncMock()
+        orch._graceful_transition = AsyncMock()
+        orch.strategy_selector = StrategySelector(
+            registry=StrategyRegistry(),
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=0.0,
+        )
+
+        analysis = _make_analysis(
+            regime=MarketRegime.BULL_TREND,
+            recommended=RecommendedStrategy.DCA,
+        )
+        orch._current_regime = analysis
+        await orch._update_active_strategies()
+
+        # DEFAULT_REGIME_STRATEGIES: BULL_TREND → trend_follower + dca (no SMC hardcode)
+        assert "trend_follower" in orch._active_strategies
+        assert "dca" in orch._active_strategies
+        # SMC is NOT hardcoded for BULL_TREND in DEFAULT_REGIME_STRATEGIES
+        assert "smc" not in orch._active_strategies
+
+    async def test_conflict2_quiet_transition_activates_grid(self):
+        """Conflict #2: QUIET_TRANSITION/GRID activates grid, not empty set."""
+        from unittest.mock import AsyncMock
+
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
+        orch = object.__new__(BotOrchestrator)
+        orch._current_regime = None
+        orch._active_strategies = set()
+        orch._last_strategy_switch_at = 0.0
+        orch._strategy_switch_cooldown = 0.0
+        orch._strategy_locked = False
+        orch._locked_strategies = None
+        orch._last_regime_update_at = 1.0
+        orch._regime_stale_threshold = 120.0
+        orch.detect_market_regime = AsyncMock(return_value=None)
+        orch._publish_event = AsyncMock()
+        orch._graceful_transition = AsyncMock()
+        orch.strategy_selector = StrategySelector(
+            registry=StrategyRegistry(),
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=0.0,
+        )
+
+        analysis = _make_analysis(
+            regime=MarketRegime.QUIET_TRANSITION,
+            recommended=RecommendedStrategy.GRID,
+        )
+        orch._current_regime = analysis
+        await orch._update_active_strategies()
+
+        # QUIET_TRANSITION → grid (not empty set as in the old buggy code)
+        assert "grid" in orch._active_strategies
+
+    async def test_conflict3_volatile_transition_reduce_empty(self):
+        """Conflict #3: VOLATILE_TRANSITION/REDUCE_EXPOSURE → empty, not {smc}."""
+        from unittest.mock import AsyncMock
+
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
+        orch = object.__new__(BotOrchestrator)
+        orch._current_regime = None
+        orch._active_strategies = set()
+        orch._last_strategy_switch_at = 0.0
+        orch._strategy_switch_cooldown = 0.0
+        orch._strategy_locked = False
+        orch._locked_strategies = None
+        orch._last_regime_update_at = 1.0
+        orch._regime_stale_threshold = 120.0
+        orch.detect_market_regime = AsyncMock(return_value=None)
+        orch._publish_event = AsyncMock()
+        orch._graceful_transition = AsyncMock()
+        orch.strategy_selector = StrategySelector(
+            registry=StrategyRegistry(),
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=0.0,
+        )
+
+        analysis = _make_analysis(
+            regime=MarketRegime.VOLATILE_TRANSITION,
+            recommended=RecommendedStrategy.REDUCE_EXPOSURE,
+        )
+        orch._current_regime = analysis
+        await orch._update_active_strategies()
+
+        # REDUCE_EXPOSURE → empty (SMC contradiction fixed: no SMC in dangerous regime)
+        assert orch._active_strategies == set()
+
+    async def test_selector_is_single_source_of_truth(self):
+        """_REGIME_TO_STRATEGIES class variable no longer exists in BotOrchestrator."""
+        from bot.orchestrator.bot_orchestrator import BotOrchestrator
+
+        # The conflicting _REGIME_TO_STRATEGIES class attribute should be removed
+        assert not hasattr(BotOrchestrator, "_REGIME_TO_STRATEGIES"), (
+            "_REGIME_TO_STRATEGIES still present — mapping must live only in "
+            "strategy_selector.py (DEFAULT_REGIME_STRATEGIES)"
+        )
+
+    async def test_first_transition_not_blocked_by_guards(self):
+        """First transition always proceeds regardless of confidence/duration."""
+        registry = _make_registry_with_strategies()
+        selector = StrategySelector(
+            registry,
+            transition_cooldown_seconds=600.0,  # long cooldown
+            min_regime_duration_seconds=120.0,
+        )
+
+        # Very low confidence and short regime — but it's the first call
+        analysis = _make_analysis(
+            regime=MarketRegime.TIGHT_RANGE,
+            recommended=RecommendedStrategy.GRID,
+            confidence=0.1,  # below 0.3 threshold
+            regime_duration=5,  # below 120s minimum
+        )
+        result = selector.select(analysis)
+
+        # First call is never blocked (cooldown has no prior time, no prior regime)
+        assert result.transition_needed is True
+
+    async def test_subsequent_transitions_respect_guards(self):
+        """After first transition, confidence and duration gates apply."""
+        registry = _make_registry_with_strategies()
+        selector = StrategySelector(
+            registry,
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=120.0,
+        )
+
+        # Establish first regime
+        first = _make_analysis(
+            regime=MarketRegime.TIGHT_RANGE,
+            recommended=RecommendedStrategy.GRID,
+            confidence=0.8,
+            regime_duration=300,
+        )
+        result = selector.select(first)
+        await selector.execute_transition(result)
+
+        # Second call with young regime — should be blocked
+        second = _make_analysis(
+            regime=MarketRegime.BULL_TREND,
+            recommended=RecommendedStrategy.DCA,
+            confidence=0.8,
+            regime_duration=30,  # too young
+        )
+        result2 = selector.select(second)
+        assert result2.transition_needed is False
+        assert "too young" in result2.reason.lower()

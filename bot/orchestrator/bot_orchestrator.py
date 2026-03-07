@@ -37,6 +37,7 @@ from bot.orchestrator.strategy_registry import (
     StrategyInstance,
     StrategyRegistry,
 )
+from bot.orchestrator.strategy_selector import StrategySelector
 from bot.strategies.base import SignalDirection as BaseSignalDirection
 from bot.strategies.dca.dca_signal_generator import MarketState
 from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
@@ -178,6 +179,14 @@ class BotOrchestrator:
         self._last_active_strategies_update_at: float = 0.0  # throttle _update_active_strategies
         # Cooldown also sourced from TradingCore (single source of truth with backtest).
         self._strategy_switch_cooldown: float = float(self._trading_core.config.cooldown_seconds)
+
+        # StrategySelector: single source of truth for regime→strategy mapping.
+        # Replaces the inline _REGIME_TO_STRATEGIES hardcode.
+        self.strategy_selector = StrategySelector(
+            registry=self.strategy_registry,
+            transition_cooldown_seconds=self._strategy_switch_cooldown,
+            min_regime_duration_seconds=float(self._MIN_REGIME_DURATION_SECONDS),
+        )
 
         # Manual strategy lock (prevents auto-switching when locked)
         self._strategy_locked: bool = False
@@ -608,15 +617,6 @@ class BotOrchestrator:
 
     # --- Regime-aware strategy selection ---
 
-    _REGIME_TO_STRATEGIES: dict[RecommendedStrategy, set[str]] = {
-        RecommendedStrategy.GRID: {"grid"},
-        RecommendedStrategy.DCA: {"dca"},
-        RecommendedStrategy.HYBRID: {"grid", "dca"},
-        RecommendedStrategy.SMC: {"smc"},
-        RecommendedStrategy.HOLD: set(),
-        RecommendedStrategy.REDUCE_EXPOSURE: set(),
-    }
-
     # Minimum confidence score [0.0–1.0] required before a strategy switch is
     # allowed.  Below this threshold the regime classification is too uncertain
     # to warrant disrupting running strategies.
@@ -635,13 +635,13 @@ class BotOrchestrator:
     async def _update_active_strategies(self) -> None:
         """Update which strategies should run based on current regime.
 
+        Thin wrapper around StrategySelector — the single source of truth for
+        regime→strategy routing.  All mapping logic lives in
+        strategy_selector.py (DEFAULT_REGIME_STRATEGIES).
+
         Called every iteration of _main_loop.  When no regime has been
         detected yet all configured engines remain active so the bot
         behaves exactly as before the feature was introduced.
-
-        A cooldown guard prevents rapid oscillation between strategy sets.
-        When strategies are deactivated, open orders are cancelled (and
-        optionally positions closed) before the new set is activated.
         """
         if self._strategy_locked and self._locked_strategies is not None:
             if self._active_strategies != self._locked_strategies:
@@ -663,105 +663,54 @@ class BotOrchestrator:
                     threshold_seconds=int(self._regime_stale_threshold),
                 )
 
-        recommendation = self.get_strategy_recommendation()
-        if recommendation is None:
+        analysis = self._current_regime
+        if analysis is None:
             # No regime data yet — keep everything active (backward-compat)
             self._active_strategies = {"grid", "dca", "trend_follower", "smc"}
             return
 
-        strategies = self._REGIME_TO_STRATEGIES.get(recommendation, set()).copy()
-
-        # Trend Follower is recommended for trending regimes
-        if self._current_regime and self._current_regime.regime.value in (
-            "bull_trend",
-            "bear_trend",
-        ):
-            strategies.add("trend_follower")
-
-        # SMC runs in trending regimes, volatile transitions, and SMC phases
-        if self._current_regime and self._current_regime.regime.value in (
-            "bull_trend",
-            "bear_trend",
-            "volatile_transition",
-            "accumulation",
-            "distribution",
-        ):
-            strategies.add("smc")
-
-        prev = self._active_strategies
-        if strategies != prev:
-            if prev:
-                # Cooldown guard: block switch if too soon after last one
-                now = time.monotonic()
-                elapsed = now - self._last_strategy_switch_at
-                if self._strategy_switch_cooldown > 0 and elapsed < self._strategy_switch_cooldown:
-                    logger.info(
-                        "strategy_switch_cooldown_active",
-                        remaining_seconds=int(self._strategy_switch_cooldown - elapsed),
-                        blocked_strategies=sorted(strategies),
-                        current_strategies=sorted(prev),
-                    )
-                    return
-
-                # Confidence gate: block switch if regime detection is too uncertain.
-                if (
-                    self._current_regime is not None
-                    and self._current_regime.confidence < self._MIN_REGIME_CONFIDENCE
-                ):
-                    logger.info(
-                        "strategy_switch_blocked_low_confidence",
-                        confidence=round(self._current_regime.confidence, 3),
-                        threshold=self._MIN_REGIME_CONFIDENCE,
-                        current_strategies=sorted(prev),
-                    )
-                    return
-
-                # Duration gate: block switch if regime is too young to be trusted.
-                if (
-                    self._current_regime is not None
-                    and self._current_regime.regime_duration_seconds
-                    < self._MIN_REGIME_DURATION_SECONDS
-                ):
-                    logger.info(
-                        "strategy_switch_blocked_regime_too_young",
-                        duration_seconds=self._current_regime.regime_duration_seconds,
-                        min_seconds=self._MIN_REGIME_DURATION_SECONDS,
-                        current_strategies=sorted(prev),
-                    )
-                    return
-
-                # Volatility guard: don't activate new strategies during extreme
-                # volatility spikes — only allow reductions (deactivations) so
-                # existing positions can still be managed.
-                if (
-                    self._current_regime is not None
-                    and self._current_regime.atr_pct > self._MAX_VOLATILITY_ATR_PCT
-                    and strategies > prev  # expansion only — reductions always pass
-                ):
-                    logger.info(
-                        "strategy_switch_blocked_high_volatility",
-                        atr_pct=round(self._current_regime.atr_pct, 3),
-                        threshold=self._MAX_VOLATILITY_ATR_PCT,
-                        current_strategies=sorted(prev),
-                        blocked_strategies=sorted(strategies - prev),
-                    )
-                    return
-
-                deactivated = prev - strategies
-                if deactivated:
-                    await self._graceful_transition(deactivated, strategies)
-
+        # Volatility guard: don't activate new strategies during extreme spikes.
+        # Only block expansion; reductions always pass through to StrategySelector.
+        if analysis.atr_pct > self._MAX_VOLATILITY_ATR_PCT:
+            result = self.strategy_selector.select(analysis)
+            target = {w.strategy_type for w in result.strategies_to_start} | set(
+                result.strategies_to_keep
+            )
+            if target > self._active_strategies:
                 logger.info(
-                    "active_strategies_updated",
-                    regime=self._current_regime.regime.value if self._current_regime else "unknown",
-                    recommendation=recommendation.value,
-                    active=sorted(strategies),
-                    deactivated=sorted(prev - strategies),
+                    "strategy_switch_blocked_high_volatility",
+                    atr_pct=round(analysis.atr_pct, 3),
+                    threshold=self._MAX_VOLATILITY_ATR_PCT,
+                    current_strategies=sorted(self._active_strategies),
+                    blocked_strategies=sorted(target - self._active_strategies),
                 )
+                return
 
-            # Record timestamp for both first-time set and subsequent switches
+        result = self.strategy_selector.select(analysis)
+
+        if result.transition_needed:
+            # Compute the intended active set from the selection result.
+            # This correctly handles HYBRID and REDUCE_EXPOSURE modes where
+            # _get_current_weights() alone would give the wrong answer.
+            intended = {w.strategy_type for w in result.strategies_to_start} | set(
+                result.strategies_to_keep
+            )
+            deactivated = set(result.strategies_to_stop)
+            if deactivated:
+                await self._graceful_transition(deactivated, intended)
+
+            await self.strategy_selector.execute_transition(result)
+
+            logger.info(
+                "active_strategies_updated",
+                regime=analysis.regime.value,
+                recommendation=analysis.recommended_strategy.value,
+                active=sorted(intended),
+                deactivated=sorted(deactivated),
+            )
             self._last_strategy_switch_at = time.monotonic()
-        self._active_strategies = strategies
+            self._active_strategies = intended
+        # If no transition needed, _active_strategies stays unchanged.
 
     def lock_strategy(self, strategies: set[str]) -> None:
         """Lock to a specific strategy set, preventing auto-switching."""

@@ -20,7 +20,8 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
-
+from bot.orchestrator.strategy_registry import StrategyRegistry
+from bot.orchestrator.strategy_selector import StrategySelector
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,6 +79,12 @@ def _make_stub(
     # redis_client needed by _publish_event_sync
     orch.redis_client = None
     orch.config = type("C", (), {"name": "test_bot"})()
+    # StrategySelector: single source of truth for regime→strategy routing
+    orch.strategy_selector = StrategySelector(
+        registry=StrategyRegistry(),
+        transition_cooldown_seconds=cooldown,
+        min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+    )
     return orch
 
 

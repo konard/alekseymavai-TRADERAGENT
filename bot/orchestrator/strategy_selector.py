@@ -422,17 +422,26 @@ class StrategySelector:
         """
         Check if transition should be blocked.
 
+        The very first transition (no prior regime) is never blocked by
+        duration or confidence gates — the bot must always start with a
+        strategy set, regardless of initial data quality.
+
         Returns:
             Tuple of (is_blocked, reason).
         """
         now = datetime.now(timezone.utc)
 
-        # Check cooldown
+        # Check cooldown (only after the first transition has occurred)
         if self._last_transition_time:
             elapsed = (now - self._last_transition_time).total_seconds()
             if elapsed < self._transition_cooldown:
                 remaining = self._transition_cooldown - elapsed
                 return True, f"Transition cooldown active ({remaining:.0f}s remaining)"
+
+        # Duration and confidence gates are only applied after the first regime
+        # has been established.  On startup, activate strategies unconditionally.
+        if self._current_regime is None:
+            return False, ""
 
         # Check minimum regime duration
         if analysis.regime_duration_seconds < self._min_regime_duration:
