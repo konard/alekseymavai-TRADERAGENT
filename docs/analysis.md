@@ -1,15 +1,15 @@
 # TRADERAGENT — Анализ проекта
 
-> Дата: 2026-03-06 · Версия: v2.0.0 + BacktestOrchestratorEngine V3.0  
-> Кодовая база: ~100K+ LOC · 1687+ тестов · Production: 5 ботов на Bybit Demo
+> Дата: 2026-03-07 · Версия: v2.0.0
+> Кодовая база: ~100K+ LOC · 2197 тестов · Production: 5 ботов на Bybit Demo
 
 ---
 
 ## 1. Текущее состояние
 
-TRADERAGENT — платформа алгоритмической торговли криптовалютами (Python 3.12, asyncio). Работает в продакшене на демо-аккаунте Bybit (`api-demo.bybit.com`) с 5 активными ботами. Поддерживает 4 независимые торговые стратегии с единым интерфейсом `BaseStrategy`.
+TRADERAGENT — платформа алгоритмической торговли (Python 3.12, asyncio, PostgreSQL). Работает на демо-аккаунте Bybit с 5 активными ботами. Поддерживает 4 стратегии через единый `BaseStrategy` интерфейс.
 
-### Производственные боты (март 2026)
+### Производственные боты
 
 | Бот | Стратегия | Пара | Статус |
 |-----|-----------|------|--------|
@@ -19,240 +19,254 @@ TRADERAGENT — платформа алгоритмической торговл
 | demo_btc_trend | TrendFollower | BTC/USDT | ✅ Running |
 | demo_btc_smc | SMC (H1+M5) | BTC/USDT | ✅ Running |
 
-**Баланс:** ~$102,415 (demo). **Сервер:** 185.233.200.13.
+### Серверная инфраструктура
+
+| Сервер | IP | Роль |
+|--------|----|------|
+| Production | 185.233.200.13 | Live-боты, Docker |
+| Testing | 158.160.215.57 | pytest, backtest (.venv) |
 
 ---
 
-## 2. Архитектура
+## 2. Сильные стороны
 
-### 2.1 Активные компоненты
+### 2.1 Архитектура
 
-```
-bot/
-├── orchestrator/           # Главный цикл (bot_orchestrator.py ~2600 LOC)
-│   ├── market_regime.py    # 6-режимный детектор (ADX + SMC overlay)
-│   └── strategy_selector.py
-├── strategies/             # 4 стратегии + адаптеры
-│   ├── base.py             # Единый интерфейс BaseStrategy
-│   ├── grid/ + grid_adapter.py
-│   ├── dca/ + dca_adapter.py
-│   ├── trend_follower/ + trend_follower_adapter.py
-│   └── smc/ + smc_adapter.py   # H1 структура + M5 вход
-├── core/
-│   ├── smc/                # Внутренний SMC-модуль (O(n) swing, BOS/CHoCH)
-│   ├── trading_core/       # TradingCore + HybridCoordinator
-│   └── portfolio_risk_manager.py
-├── tests/backtesting/
-│   ├── orchestrator_engine.py   # BacktestOrchestratorEngine V3.0
-│   ├── multi_tf_data_loader.py  # O(log n) многотаймфреймовый загрузчик
-│   └── strategy_router.py       # Advisory-роутер для бэктеста
-└── api/bybit_direct_client.py   # Bybit V5 API (demo/live)
-```
+- **Единый `BaseStrategy` интерфейс** — `analyze_market()`, `generate_signal()`, `update_positions()`, `open_position()`, `close_position()`. Замена стратегии не требует изменения оркестратора.
+- **Адаптерный слой** (`*_adapter.py`) — полная изоляция внутренней логики стратегий. Один адаптер работает в live и backtest.
+- **6-режимный детектор рынка** (`market_regime.py`) — bull/bear/tight_range/volatile/accumulation/distribution с ADX/EMA/BB/SMC-фазами.
+- **TradingCore** (`bot/core/trading_core/`) — единое ядро конфигурации синхронизирует live и backtest параметры.
+- **BacktestOrchestratorEngine V3.0** — оркестрированный бэктест: 4 стратегии в одном прогоне с per-strategy metrics.
 
-### 2.2 Устаревшие / неиспользуемые компоненты
+### 2.2 Функциональность стратегий
 
-| Компонент | Статус |
-|-----------|--------|
-| `services/backtesting/` | Старая REST-API система, не используется |
-| `backtesting-module/` | Отдельный пакет, не интегрирован |
-| `web/` | React-дашборд, не поддерживается |
-| `bot/replay/` | Replay-движок, не используется |
-| `bot/tests/backtesting/multi_tf_engine.py` | Предшественник V3.0, частично устарел |
-| `bot/tests/backtesting/backtesting_engine.py` | V1.0, заменён |
+- **Grid** — полная реализация: уровни, SL на границах сетки, `force_close_all` при деактивации. Phase 1 Sharpe до 5.13 (SANDUSDT).
+- **DCA** — DCAStartupAnalyzer для catch-up, trailing stop, multi-step averaging. Phase 1 Sharpe до 6.36 (LDOUSDT).
+- **SMC** — H1 структура (BOS/CHoCH, Order Blocks, FVG) + M5 вход. Исправлен критический баг (Session 47).
+- **TrendFollower** — EMA/ATR/RSI с adaptive TP multipliers, partial close, trailing stop.
+
+### 2.3 Тестирование и инфраструктура
+
+- **2197 тестов** на тестовом сервере, 0 провалов
+- **Phase 1 завершён** — 43/43 пар, 50k баров, `strategy_score_matrix.json`
+- **`configs/backtest_phase1.yaml`** — standalone конфиг не зависит от live YAML
+- `from_yaml_config()` читает параметры из live-конфига для backtest (P0.3)
 
 ---
 
-## 3. Сильные стороны
+## 3. Слабые стороны и технические долги
 
-### 3.1 Архитектурные
+### 3.1 КРИТИЧЕСКИЙ: Расхождение роутинга Live ↔ Backtest
 
-- **Единый интерфейс BaseStrategy** — все 4 стратегии реализуют один контракт. Добавление новой стратегии = 1 файл + адаптер.
-- **Адаптерный паттерн** — одна реализация работает и в live, и в бэктесте без модификации стратегий.
-- **MarketRegimeDetector** — 6 режимов с ADX-гистерезисом и SMC overlay (ACCUMULATION/DISTRIBUTION). Внутренний модуль `bot/core/smc/` без внешних зависимостей.
-- **O(log n) поиск данных** через `searchsorted` в multi_tf_data_loader (было O(n²)).
-- **BacktestOrchestratorEngine V3.0** — параллельный запуск всех 4 стратегий на каждом баре, реальный P&L: `(exit_price - entry_price) × amount`.
-- **from_yaml_config()** — единый YAML как источник параметров для live и backtest.
+**Это главное препятствие для достоверного бэктеста.**
 
-### 3.2 Качество кода
+#### Live Bot (`bot_orchestrator.py:675–695`) — АДДИТИВНАЯ логика:
+```
+bull_trend  → Grid + TrendFollower + SMC (3 стратегии одновременно)
+bear_trend  → Grid + DCA + TrendFollower + SMC (все 4)
+tight_range → Grid
+volatile    → Grid + SMC
+```
 
-- 1687+ тестов, ruff + black
-- `Decimal` для всех финансовых вычислений
-- structlog (JSON-логирование)
-- Pydantic-схемы для конфигурации
-- Asyncio без блокирующих вызовов
+#### Backtest StrategyRouter — ЭКСКЛЮЗИВНАЯ логика:
+```
+bull_trend  → TrendFollower ТОЛЬКО
+bear_trend  → DCA ТОЛЬКО
+volatile    → SMC ТОЛЬКО
+остальное   → Grid
+```
 
-### 3.3 Инфраструктура
+**Следствие**: Phase 1 результаты не отражают поведение живого бота. Выбрать единую модель:
+- **Exclusive** (проще оптимизировать, текущий backtest) — рекомендуется для Phase 2
+- **Additive** (реалистичнее для live) — сложнее анализировать per-strategy
 
-- Docker Compose, volume mount без rebuild
-- Bybit Demo API (реальные цены, нулевой риск)
-- Encrypted credentials в PostgreSQL
-- GitHub Actions workflow для автоматизации
+**Рекомендация**: перевести live-бот на exclusive routing, синхронизировав с backtest.
 
 ---
 
-## 4. Слабые стороны
+### 3.2 КРИТИЧЕСКИЙ: TF и SMC — realized_pnl=0 в backtest
 
-### 4.1 Критические (блокируют оптимизацию)
+**Симптом**: Phase 1 — trades=1–159 для TF, trades=360–4971 для SMC, но `realized_pnl=0`.
 
-**А. Нет реальных торговых данных**  
-Без CSV-данных за 12+ месяцев невозможна осмысленная оптимизация. Синтетика не воспроизводит реальную микроструктуру рынка.
+**Корневая причина**: Нет `force_close_all()` для TF и SMC при деактивации роутером.
 
-**Б. Параметры не унифицированы** (см. раздел 5)  
-`max_position_size` в USD vs % баланса, `cooldown` в секундах vs барах, `max_daily_loss` в $ vs % — вычисления не совпадают между live и backtest.
+**Механизм**:
+1. Роутер активирует TF в `bull_trend` → TF открывает позиции
+2. Режим меняется → роутер деактивирует TF (`weight=0`)
+3. TF-позиции остаются в `position_amounts[strat_name]`
+4. `update_positions()` пропускается (weight=0) → позиции никогда не закрываются
+5. Открытые позиции "съедают" баланс → DAILY LOSS LIMIT
+6. `per_strategy_pnl["trend_follower"] = 0` (нет exits → нет pnl_delta)
 
-**В. Hybrid не воспроизводится в backtest**  
-`HybridStrategy` (Grid↔DCA coordinator) в live переключает стратегии через `HybridCoordinator`. В backtest Grid и DCA работают независимо — поведение принципиально разное.
+**Только Grid** реализует `force_close_all()`. TF и SMC — нет.
 
-### 4.2 Архитектурные
-
-**Г. Два параллельных роутера**  
-Live: `HybridCoordinator` (mode-based: GRID_ONLY / DCA_ACTIVE).  
-Backtest: `StrategyRouter` (advisory weights: 1.0 / 0.5).  
-Разные алгоритмы → backtest ≠ live по определению.
-
-**Д. bot_orchestrator.py перегружен (2600+ LOC)**  
-Main loop + risk management + routing + Telegram + WebSocket + DCA catch-up в одном файле. Сложно тестировать.
-
-**Е. Дублирование SMC-логики**  
-`bot/core/smc/` (swing/BOS/CHoCH) + `bot/strategies/smc/` (market_structure, signal_generator) — два слоя с частичным дублированием. `structural_detector.py` и `market_structure.py` делают похожую работу.
-
-**Ж. Нет автоматического применения результатов оптимизации**  
-Нет инструмента: «взять оптимальные параметры из backtest → записать в YAML → перезапустить».
-
-### 4.3 Функциональные
-
-**З. TrendFollower без SHORT-режима** — теряется 50% возможностей в BEAR_TREND.
-
-**И. DCA catch-up не реализован в backtest** — поведение при старте различается.
-
-**К. Portfolio-level stop-loss не подключён** — `PortfolioRiskManager` реализован, но не интегрирован в BacktestOrchestratorEngine.
-
-**Л. Grid-диапазон не пересчитывается автоматически** — при движении BTC от $69k к $100k сетка выходит за диапазон.
-
-### 4.4 Инфраструктурные
-
-**М. Telegram недоступен на продакшн-сервере** (сетевые ограничения).
-
-**Н. Нет CI/CD для backtest** — `weekly_optimization.yml` не запускается без тестового сервера.
-
-**О. 26 веб-тестов всегда провалены** — pre-existing, засоряют отчёт.
+**Фикс**: добавить `force_close_all()` в `TrendFollowerAdapter` и `SMCStrategyAdapter`.
 
 ---
 
-## 5. Конфликты: Live ↔ Backtest V3.0
+### 3.3 ВАЖНЫЙ: `strat_trades` считает сигналы, не закрытые позиции
 
-> **Главный принцип**: нельзя оптимизировать то, что не воспроизводишь.
-
-### 5.1 Таблица расхождений параметров
-
-| Параметр | Live (bot_orchestrator) | Backtest (orchestrator_engine) | Статус |
-|----------|------------------------|-------------------------------|--------|
-| `max_position_size` | Абсолютный USD (3000) | % баланса (25% × $10k = $2500) | 🔴 Разные единицы |
-| `max_daily_loss` | Абсолютный USD (600) | % баланса (25% × $10k = $2500) | 🔴 В 4× мягче в backtest |
-| `cooldown` | 600 сек (wall-clock) | 120 баров × 300 сек = 600 сек | ✅ Эквивалентно |
-| `regime_check_interval` | 60 сек (каждый тик) | 12 баров = 60 мин | 🔴 60× реже |
-| `maker_fee` | 0.02% | 0.0002 | ✅ Совпадает |
-| `taker_fee` | 0.055% | 0.00055 | ✅ Совпадает |
-| `slippage` | Нет (реальный ордербук) | 0.03% фиксированный | ⚠️ Только backtest |
-| `risk_per_trade` | 2% | 2% | ✅ Совпадает |
-| `require_volume_confirmation` | True (SMC) | False (хардкод) | ⚠️ Намеренно |
-| `warmup_bars` | N/A | 14 400 баров (50 дней) | ⚠️ Только backtest |
-| `smc_generate_signal_every_n` | Каждый тик | 12 баров (60 мин) | 🔴 12× реже |
-
-### 5.2 Конфликт роутера (критический)
-
-**Live** (`HybridCoordinator`):
-```
-GRID_ONLY  → Grid активен, DCA пассивен
-DCA_ACTIVE → DCA активен, Grid пассивен
-Переключение: ADX-порог или SMC-сигнал
+```python
+# orchestrator_engine.py:636
+if signal is not None:
+    strat_trades[strat_name] += 1  # СИГНАЛ, не завершённая сделка
 ```
 
-**Backtest** (`StrategyRouter` advisory weights):
+Результат: BATUSDT SMC trades=4971 (каждый бар сигнал), BNBUSDT grid=1983. Реальных закрытых сделок может быть в 10–100 раз меньше.
+
+**Фикс**: считать `strat_trades` только при успешном закрытии позиции в `_handle_exits`.
+
+---
+
+### 3.4 ВАЖНЫЙ: win_rate — приближение, не реальный показатель
+
+```python
+def _calculate_win_rate_from_pnl(self, pnl: float, trades: int) -> float:
+    return 100.0 if pnl > 0 else 0.0
 ```
-Все стратегии работают одновременно
-weight = 1.0 → полная аллокация капитала
-weight = 0.5 → половинная
-Cooldown = 120 баров между переключениями
-```
 
-**Следствие**: в backtest Grid + DCA торгуют одновременно. В live — только одна активна. Backtest систематически завышает торговую активность.
+100% win_rate означает только `sum(pnl) > 0`, не процент прибыльных сделок.
 
-### 5.3 Конфликт позиционирования
+---
 
-Live: `max_position_size = 3000 USD` — фиксированный USD-лимит.  
-Backtest: `max_position_pct = 0.25` → 25% × $10,000 = $2,500.
+### 3.5 ВАЖНЫЙ: Cooldown расхождение
 
-При балансе $102,415: backtest даёт $2,500, live даёт $3,000 → разница 20%.  
-При оптимизации под $10,000 initial_balance результаты нерелевантны для реального баланса $102,415.
+| Параметр | Live Bot | backtest_phase1.yaml | Дефолт OrchestratorBacktestConfig |
+|---------|----------|---------------------|----------------------------------|
+| cooldown | 600 сек = **2 бара M5** | 120 баров = **600 мин** | 120 баров ❌ |
 
-### 5.4 Конфликт частоты сигналов SMC
+Бэктест использует cooldown в 300 раз больше, чем live-бот. Это сильно искажает частоту переключений стратегий.
 
-**Live**: `generate_signal` вызывается каждый M5-тик.  
-**Backtest**: `smc_generate_signal_every_n = 12` → раз в 60 мин.  
-**Следствие**: backtest даёт SMC 12× меньше возможностей для входа.
+**Фикс**: `router_cooldown_bars=2` в `OrchestratorBacktestConfig` по умолчанию.
 
-### 5.5 Исправленный критический баг (сессия 47)
+---
 
-`generate_signals_m5()` использовал неверный ключ: `.get("trend", ...)` вместо `.get("current_trend", ...)`. Словарь `get_current_structure()` возвращает `"current_trend"`, поэтому fallback всегда возвращал `RANGING` → 97.8% вызовов блокировалось.
+### 3.6 ВАЖНЫЙ: DCA DAILY LOSS LIMIT на 60% пар
 
-**Результат до**: SMC = 0 сделок на 37 парах × 50k баров.  
-**Результат после**: 0 → 1086 сделок на 2000 баров синтетики (smoke test).
+Phase 1: `DAILY LOSS LIMIT REACHED` на ~26 из 43 пар. Причина: `$1000 × 6% = $60/день`. DCA открывает 4 позиции по $50 → $200 экспозиции. При любом дневном движении лимит достигается.
+
+Live-бот: `$10,000 × 6% = $600` — тот же процент, но DCA работает корректно.
+
+**Фикс**: для Phase 2 увеличить `initial_balance` до $10,000 или `max_daily_loss_pct` до 25%.
+
+---
+
+### 3.7 УМЕРЕННЫЙ: SMC параметры не унифицированы
+
+| Параметр | YAML (live) | backtest_phase1.yaml |
+|---------|-------------|---------------------|
+| swing_length | 10 | 10 ✅ |
+| min_risk_reward | 2.0 | не задан (дефолт 2.5) ❌ |
+| require_volume | false | false ✅ |
+
+---
+
+### 3.8 УМЕРЕННЫЙ: HybridCoordinator не в backtest
+
+`demo_btc_hybrid` (live) использует `HybridCoordinator` (Grid↔DCA через ADX). В бэктесте Grid и DCA работают как независимые стратегии через StrategyRouter. Результаты не сопоставимы с hybrid-ботом.
+
+---
+
+### 3.9 УМЕРЕННЫЙ: SMC генерирует сигнал каждый бар
+
+Без throttling SMC создаёт тысячи сигналов за прогон, многие из которых дублируются. Нужен `generate_signal_every_n ≥ 12` для SMC.
+
+---
+
+### 3.10 МАЛЫЙ: Дублирование SMC реализаций
+
+`bot/strategies/smc_adapter.py` использует `smartmoneyconcepts` библиотеку. `bot/core/smc/` — собственная реализация (BOS/CHoCH, swing detector). Они не связаны.
+
+---
+
+## 4. Конфликты Logic: Live Bot vs Backtest V2.0
+
+| Параметр | Live Bot | Backtest V2.0 | Критичность |
+|---------|----------|---------------|-------------|
+| **Routing** | Additive (TF+SMC в bull+bear) | Exclusive (один режим → одна стратегия) | 🔴 КРИТИЧНО |
+| **TF/SMC деактивация** | cancel_orders() без force_close | force_close_all отсутствует | 🔴 КРИТИЧНО |
+| **Cooldown** | 600 сек = 2 бара M5 | 120 баров = 600 мин | 🟡 ВАЖНО |
+| **Regime check** | 60 сек = ~0.2 бара | 12 баров = 60 мин | 🟡 ВАЖНО |
+| **win_rate** | N/A (нет расчёта) | sum(pnl)>0 → 100% | 🟡 ВАЖНО |
+| **trades counter** | N/A | сигналы (x10–100 завышение) | 🟡 ВАЖНО |
+| **DCA daily loss** | $600 при $10k | $60 при $1k | 🟡 ВАЖНО |
+| **SMC min_rr** | 2.0 (YAML) | 2.5 (hardcoded default) | 🟠 УМЕРЕННО |
+| **HybridCoordinator** | Активен | Не реализован | 🟠 УМЕРЕННО |
+| **SMC throttling** | Нет | Нет | 🟠 УМЕРЕННО |
+
+---
+
+## 5. Phase 1 Results — Summary
+
+43/43 пар, 50k M5 баров (~173 дня), ~58 минут, тестовый сервер 158.160.215.57.
+
+### Достоверные результаты (Grid + DCA работают корректно)
+
+| Пара | Grid Sharpe | DCA Sharpe | Total PnL |
+|------|-------------|------------|-----------|
+| LDOUSDT | 4.93 | 6.36 | +$122 |
+| SANDUSDT | 5.13 | 5.75 | +$23 |
+| BCHUSDT | 4.66 | 2.99 | +$58 |
+| XEMUSDT | 4.61 | 3.02 | +$57 |
+| BATUSDT | 3.64 | 3.16 | +$20 |
+| ZILUSDT | 2.48 | 3.26 | +$45 |
+| SOLUSDT | 2.05 | 3.13 | +$48 |
+| LTCUSDT | 1.83 | 3.06 | +$69 |
+| BTCUSDT | -0.10 | 2.97 | +$68 |
+| HBARUSDT | 0.26 | 3.28 | +$71 |
+
+### Недостоверные (TF, SMC — баг force_close_all)
+
+TF и SMC показывают `realized_pnl=0` на большинстве пар из-за незакрытых позиций при деактивации роутером.
 
 ---
 
 ## 6. Унификация параметров стратегий
 
-### 6.1 Проблема разнородности
-
-Одна концепция — разные имена параметров:
-
-| Концепция | Grid | DCA | TrendFollower | SMC |
-|-----------|------|-----|---------------|-----|
-| Размер сделки | `amount_per_grid` | `amount_per_step` | `risk_per_trade_pct` | `risk_per_trade` |
-| Макс. позиция | `max_position_size` | `max_position_size` | `max_position_size_usd` | `max_position_size` |
-| Тейк-профит | `profit_per_grid` (%) | `take_profit_percentage` (%) | ATR × multiplier | `min_risk_reward` (R:R) |
-| Стоп-лосс | нет | нет | ATR-based | implicit in signal |
-
-Кросс-стратегийная оптимизация невозможна без нормализации.
-
-### 6.2 Целевая модель унификации
-
-```
-Уровень 1: Универсальные риск-параметры (все стратегии)
-  risk_per_trade_pct    = % баланса, рискуемый на одну сделку
-  max_position_pct      = % баланса в одной позиции
-  max_daily_loss_pct    = % баланса, максимальный дневной убыток
-
-Уровень 2: Стратегия-специфичные параметры
-  Grid: num_levels, profit_per_grid_pct, range_pct
-  DCA: trigger_pct, safety_order_multiplier, max_safety_orders
-  TF: ema_fast, ema_slow, atr_period, tp_atr_mult, sl_atr_mult
-  SMC: swing_length, min_risk_reward, confluence_required
-```
-
-### 6.3 Почему оптимизация невозможна без backtest
-
-До проведения бэктеста с реальными данными и исправленным движком:
-1. Нет данных о распределении сделок по стратегиям
-2. Нет данных о влиянии cooldown на P&L
-3. Нет данных о корреляции стратегий в разных режимах рынка
-4. Нет данных о drawdown на реальных downtrend/uptrend периодах
-
-**Вывод**: сначала исправить Live↔Backtest расхождения → собрать реальные данные → запустить Phase 2 оптимизацию → только тогда можно говорить об оптимальных параметрах.
+| Параметр | Статус | Источник правды |
+|---------|--------|-----------------|
+| initial_balance | ✅ P0.2 | YAML |
+| max_daily_loss_pct | ✅ P0.3 | YAML → backtest |
+| maker/taker_fee | ✅ P0 | TradingCoreConfig |
+| cooldown_bars | ⚠️ расхождение | backtest_phase1.yaml: 120 баров (неверно) |
+| regime_check_every_n | ✅ P0.1 | backtest_phase1.yaml: 12 баров |
+| max_position_pct | ✅ P0.2 | YAML |
+| grid_params | ✅ | backtest_phase1.yaml |
+| dca_params | ✅ | backtest_phase1.yaml |
+| tf_params | ✅ | backtest_phase1.yaml |
+| smc_params (min_rr) | ❌ расхождение | YAML: 2.0, backtest default: 2.5 |
+| routing mode | ❌ расхождение | additive vs exclusive |
+| force_close_all | ❌ отсутствует | нет в TF/SMC |
+| HybridCoordinator | ❌ отсутствует | только в live |
 
 ---
 
-## 7. Статус тестирования
+## 7. Выводы и приоритеты
 
-| Набор тестов | Passing | Failing | Причина |
-|---|---|---|---|
-| SMC unit (`bot/tests/unit/smc/`) | 52 | 0 | ✅ |
-| MarketRegime unit | 26 | 0 | ✅ |
-| Backtest config sync | 34 | 0 | ✅ |
-| SMC strategy tests | 109 | 7 | ⚠️ Pre-existing |
-| Web tests | ~800 | 26 | ⚠️ Pre-existing (password) |
-| SMC market_structure | нестабильны | 3 | ⚠️ Flaky (randomized data) |
-| **Итого** | **~1687** | **~36** | — |
+### P0 — Критические фиксы (блокируют Phase 2)
 
-Все 36 failing тестов — pre-existing, не введены текущей разработкой.
+1. `force_close_all()` в TF и SMC адаптерах
+2. `strat_trades` считать closed round-trips, не сигналы
+3. Унифицировать routing (exclusive и в live-боте)
+4. `router_cooldown_bars=2` в backtest (синхронизация с live)
+
+### P1 — Phase 2 оптимизация (после P0)
+
+5. Grid search параметров для топ-10 пар (Grid + DCA)
+6. `initial_balance=$10,000` или `max_daily_loss_pct=0.25` для Phase 2
+
+### P2 — Метрики и качество
+
+7. `win_rate` — per-trade расчёт
+8. SMC `generate_signal_every_n=12`
+9. SMC `min_rr=2.0` в backtest конфиге
+
+### P3 — Архитектурные улучшения
+
+10. HybridCoordinator в backtest
+11. Telegram прокси для production
+12. Consolidate SMC реализации
+
+---
+
+*Связанные документы: [plan.md](plan.md) | [architecture.md](architecture.md)*
