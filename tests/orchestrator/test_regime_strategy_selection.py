@@ -124,13 +124,13 @@ class TestRegimeToStrategyMapping:
         assert "trend_follower" in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_bear_trend_selects_dca_and_trend_follower(self) -> None:
+    async def test_bear_trend_selects_dca_only(self) -> None:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
-        # StrategySelector routes BEAR_TREND → dca + trend_follower (no hardcoded SMC)
+        # BEAR_TREND → DCA only (TF removed: no long signals in downtrend)
         assert "dca" in orch._active_strategies
-        assert "trend_follower" in orch._active_strategies
+        assert "trend_follower" not in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio

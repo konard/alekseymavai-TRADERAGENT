@@ -170,12 +170,12 @@ class TestMarketRegimeDetector:
         recommended = detector._recommend_strategy(regime, 0.5, 25.0)
         assert recommended == RecommendedStrategy.REDUCE_EXPOSURE
 
-    def test_strategy_recommendation_hold_for_quiet_transition(self):
-        """Quiet transition should recommend hold."""
+    def test_strategy_recommendation_grid_for_quiet_transition(self):
+        """Quiet transition should recommend grid (sideways = ideal for grid)."""
         detector = MarketRegimeDetector()
         regime = MarketRegime.QUIET_TRANSITION
         recommended = detector._recommend_strategy(regime, 0.5, 25.0)
-        assert recommended == RecommendedStrategy.HOLD
+        assert recommended == RecommendedStrategy.GRID
 
     def test_confluence_score_range(self):
         detector = MarketRegimeDetector()

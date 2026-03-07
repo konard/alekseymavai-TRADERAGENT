@@ -89,11 +89,11 @@ class TestDefaultRegimeStrategies:
         assert "trend_follower" in types
         assert "dca" in types
 
-    def test_bear_trend_maps_to_dca_and_trend(self):
+    def test_bear_trend_maps_to_dca_only(self):
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.BEAR_TREND]
         types = {w.strategy_type for w in weights}
         assert "dca" in types
-        assert "trend_follower" in types
+        assert "trend_follower" not in types  # TF removed: no long signals in downtrend
 
     def test_volatile_transition_maps_to_smc(self):
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.VOLATILE_TRANSITION]
