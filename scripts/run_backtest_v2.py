@@ -832,12 +832,23 @@ async def run_single(args: argparse.Namespace) -> None:
 
 async def run_multi(args: argparse.Namespace) -> None:
     """Multi-pair mode: Phase 1 in parallel via ProcessPoolExecutor."""
-    raw_symbols = (args.symbols or "BTC,ETH,SOL").split(",")
     exclude = _load_exclude_symbols(args.config)
-    symbols = [
-        s.strip() for s in raw_symbols
-        if s.strip() and s.strip().upper().replace("/", "") not in exclude
-    ]
+
+    if args.symbols:
+        raw_symbols = args.symbols.split(",")
+        symbols = [
+            s.strip() for s in raw_symbols
+            if s.strip() and s.strip().upper().replace("/", "") not in exclude
+        ]
+    else:
+        # Auto-discover from data_dir: only *_5m.csv files (not *15m*, *25m* etc.)
+        _ddir = Path(args.data_dir) if args.data_dir else Path("data/historical")
+        symbols = []
+        for f in sorted(_ddir.glob("*_5m.csv")):
+            sym = f.stem[: -len("_5m")].upper()
+            if sym not in exclude:
+                symbols.append(sym)
+        logger.info("Auto-discovered %d symbols from %s", len(symbols), _ddir)
     if exclude:
         logger.info("Excluded symbols: %s", sorted(exclude))
 
@@ -996,13 +1007,12 @@ async def run_auto(args: argparse.Namespace) -> None:
         logger.error("Data dir does not exist: %s", data_dir)
         sys.exit(1)
 
-    csv_files = list(data_dir.glob("*5m*.csv")) + list(data_dir.glob("*_5m.csv"))
+    # Only match exact *_5m.csv pattern to avoid picking up 15m, 25m files
+    csv_files = sorted(data_dir.glob("*_5m.csv"))
     exclude = _load_exclude_symbols(args.config)
     symbols_found = []
     for f in csv_files:
-        name = f.stem.upper()
-        for suffix in ["_5M", "_5MIN", "_5m", "_5min"]:
-            name = name.replace(suffix.upper(), "")
+        name = f.stem[: -len("_5m")].upper()
         if name not in exclude:
             symbols_found.append(name)
 
