@@ -252,8 +252,8 @@ async def cmd_positions(message: Message) -> None:
             f"*DCA Position:*\n"
             f"Symbol: {orch.config.symbol}\n"
             f"Entry: {pos.avg_entry_price}\n"  # type: ignore[attr-defined]
-            f"Amount: {pos.total_amount}\n"  # type: ignore[attr-defined]
-            f"Steps: {orch.dca_engine.current_step}/{orch.dca_engine.max_steps}\n"  # type: ignore[attr-defined]
+            f"Amount: {pos.total_amount}\n"
+            f"Steps: {orch.dca_engine.current_step}/{orch.dca_engine.max_steps}\n"
         )
         if orch.current_price:
             pnl = pos.get_pnl(orch.current_price)
@@ -272,7 +272,7 @@ async def cmd_positions(message: Message) -> None:
                     f"ID: `{pid[:8]}`\n"
                     f"  Type: {pos.signal_type.value}\n"  # type: ignore[attr-defined]
                     f"  Entry: {pos.entry_price}\n"
-                    f"  Size: {pos.size}\n\n"  # type: ignore[attr-defined]
+                    f"  Size: {pos.size}\n\n"
                 )
             if len(active) > 5:
                 response += f"... and {len(active) - 5} more positions\n"

@@ -212,7 +212,7 @@ class BotOrchestrator:
         # Connect to Redis
         self.redis_client = redis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
         assert self.redis_client is not None
-        await self.redis_client.ping()  # type: ignore[misc]
+        await self.redis_client.ping()
         logger.info("redis_connected")
 
         # Initialize risk manager
