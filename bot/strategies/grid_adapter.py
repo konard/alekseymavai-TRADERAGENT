@@ -65,6 +65,7 @@ class GridAdapter(BaseStrategy):
 
         self._grid_engine: GridEngine | None = None
         self._grid_levels: list[Decimal] = []
+        self._grid_lower_price: Decimal = Decimal("0")  # lower boundary of the entire grid
         self._last_analysis: BaseMarketAnalysis | None = None
 
         # Position tracking
@@ -118,6 +119,7 @@ class GridAdapter(BaseStrategy):
                 profit_per_grid=self._profit_per_grid,
             )
             self._grid_levels = self._grid_engine.calculate_grid_levels()
+            self._grid_lower_price = self._grid_engine.lower_price
 
         # Trend: grid works best in sideways
         price_change = (close[-1] - close[0]) / close[0] if close[0] > 0 else 0.0
@@ -176,7 +178,11 @@ class GridAdapter(BaseStrategy):
             return None
 
         sell_target = nearest_buy * (Decimal("1") + self._profit_per_grid)
-        stop_loss = nearest_buy * (Decimal("1") - self._grid_range_pct)
+        # SL = lower boundary of the entire grid (not per-position -5%).
+        # Real grid trading: close ALL positions only when price exits the grid range.
+        stop_loss = self._grid_lower_price if self._grid_lower_price > 0 else nearest_buy * (
+            Decimal("1") - self._grid_range_pct
+        )
 
         return BaseSignal(
             direction=SignalDirection.LONG,
@@ -210,14 +216,22 @@ class GridAdapter(BaseStrategy):
         exits: list[tuple[str, ExitReason]] = []
         self._current_price = current_price
 
+        # If price breaks below the entire grid's lower boundary → close ALL positions
+        if self._grid_lower_price > 0 and current_price < self._grid_lower_price:
+            for pos_id in list(self._positions):
+                exits.append((pos_id, ExitReason.STOP_LOSS))
+            return exits
+
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
             if current_price >= pos["take_profit"]:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
-            elif current_price <= pos["stop_loss"]:
-                exits.append((pos_id, ExitReason.STOP_LOSS))
 
         return exits
+
+    def force_close_all(self) -> list[tuple[str, ExitReason]]:
+        """Force-close all open positions (called when router deactivates this strategy)."""
+        return [(pos_id, ExitReason.MANUAL) for pos_id in list(self._positions)]
 
     def close_position(
         self, position_id: str, exit_reason: ExitReason, exit_price: Decimal
@@ -285,6 +299,7 @@ class GridAdapter(BaseStrategy):
     def reset(self) -> None:
         self._grid_engine = None
         self._grid_levels = []
+        self._grid_lower_price = Decimal("0")
         self._positions.clear()
         self._closed_trades.clear()
         self._last_analysis = None

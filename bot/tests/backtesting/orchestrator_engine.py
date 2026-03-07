@@ -557,6 +557,23 @@ class BacktestOrchestratorEngine:
                     name: (1.0 if name in router_event.active_strategies else 0.0)
                     for name in strategies
                 }
+                # Force-close open positions of newly-deactivated strategies
+                for deact_name in router_event.deactivated:
+                    deact_strat = strategies.get(deact_name)
+                    if deact_strat is not None and hasattr(deact_strat, "force_close_all"):
+                        forced = deact_strat.force_close_all()
+                        if forced:
+                            pnl_delta = await self._handle_exits(
+                                strat_name=deact_name,
+                                strategy=deact_strat,
+                                exits=forced,
+                                current_price=current_price,
+                                simulator=simulator,
+                                position_amounts=position_amounts[deact_name],
+                                position_directions=position_directions[deact_name],
+                                position_entry_prices=position_entry_prices[deact_name],
+                            )
+                            per_strategy_pnl[deact_name] += pnl_delta
 
             # 3. Per-strategy signal generation and execution (ALL strategies, always)
             # Mirrors live BotOrchestrator: every strategy runs every bar,
