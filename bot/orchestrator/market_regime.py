@@ -593,7 +593,7 @@ class MarketRegimeDetector:
             return RecommendedStrategy.SMC
 
         if regime == MarketRegime.QUIET_TRANSITION:
-            return RecommendedStrategy.HOLD
+            return RecommendedStrategy.GRID
 
         if regime == MarketRegime.VOLATILE_TRANSITION:
             return RecommendedStrategy.REDUCE_EXPOSURE

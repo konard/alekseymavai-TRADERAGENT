@@ -807,20 +807,19 @@ class BotOrchestrator:
             if "smc" in deactivated and self.smc_strategy:
                 try:
                     adapter = self.smc_strategy
-                    if hasattr(adapter, "active_positions"):
-                        for pos in list(adapter.active_positions):
-                            if self.current_price:
-                                base_amount = float(
-                                    Decimal(str(pos.get("size", 0))) / self.current_price
-                                )
-                                side = "sell" if pos.get("direction") == "long" else "buy"
-                                await self.exchange.create_order(
-                                    symbol=self.config.symbol,
-                                    order_type="market",
-                                    side=side,
-                                    amount=base_amount,
-                                    params={"reduceOnly": True},
-                                )
+                    for pos_id, pos in list(adapter._positions.items()):
+                        if self.current_price:
+                            base_amount = float(
+                                Decimal(str(pos.get("size", 0))) / self.current_price
+                            )
+                            side = "sell" if pos.get("direction") == "long" else "buy"
+                            await self.exchange.create_order(
+                                symbol=self.config.symbol,
+                                order_type="market",
+                                side=side,
+                                amount=base_amount,
+                                params={"reduceOnly": True},
+                            )
                     logger.info("transition_smc_positions_closed")
                 except Exception as e:
                     logger.error("transition_smc_close_failed", error=str(e))
