@@ -235,6 +235,10 @@ class SMCStrategyAdapter(BaseStrategy):
 
         return exits
 
+    def force_close_all(self) -> list[tuple[str, ExitReason]]:
+        """Force-close all open positions (called when router deactivates this strategy)."""
+        return [(pos_id, ExitReason.MANUAL) for pos_id in list(self._positions.keys())]
+
     def close_position(
         self, position_id: str, exit_reason: ExitReason, exit_price: Decimal
     ) -> None:

@@ -96,7 +96,7 @@ class OrchestratorBacktestConfig:
 
     # Regime-based routing (key differentiator from V1)
     enable_strategy_router: bool = True
-    router_cooldown_bars: int = 120  # 600 sec / 5-min bars = 120 bars (matches live bot)
+    router_cooldown_bars: int = 2  # 600 sec cooldown / 300 sec per M5 bar = 2 bars (matches live bot)
     regime_check_every_n: int = 12  # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
 
     # Per-strategy parameters (passed to strategy factories)
@@ -574,6 +574,8 @@ class BacktestOrchestratorEngine:
                                 position_entry_prices=position_entry_prices[deact_name],
                             )
                             per_strategy_pnl[deact_name] += pnl_delta
+                            # Count force-closed positions as completed trades
+                            strat_trades[deact_name] += len(forced)
 
             # 3. Per-strategy signal generation and execution (ALL strategies, always)
             # Mirrors live BotOrchestrator: every strategy runs every bar,
@@ -632,8 +634,6 @@ class BacktestOrchestratorEngine:
                         config=config,
                         position_weight=weight,
                     )
-                    if is_active:
-                        strat_trades[strat_name] += 1
 
                 # 4. update_positions — always (each strategy manages its own positions)
                 try:
@@ -654,6 +654,8 @@ class BacktestOrchestratorEngine:
                         position_entry_prices=position_entry_prices[strat_name],
                     )
                     per_strategy_pnl[strat_name] += pnl_delta
+                    # Count closed round-trips (not signals) as completed trades
+                    strat_trades[strat_name] += len(exits)
 
             # 5. Record equity
             # simulator.get_portfolio_value() = quote + base * current_price

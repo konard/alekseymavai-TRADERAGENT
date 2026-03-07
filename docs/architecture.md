@@ -1,6 +1,6 @@
 # TRADERAGENT — Архитектура
 
-> Дата: 2026-03-07 · Версия: v2.0.0
+> Дата: 2026-03-07 · Версия: v2.0.1 (P0-фиксы: force_close_all TF/SMC, strat_trades, cooldown)
 
 ---
 
@@ -80,7 +80,7 @@
 │  │    │ 2. StrategyRouter.on_bar(regime) ─► weights       │     │   │
 │  │    │    ЭКСКЛЮЗИВНО: bull→TF, bear→DCA, volatile→SMC   │     │   │
 │  │    │ 3. force_close_all(deactivated) ─► pnl_delta      │     │   │
-│  │    │    (только Grid! TF/SMC — БАГ, нет force_close)   │     │   │
+│  │    │    ✅ Grid + TF + SMC (P0-фикс: force_close реализован) │   │
 │  │    │ 4. Для каждой стратегии с weight>0:               │     │   │
 │  │    │    a. analyze_market(df_d1..df_m5)                │     │   │
 │  │    │    b. generate_signal(df_m5) ─► signal?           │     │   │
@@ -113,7 +113,7 @@
      ┌──────▼──────┐ ┌──────▼──────┐ ┌─────▼────┐ ┌────▼────────┐
      │GridAdapter  │ │DCAAdapter   │ │TFAdapter │ │SMCAdapter   │
      │             │ │             │ │          │ │             │
-     │ ✅force_close│ │             │ │❌ нет    │ │❌ нет       │
+     │ ✅force_close│ │             │ │✅ fixed  │ │✅ fixed     │
      └──────┬──────┘ └──────┬──────┘ └─────┬────┘ └────┬────────┘
             │               │               │            │
      ┌──────▼──────┐ ┌──────▼──────┐ ┌─────▼────┐ ┌────▼────────┐
@@ -131,15 +131,15 @@
 |--------|--------------------------------|----------------------------------------|
 | **Тик** | asyncio 60s | M5 бар (300s) |
 | **Routing** | 🔴 Аддитивный: TF+SMC добавляются к базовым | ✅ Эксклюзивный: один режим = одна стратегия |
-| **Cooldown** | 600 сек = 2 бара M5 | 🔴 120 баров = 10 часов |
+| **Cooldown** | 600 сек = 2 бара M5 | ✅ 2 бара M5 (P0-фикс) |
 | **Regime check** | каждые 60 сек | каждые 12 баров = 60 мин ✅ |
-| **force_close** | cancel_orders() (нет force_close) | 🔴 только Grid, TF/SMC — баг |
+| **force_close** | cancel_orders() (нет force_close) | ✅ Grid + TF + SMC (P0-фикс) |
 | **Data** | WebSocket real-time | CSV (tail-read, 50k баров) |
 | **Capital** | $10,000+ реальных | $1,000 симулятор |
 | **Fees** | Bybit VIP0 (0.02%/0.055%) | TradingCoreConfig ✅ |
 | **Daily loss** | $600 при $10k | 🔴 $60 при $1k (ложные стопы) |
 | **win_rate** | N/A | 🔴 sum(pnl)>0 → 100% (приближение) |
-| **trades** | N/A | 🔴 сигналы, не closed round-trips |
+| **trades** | N/A | ✅ закрытые round-trips (P0-фикс) |
 | **Hybrid Grid↔DCA** | ✅ HybridCoordinator (ADX) | ❌ не реализован |
 | **SMC throttle** | 5-min interval | ❌ каждый бар |
 | **DCA catch-up** | ✅ DCAStartupAnalyzer | ✅ P0.5 warmup catchup |
@@ -205,8 +205,8 @@ BacktestOrchestratorEngine.run(data, config)
 OrchestratorBacktestResult
   ├── per_strategy_metrics {grid, dca, tf, smc}
   │     ├── bars_active
-  │     ├── trades  ⚠️ (сигналы, не round-trips)
-  │     ├── realized_pnl  ⚠️ (TF/SMC=0 из-за force_close бага)
+  │     ├── trades  ✅ (закрытые round-trips, P0-фикс)
+  │     ├── realized_pnl  ✅ (TF/SMC≠0 после P0-фикса force_close_all)
   │     ├── sharpe
   │     └── win_rate  ⚠️ (100% если pnl>0)
   └── equity_curve
@@ -236,9 +236,9 @@ class BaseStrategy(ABC):
     def close_position(self, pos_id, reason, exit_price) -> None:
         """Закрыть позицию по pos_id"""
 
-    def force_close_all(self) -> list[tuple[str, ExitReason]]:  # Grid only!
+    def force_close_all(self) -> list[tuple[str, ExitReason]]:
         """Немедленно закрыть все позиции (при деактивации роутером)"""
-        # ❌ НЕ реализован в TF и SMC адаптерах — КРИТИЧЕСКИЙ БАГ
+        # ✅ Реализован во всех адаптерах: Grid, TF, SMC (P0-фикс)
 ```
 
 ---
