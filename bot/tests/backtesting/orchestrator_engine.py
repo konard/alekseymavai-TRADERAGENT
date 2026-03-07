@@ -96,7 +96,9 @@ class OrchestratorBacktestConfig:
 
     # Regime-based routing (key differentiator from V1)
     enable_strategy_router: bool = True
-    router_cooldown_bars: int = 2  # 600 sec cooldown / 300 sec per M5 bar = 2 bars (matches live bot)
+    router_cooldown_bars: int = (
+        2  # 600 sec cooldown / 300 sec per M5 bar = 2 bars (matches live bot)
+    )
     regime_check_every_n: int = 12  # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
 
     # Per-strategy parameters (passed to strategy factories)

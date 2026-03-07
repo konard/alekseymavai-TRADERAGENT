@@ -46,12 +46,11 @@ def _make_regime(
 
 
 class TestStrategyRouter:
-    def test_no_regime_returns_all(self) -> None:
+    def test_no_regime_returns_empty(self) -> None:
         router = StrategyRouter()
         event = router.on_bar(regime=None, current_bar=0)
-        # Should return the initial "everything active" set
-        assert "grid" in event.active_strategies
-        assert "dca" in event.active_strategies
+        # With no regime data yet, active_strategies is empty (exclusive routing model)
+        assert event.active_strategies == set()
         assert event.cooldown_remaining == 0
         assert event.activated == set()
 
@@ -70,8 +69,10 @@ class TestStrategyRouter:
         assert "grid" not in event.active_strategies
 
     def test_hybrid_regime(self) -> None:
-        router = StrategyRouter(cooldown_bars=0)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
+        # HYBRID base mapping (grid+dca) activates for non-primary regimes.
+        # BULL_TREND routes exclusively to trend_follower; use ACCUMULATION for HYBRID.
+        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
+        regime = _make_regime(MarketRegime.ACCUMULATION, RecommendedStrategy.HYBRID)
         event = router.on_bar(regime, current_bar=0)
         assert "grid" in event.active_strategies
         assert "dca" in event.active_strategies
@@ -104,9 +105,10 @@ class TestStrategyRouter:
         event = router.on_bar(regime, current_bar=0)
         assert "smc" not in event.active_strategies
 
-    def test_smc_enabled_in_trending(self) -> None:
+    def test_smc_enabled_in_volatile(self) -> None:
+        # SMC activates exclusively for volatile_transition/breakout regimes.
         router = StrategyRouter(cooldown_bars=0, enable_smc=True)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
+        regime = _make_regime(MarketRegime.VOLATILE_TRANSITION, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=0)
         assert "smc" in event.active_strategies
 
@@ -158,7 +160,7 @@ class TestStrategyRouter:
         router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), 1)
         router.reset()
         assert router.switch_history == []
-        assert "grid" in router._active_strategies  # reset to initial set
+        assert router._active_strategies == set()  # reset to empty (exclusive routing model)
 
     def test_no_switch_if_same_regime(self) -> None:
         router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
