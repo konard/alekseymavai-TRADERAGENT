@@ -1,15 +1,15 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-06)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-07)
 
 ## Текущий статус проекта
 
-**Дата:** 6 марта 2026
-**Статус:** v2.0.0 + **Session 50: Phase 1 backtest pipeline подготовлен к запуску**
-**Pass Rate:** 78 unit tests passing (52 SMC + 26 market regime)
+**Дата:** 7 марта 2026
+**Статус:** v2.0.0 + **Session 51: Phase 1 завершён — 43/43 пар, strategy_score_matrix готова**
+**Pass Rate:** 2197 tests passing (тестовый сервер 158.160.215.57)
 **Code Quality:** ruff PASS + black PASS
-**Последний коммит:** `3ebfaf3` (fix(backfill): fix CSV import bugs + --csv-only/--data-dir)
+**Последний коммит:** `59968da` (fix(backtest): auto-detect CSV timestamp format)
 **Bot Status:** RUNNING — 5 ботов на `185.233.200.13`: demo_btc_hybrid, demo_eth_grid, demo_sol_dca, demo_btc_trend, demo_btc_smc.
-**Backtest V2.0 Status:** 🟡 Phase 1 pipeline готов (per-strategy metrics, backtest_phase1.yaml, exclude FTT/LUNA). Ожидает git pull на тест. сервере + smoke test.
-**Тест-сервер:** ВЫКЛЮЧЕН (`158.160.215.57`) — нужен git pull (отстаёт от main).
+**Backtest V2.0 Status:** ✅ Phase 1 COMPLETE — 43/43 пар, results в `results/phase1_full/multi_20260307_084535/`
+**Тест-сервер:** RUNNING (`158.160.215.57`) — virtualenv `.venv`, pytest 2197 pass без Docker.
 
 ---
 
@@ -3981,3 +3981,92 @@ docker compose up webui-backend webui-frontend
 ### Last Commit
 - `c7996a8` fix(portfolio): stale attribute reference
 - Предыдущие: `6b4eccf` P0.2+P0.5, `9508ae1` architecture doc
+
+---
+
+## Session 51 — Phase 1 Complete + Testing Server Setup (2026-03-07)
+
+### Задачи сессии
+1. Перенести тестирование на выделенный тестовый сервер (158.160.215.57).
+2. Исправить 3 падающих теста.
+3. Запустить и завершить Phase 1 backtest на всех 43 парах.
+4. Проанализировать strategy_score_matrix.
+
+### Изменения
+
+#### Тестовый сервер (158.160.215.57)
+- Установлен virtualenv `.venv` + все зависимости из `requirements.txt`
+- Все тесты теперь запускаются **только** на `158.160.215.57`
+- Команда: `ssh ai-agent@158.160.215.57 "cd ~/TRADERAGENT && .venv/bin/python -m pytest tests/ --ignore=tests/loadtest --ignore=tests/integration -q"`
+- **Production server** (185.233.200.13): только для live бота, Docker, деплой
+
+#### Bug fixes (3 теста)
+
+**1. `test_smc_adapter_backtest` + `test_trend_follower_backtest`**
+- Файл: `tests/backtesting/test_multi_tf_backtesting.py`
+- Причина: `warmup_bars=14400` при данных на 4-14 дней (~1152-2016 M5 баров). Цикл `range(14400, N)` пуст → `equity_curve=[]`
+- Фикс: `warmup_bars=14400` → `warmup_bars=100` в обоих тестах
+
+**2. `unified_engine.py` — неверное имя параметра**
+- Файл: `bot/tests/backtesting/unified_engine.py`
+- Причина: `analyze_every_n=cfg.analyze_every_n_bars` — у `OrchestratorBacktestConfig` нет поля `analyze_every_n`, есть `default_analyze_every_n`
+- Фикс: `analyze_every_n` → `default_analyze_every_n`
+
+**3. `test_pnl_basic` — HTML entity escaping**
+- Файл: `tests/telegram/test_telegram_bot.py`
+- Причина: бот использует HTML parse_mode, `&` → `&amp;`, тест проверял `"P&L"`
+- Фикс: `assert "P&L" in text` → `assert "P&amp;L" in text or "P&L" in text`
+
+#### Phase 1 Backtest — результаты
+
+**Параметры запуска:**
+- 43 пары (FTTUSDT и LUNAUSDT исключены)
+- 50 000 M5 баров (~173 дня)
+- 4 воркера параллельно
+- Время выполнения: ~58 минут
+- Сервер: 158.160.215.57
+
+**strategy_score_matrix.json:** `results/phase1_full/multi_20260307_084535/`
+
+| Стратегия | Активна на | Sharpe > 0 |
+|-----------|-----------|------------|
+| Grid | 43/43 | 18/43 |
+| DCA | 43/43 | 15/43 |
+| TrendFollower | 43/43 | 10/43 |
+| SMC | 41/43 | 6/43 |
+
+**Топ-10 пар (Grid):** LDOUSDT(4.93), SANDUSDT(5.13), BCHUSDT(4.66), XEMUSDT(4.61), BATUSDT(3.64), ZILUSDT(2.48), SOLUSDT(2.05), LTCUSDT(1.83), BTCUSDT(2.97), HBARUSDT(0.26)
+
+**Топ DCA:** LDOUSDT(6.36), SANDUSDT(5.75), ZILUSDT(3.26), SOLUSDT(3.13), LTCUSDT(3.06), BTCUSDT(2.97)
+
+**Аномалии обнаружены:**
+- TrendFollower и SMC: `realized_pnl=0` на большинстве пар при ненулевых трейдах → баг в StrategyPeriodMetrics для TF/SMC
+- Исключение: LDOUSDT SMC: pnl=+$148, 3212 трейдов, Sharpe=6.37
+- BNBUSDT SMC Sharpe=16.633 при 0 PnL — артефакт метрики
+
+#### Backtest fixes (предыдущие сессии, слиты в main)
+- `run_backtest_v2.py` — auto-discover 43 символов из `data/historical/` (без `--symbols`)
+- `run_backtest_v2.py` — glob `*5m*.csv` → `*_5m.csv` (не матчит 15m файлы)
+- `run_backtest_v2.py` — tail-read CSV через `skiprows` для предотвращения OOM (889k строк/файл × 4 воркера)
+- `run_backtest_v2.py` — auto-detect timestamp: ms epoch → fallback datetime string
+- `strategy_router.py` — exclusive routing (bull→TF only, bear→DCA only, breakout→SMC) вместо аддитивного
+- `strategy_router.py` — `_active_strategies = set()` при инициализации (не все 4 сразу)
+- `grid_adapter.py` — SL = grid lower boundary (не per-position -5%)
+- `grid_adapter.py` — `force_close_all()` при деактивации Grid роутером
+- `orchestrator_engine.py` — force-close hook при deactivation события
+
+### Финальный статус тестов
+**2197 passed, 11 skipped, 0 failed** на тестовом сервере (158.160.215.57)
+
+### Last Commits
+- `59968da` fix(backtest): auto-detect CSV timestamp format
+- `308eba4` fix(backtest): tail-read CSV to prevent OOM
+- `2b67a31` fix(backtest): run_multi auto-discover symbols + fix 5m glob
+- `732321c` test: update grid SL test
+- `2d51df2` fix(grid): grid boundary SL + force-close on deactivation
+
+### Next Actions
+1. **Исправить баг TF/SMC realized_pnl=0** в StrategyPeriodMetrics
+2. **Phase 2:** Оптимизация параметров для топ Grid+DCA пар
+3. **Портфель Phase 3:** Топ-10 пар × лучшая стратегия
+4. **Деплой** SMC-фикс на продакшн (185.233.200.13)

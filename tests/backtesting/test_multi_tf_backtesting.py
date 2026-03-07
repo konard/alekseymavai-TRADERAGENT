@@ -544,7 +544,7 @@ class TestSMCAdapterIntegration:
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=100,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = SMCStrategyAdapter(
@@ -574,7 +574,7 @@ class TestTrendFollowerAdapterIntegration:
         config = MultiTFBacktestConfig(
             symbol="BTC/USDT",
             initial_balance=Decimal("10000"),
-            warmup_bars=14400,
+            warmup_bars=100,
         )
         engine = MultiTimeframeBacktestEngine(config=config)
         strategy = TrendFollowerAdapter(

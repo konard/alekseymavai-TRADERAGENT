@@ -308,7 +308,7 @@ class TestPnlCommand:
         msg = _make_message("/pnl test_bot")
         await bot._cmd_pnl(msg)
         text = msg.answer.call_args[0][0]
-        assert "P&L" in text
+        assert "P&amp;L" in text or "P&L" in text
 
     async def test_pnl_with_grid(self, bot):
         orch = bot.orchestrators["test_bot"]
