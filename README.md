@@ -211,6 +211,7 @@ python -m pytest tests/strategies/smc/ --ignore=tests/strategies/smc/test_market
 |----------|----------|
 | **[docs/analysis.md](docs/analysis.md)** | Анализ проекта: сильные/слабые стороны, конфликты Live↔Backtest, результаты Phase 1 |
 | **[docs/plan.md](docs/plan.md)** | План развития: 7 направлений, приоритеты P0–P3, таймлайн |
+| **[docs/planV2.md](docs/planV2.md)** | План V2.0: концепция «Идеального трейдера», P0-фиксы, оптимизация Phase 2, параметры по парам |
 | **[docs/architecture.md](docs/architecture.md)** | Блок-схемы, сравнительные таблицы Live vs Backtest |
 | [docs/SESSION_CONTEXT.md](docs/SESSION_CONTEXT.md) | Полная история разработки по сессиям |
 
