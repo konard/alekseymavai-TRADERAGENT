@@ -4070,3 +4070,123 @@ docker compose up webui-backend webui-frontend
 2. **Phase 2:** Оптимизация параметров для топ Grid+DCA пар
 3. **Портфель Phase 3:** Топ-10 пар × лучшая стратегия
 4. **Деплой** SMC-фикс на продакшн (185.233.200.13)
+
+---
+
+## Сессия 52 (2026-03-07) — Анализ архитектуры живого бота + документация
+
+### Задачи сессии
+1. Обновить документацию: README, docs/analysis.md, docs/plan.md, docs/architecture.md
+2. Очистить репозиторий от устаревших файлов
+3. Сохранить персональный промт (идеальный трейдер + senior dev)
+4. Глубокий анализ внутренних конфликтов живого бота
+
+---
+
+### Архитектурное решение (ключевое)
+
+> **Логика живого бота — приоритетная.** Менять бот под бэктест — неправильная практика.
+> Правильный порядок: сначала исправить баги в живом боте, затем синхронизировать бэктест
+> так чтобы он воспроизводил именно то, что делает бот. Только тогда бэктест
+> будет иметь смысл как инструмент подбора параметров.
+
+---
+
+### 1. Документация
+
+**Удалены устаревшие файлы** (коммит `8852270`):
+- `docs/BYBIT_DEMO_TRADING_SOLUTION.md`
+- `docs/BYBIT_PRODUCTION_SETUP.md`
+- `docs/CONFIGURATION.md`
+- `docs/DEPLOYMENT.md`
+- `docs/TESTING.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/architecture_bot.md`
+- `docs/architecture_livebot_vs_backtest.md`
+- `docs/backtest_v2_phase1_results.md`
+
+**Добавлены новые файлы:**
+- `docs/analysis.md` — полный анализ проекта (сильные/слабые стороны, конфликты Live↔Backtest, результаты Phase 1)
+- `docs/architecture.md` — ASCII-схемы архитектуры, сравнительные таблицы, routing-конфликты
+- `docs/plan.md` — 7 направлений развития (A–G), приоритеты P0–P3, таймлайн
+- `docs/persona.md` — роль: идеальный криптотрейдер (SMC, трёхрежимная система) + senior Python разработчик
+
+**README.md обновлён:**
+- Тесты: 1687 → 2197
+- Phase 1: 43/43 пар (был 28/37)
+- Статус P0-багов (force_close_all, routing divergence)
+- Ссылки на analysis.md, architecture.md, plan.md
+
+**Сохранён в памяти Claude** (`~/.claude/projects/.../memory/persona.md`) — загружается автоматически в каждой сессии.
+
+---
+
+### 2. Анализ внутренних конфликтов живого бота
+
+Проведён полный аудит: `market_regime.py` (808 строк), `strategy_selector.py` (474 строки), `bot_orchestrator.py` (2417 строк, фокус на `_update_active_strategies`).
+
+#### Конфликт #1 — StrategySelector — мёртвый код 🔴
+- `strategy_selector.py` создан PR #166 (14 фев 2026) — 474 строки, 29 тестов, transition guards, приоритеты
+- PR #283 (24 фев 2026) добавил `_update_active_strategies()` в главный цикл, обойдя StrategySelector
+- `StrategySelector` не вызывается нигде, `DEFAULT_REGIME_STRATEGIES` не используется
+- Два противоречивых маппинга режимов в кодовой базе
+
+#### Конфликт #2 — QUIET_TRANSITION = все стратегии выключены 🔴
+```
+QUIET_TRANSITION → recommend=HOLD → _REGIME_TO_STRATEGIES[HOLD]={} → нет TF/SMC добавлений → {}
+```
+При ADX 22-32, ATR < 2% (классическое боковое движение) бот не делает ничего. Grid — идеальная стратегия для этого состояния. StrategySelector знает: `QUIET_TRANSITION → Grid 0.7`.
+
+#### Конфликт #3 — SMC graceful_transition: неверный атрибут 🔴
+```python
+if hasattr(adapter, "active_positions"):  # атрибута НЕТ у SMCStrategyAdapter
+```
+Реальный атрибут — `_positions`. SMC-позиции никогда не закрываются при деактивации даже при `close_positions_on_switch=True`.
+
+#### Конфликт #4 — BULL_TREND + high confluence = 4 стратегии одновременно 🟡
+```
+BULL_TREND + confluence ≥ 0.7 → HYBRID → {grid, dca} → +trend_follower → +smc → {grid, dca, tf, smc}
+```
+Все 4 стратегии без координации капитала. PortfolioRiskManager создан, но не интегрирован.
+
+#### Конфликт #5 — TrendFollower в bear_trend без пользы 🟡
+TF принудительно добавляется в bear_trend хардкодом. В логах: `Volume confirmation failed` каждый тик. Не торгует, но потребляет ресурсы.
+
+#### Конфликт #6 — TradingCore заполнен частично 🟡
+Создаётся с 3 полями из ~15. `max_daily_loss_pct`, `fees`, `max_position_size_pct` берут дефолты, не из реального YAML.
+
+#### Конфликт #7 — VOLATILE_TRANSITION: рекомендует REDUCE, запускает SMC 🟠
+`_recommend_strategy()` → REDUCE_EXPOSURE → `{}` → хардкод добавляет SMC → `{smc}`. Противоречие в логике одного модуля.
+
+---
+
+### 3. GitHub Issues
+
+| Issue | Название |
+|-------|---------|
+| **#352** | refactor: integrate StrategySelector as primary strategy router |
+
+Исторический факт: `StrategySelector` (PR#166, 14 фев) **старше** `_update_active_strategies` (PR#283, 24 фев) на 10 дней. `_update_active_strategies` — временный хардкод, который вырос и стал основным.
+
+---
+
+### Состояние ботов (19:19 UTC)
+- BTC/USDT: `bear_trend`, ADX=50, RSI=32, баланс $102,283
+- Рекомендован DCA, TF не входит (`Volume confirmation failed`)
+- Без ошибок, стабильно
+
+---
+
+### Last Commits
+- `6023cf9` docs: add persona.md — роль криптотрейдера и разработчика
+- `f09be8a` docs(plan): revert to original format
+- `8852270` docs: update README, add architecture.md, remove stale docs
+- `bdce2c3` docs: update SESSION_CONTEXT.md — Session 51 final
+
+### Next Actions (приоритет — живой бот, потом бэктест)
+1. **#3 Исправить** `_graceful_transition` SMC: `active_positions` → `_positions`
+2. **#2 Исправить** QUIET_TRANSITION → Grid (убрать "ничего не делать" в переходной зоне)
+3. **#5 Убрать** TF из bear_trend хардкода
+4. **#352 Решить** судьбу StrategySelector: интегрировать как основной роутер
+5. После фиксов — обновить бэктест чтобы воспроизводил исправленную логику бота
+
