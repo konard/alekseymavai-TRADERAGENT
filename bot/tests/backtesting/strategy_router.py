@@ -26,12 +26,15 @@ logger = logging.getLogger(__name__)
 
 
 # Mirrors BotOrchestrator._REGIME_TO_STRATEGIES
-_REGIME_TO_STRATEGIES: dict[RecommendedStrategy, set[str]] = {
-    RecommendedStrategy.GRID: {"grid"},
-    RecommendedStrategy.DCA: {"dca"},
-    RecommendedStrategy.HYBRID: {"grid", "dca"},
-    RecommendedStrategy.HOLD: set(),
-    RecommendedStrategy.REDUCE_EXPOSURE: set(),
+# Keys are string values (not enum instances) to avoid Python 3.11 str-Enum hash
+# edge-cases when looking up by regime.recommended_strategy.value.
+# Values are frozenset to prevent accidental mutation of the module-level mapping.
+_REGIME_TO_STRATEGIES: dict[str, frozenset[str]] = {
+    RecommendedStrategy.GRID.value: frozenset({"grid"}),
+    RecommendedStrategy.DCA.value: frozenset({"dca"}),
+    RecommendedStrategy.HYBRID.value: frozenset({"grid", "dca"}),
+    RecommendedStrategy.HOLD.value: frozenset(),
+    RecommendedStrategy.REDUCE_EXPOSURE.value: frozenset(),
 }
 
 # TrendFollower is the PRIMARY strategy for bull trends — replaces Grid/DCA
@@ -223,4 +226,4 @@ class StrategyRouter:
         if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
             return {"smc"}
 
-        return _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
+        return set(_REGIME_TO_STRATEGIES.get(regime.recommended_strategy.value, frozenset()))

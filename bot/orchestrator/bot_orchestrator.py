@@ -807,12 +807,12 @@ class BotOrchestrator:
             if "smc" in deactivated and self.smc_strategy:
                 try:
                     adapter = self.smc_strategy
-                    for pos_id, pos in list(adapter._positions.items()):
+                    for _pos_id, smc_pos in list(adapter._positions.items()):
                         if self.current_price:
                             base_amount = float(
-                                Decimal(str(pos.get("size", 0))) / self.current_price
+                                Decimal(str(smc_pos.get("size", 0))) / self.current_price
                             )
-                            side = "sell" if pos.get("direction") == "long" else "buy"
+                            side = "sell" if smc_pos.get("direction") == "long" else "buy"
                             await self.exchange.create_order(
                                 symbol=self.config.symbol,
                                 order_type="market",
