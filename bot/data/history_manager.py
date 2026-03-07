@@ -332,7 +332,7 @@ class HistoryManager:
 
         async with self._session_factory() as session:
             result = await session.execute(stmt, params)
-            return list(result.fetchall())
+            return list(result.fetchall())  # type: ignore[arg-type]
 
     async def _count_db(self, symbol: str, interval: str) -> int:
         """Count rows in DB for (symbol, interval)."""

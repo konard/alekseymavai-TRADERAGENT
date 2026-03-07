@@ -137,11 +137,11 @@ class SharedCapitalPool:
 
     @property
     def total_allocated(self) -> Decimal:
-        return sum(a.allocated for a in self._allocations.values())
+        return sum((a.allocated for a in self._allocations.values()), Decimal("0"))
 
     @property
     def total_deployed(self) -> Decimal:
-        return sum(a.deployed for a in self._allocations.values())
+        return sum((a.deployed for a in self._allocations.values()), Decimal("0"))
 
     def get_utilization(self) -> float:
         """Fraction of total capital currently allocated (0.0–1.0)."""
@@ -326,7 +326,7 @@ class PortfolioRiskManager:
         Args:
             balances: Mapping of bot_name → current balance.
         """
-        total = sum(balances.values())
+        total: Decimal = sum(balances.values(), Decimal("0"))
         self._current_value = total
 
         if total > self._peak_value:
@@ -366,8 +366,8 @@ class PortfolioRiskManager:
 
     def set_correlation(self, symbol_a: str, symbol_b: str, correlation: float) -> None:
         """Register a known correlation between two symbols."""
-        key = tuple(sorted([symbol_a, symbol_b]))  # type: ignore[arg-type]
-        self._correlation_overrides[key] = correlation  # type: ignore[index]
+        key: tuple[str, str] = (min(symbol_a, symbol_b), max(symbol_a, symbol_b))
+        self._correlation_overrides[key] = correlation
 
     def _is_too_correlated(self, symbol: str) -> bool:
         """
@@ -383,9 +383,9 @@ class PortfolioRiskManager:
         return False
 
     def _get_correlation(self, sym_a: str, sym_b: str) -> float:
-        key = tuple(sorted([sym_a, sym_b]))  # type: ignore[arg-type]
-        if key in self._correlation_overrides:  # type: ignore[operator]
-            return self._correlation_overrides[key]  # type: ignore[return-value]
+        key: tuple[str, str] = (min(sym_a, sym_b), max(sym_a, sym_b))
+        if key in self._correlation_overrides:
+            return self._correlation_overrides[key]
         # Simple heuristic: same base currency → assume high correlation
         base_a = sym_a.split("/")[0].split("USDT")[0]
         base_b = sym_b.split("/")[0].split("USDT")[0]
