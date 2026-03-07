@@ -109,7 +109,10 @@ class TestMainLoopThrottle:
         """_last_active_strategies_update_at == 0 → immediate call on first tick."""
         orch = _make_stub(regime_check_interval=3600.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
-        orch._last_active_strategies_update_at = 0.0  # never updated
+        # Simulate "never updated": set timestamp far enough in the past so
+        # the throttle condition (now - ts >= interval) is satisfied on any
+        # machine regardless of uptime.
+        orch._last_active_strategies_update_at = time.monotonic() - 3601.0
 
         await _run_main_loop_throttle(orch)
 
