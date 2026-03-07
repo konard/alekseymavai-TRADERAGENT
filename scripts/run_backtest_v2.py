@@ -257,10 +257,45 @@ def _load_data(
         ]
         if csv_files:
             try:
-                data = loader.load_csv(str(csv_files[0]))
+                csv_path = csv_files[0]
+                # Memory optimisation: read only the last max_bars rows from CSV.
+                # Avoids loading 889k rows into RAM just to slice to 50k later,
+                # which causes OOM in multi-pair sequential workers.
+                if max_bars:
+                    import pandas as _pd
+                    with open(csv_path, "rb") as _fh:
+                        total_lines = _fh.read().count(b"\n")
+                    skip = max(0, total_lines - max_bars)  # header is row 0, data starts row 1
+                    _df_m5 = _pd.read_csv(
+                        csv_path,
+                        skiprows=range(1, skip + 1) if skip > 0 else None,
+                    )
+                    # Parse timestamp from first column (milliseconds epoch)
+                    ts_col = _df_m5.columns[0]
+                    _df_m5["_ts"] = _pd.to_datetime(_df_m5[ts_col], unit="ms", utc=True)
+                    _df_m5 = _df_m5.set_index("_ts").sort_index()
+                    _df_m5 = _df_m5[["open", "high", "low", "close", "volume"]].apply(
+                        _pd.to_numeric, errors="coerce"
+                    ).dropna()
+
+                    def _resample(df: "_pd.DataFrame", rule: str) -> "_pd.DataFrame":
+                        return df.resample(rule).agg(
+                            {"open": "first", "high": "max", "low": "min",
+                             "close": "last", "volume": "sum"}
+                        ).dropna()
+
+                    data = MultiTimeframeData(
+                        m5=_df_m5,
+                        m15=_resample(_df_m5, "15min"),
+                        h1=_resample(_df_m5, "1h"),
+                        h4=_resample(_df_m5, "4h"),
+                        d1=_resample(_df_m5, "1D"),
+                    )
+                else:
+                    data = loader.load_csv(str(csv_path))
                 if max_bars and len(data.m5) > max_bars:
                     data = _trim_data(data, max_bars)
-                logger.info("Loaded %d M5 bars from %s", len(data.m5), csv_files[0].name)
+                logger.info("Loaded %d M5 bars from %s", len(data.m5), csv_path.name)
                 return data
             except Exception as e:
                 logger.warning("Failed to load CSV for %s: %s — using synthetic data", symbol, e)
