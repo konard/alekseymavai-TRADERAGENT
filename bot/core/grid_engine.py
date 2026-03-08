@@ -3,8 +3,14 @@ GridEngine - Grid trading strategy implementation
 Handles grid level calculation, order placement, execution handling, and rebalancing
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
 from enum import Enum
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from bot.core.trading_core.core_position import CorePosition
 
 from bot.utils.logger import get_logger
 
@@ -398,3 +404,143 @@ class GridEngine:
                     }
                 )
         return result
+
+    # ------------------------------------------------------------------
+    # CorePosition coordination (Hybrid mode)
+    # ------------------------------------------------------------------
+
+    def apply_position_constraints(
+        self,
+        core_position: Optional[CorePosition],
+        *,
+        dca_protection_levels: int = 2,
+        max_sell_ratio: Decimal = Decimal("0.5"),
+    ) -> dict:
+        """
+        Adapt the active grid to avoid conflicting with a DCA CorePosition.
+
+        Rules applied:
+        1. **Accumulation zone** — SELL orders whose price falls within
+           ``dca_protection_levels`` trigger-% steps below
+           ``avg_entry_price`` are cancelled (Grid must not lock profits
+           before DCA finishes accumulating).
+        2. **Total SELL cap** — sum of all active SELL amounts must not
+           exceed ``max_sell_ratio`` × ``core_position.total_amount``.
+           Excess SELL orders (cheapest first) are cancelled.
+        3. **Safety-order conflict** — when ``core_position.safety_order_active``
+           is True, BUY orders within ±1 grid level of the DCA fill price
+           (``avg_entry_price``) are cancelled to avoid double-buying.
+           The flag is then cleared on ``core_position``.
+
+        When *core_position* is ``None`` or empty, this method is a no-op
+        and returns an empty constraint report — full backward compatibility.
+
+        Args:
+            core_position: Shared CorePosition from HybridCoordinator.
+                If ``None``, no constraints are applied.
+            dca_protection_levels: How many DCA trigger steps below avg_entry
+                to protect from Grid SELL orders.  Default 2.
+            max_sell_ratio: Maximum fraction of CorePosition size that Grid
+                may place as SELL orders simultaneously.  Default 0.5 (50 %).
+
+        Returns:
+            A dict summarising what was constrained::
+
+                {
+                    "sell_cancelled_accumulation_zone": [order_ids],
+                    "sell_cancelled_cap": [order_ids],
+                    "buy_cancelled_safety_conflict": [order_ids],
+                }
+        """
+        report: dict[str, list[str]] = {
+            "sell_cancelled_accumulation_zone": [],
+            "sell_cancelled_cap": [],
+            "buy_cancelled_safety_conflict": [],
+        }
+
+        if core_position is None or core_position.is_empty():
+            return report
+
+        avg = core_position.avg_entry_price
+
+        # -----------------------------------------------------------------
+        # Rule 1: No SELL orders in DCA accumulation zone
+        # (below avg_entry by up to dca_protection_levels × profit_per_grid)
+        # -----------------------------------------------------------------
+        protection_band = avg * self.profit_per_grid * dca_protection_levels
+        accumulation_ceiling = avg - protection_band
+
+        sell_orders_by_price = sorted(
+            [o for o in self.active_orders.values() if o.side == "sell"],
+            key=lambda o: o.price,
+        )
+
+        for order in sell_orders_by_price:
+            if order.price <= avg and order.price >= accumulation_ceiling:
+                # SELL in the protected DCA zone — cancel it
+                if order.order_id is not None:
+                    self.cancel_order(order.order_id)
+                    report["sell_cancelled_accumulation_zone"].append(
+                        order.order_id or f"level-{order.level}"
+                    )
+                    logger.info(
+                        "grid_sell_cancelled_dca_zone",
+                        symbol=self.symbol,
+                        price=float(order.price),
+                        avg_entry=float(avg),
+                    )
+
+        # -----------------------------------------------------------------
+        # Rule 2: Cap total SELL volume at max_sell_ratio × CorePosition size
+        # -----------------------------------------------------------------
+        max_sell_amount = core_position.total_amount * max_sell_ratio
+
+        # Collect remaining active SELLs (after rule-1 removals)
+        remaining_sells = sorted(
+            [o for o in self.active_orders.values() if o.side == "sell"],
+            key=lambda o: o.price,  # cancel cheapest (closest to market) first
+        )
+
+        cumulative_sell = Decimal("0")
+        for order in remaining_sells:
+            cumulative_sell += order.amount
+            if cumulative_sell > max_sell_amount:
+                # This order pushes us over the cap — cancel it
+                if order.order_id is not None:
+                    self.cancel_order(order.order_id)
+                    report["sell_cancelled_cap"].append(
+                        order.order_id or f"level-{order.level}"
+                    )
+                    logger.info(
+                        "grid_sell_cancelled_cap",
+                        symbol=self.symbol,
+                        price=float(order.price),
+                        cumulative_sell=float(cumulative_sell),
+                        max_sell_amount=float(max_sell_amount),
+                    )
+
+        # -----------------------------------------------------------------
+        # Rule 3: Remove conflicting BUY orders during active DCA safety order
+        # -----------------------------------------------------------------
+        if core_position.safety_order_active:
+            fill_price = avg  # best proxy for the just-completed DCA fill
+            # Cancel BUY orders within ±1 profit_per_grid of the DCA fill price
+            conflict_band = fill_price * self.profit_per_grid
+
+            for order in list(self.active_orders.values()):
+                if order.side == "buy" and abs(order.price - fill_price) <= conflict_band:
+                    if order.order_id is not None:
+                        self.cancel_order(order.order_id)
+                        report["buy_cancelled_safety_conflict"].append(
+                            order.order_id or f"level-{order.level}"
+                        )
+                        logger.info(
+                            "grid_buy_cancelled_safety_conflict",
+                            symbol=self.symbol,
+                            price=float(order.price),
+                            fill_price=float(fill_price),
+                        )
+
+            core_position.clear_safety_order_flag()
+
+        return report
