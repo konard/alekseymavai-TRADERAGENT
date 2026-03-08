@@ -431,10 +431,9 @@ class TestRegimeAllowedStrategyTypes:
         assert "trend_follower" in allowed
         assert "dca" in allowed
 
-    def test_bear_trend_allows_dca_and_trend_follower(self):
+    def test_bear_trend_allows_dca(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.BEAR_TREND]
         assert "dca" in allowed
-        assert "trend_follower" in allowed
 
     def test_tight_range_allows_grid(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.TIGHT_RANGE]

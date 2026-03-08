@@ -473,8 +473,6 @@ class BacktestOrchestratorEngine:
         # Strategy router
         router = StrategyRouter(
             cooldown_bars=config.router_cooldown_bars,
-            enable_smc=config.enable_smc,
-            enable_trend_follower=config.enable_trend_follower,
         )
 
         # Risk manager
