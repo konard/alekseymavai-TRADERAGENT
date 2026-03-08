@@ -827,7 +827,7 @@ class BotOrchestrator:
             if "smc" in deactivated and self.smc_strategy:
                 try:
                     adapter = self.smc_strategy
-                    for pos_id, pos in list(adapter._positions.items()):
+                    for _pos_id, pos in list(adapter._positions.items()):
                         if self.current_price:
                             base_amount = float(
                                 Decimal(str(pos.get("size", 0))) / self.current_price
@@ -884,9 +884,12 @@ class BotOrchestrator:
                 # Update which strategies should run based on regime (#283, #292).
                 # Throttled to _regime_check_interval so we don't re-evaluate every tick —
                 # regime data itself only refreshes that often.  The first iteration always
-                # runs (monotonic() ≫ 0, so now - 0.0 is always ≥ interval).
+                # runs because _last_active_strategies_update_at starts at 0.0.
                 _now = time.monotonic()
-                if _now - self._last_active_strategies_update_at >= self._regime_check_interval:
+                if (
+                    self._last_active_strategies_update_at == 0.0
+                    or _now - self._last_active_strategies_update_at >= self._regime_check_interval
+                ):
                     await self._update_active_strategies()
                     self._last_active_strategies_update_at = _now
 

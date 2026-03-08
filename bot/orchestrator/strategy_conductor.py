@@ -277,9 +277,7 @@ class StrategyConductor:
         """
         regime = regime_analysis.regime
         smc_context = regime_analysis.smc_context
-        current_price = float(
-            regime_analysis.analysis_details.get("current_price", 0.0)
-        )
+        current_price = float(regime_analysis.analysis_details.get("current_price", 0.0))
 
         mode = self.determine_mode(regime)
         directives = self.create_directives(mode, smc_context, current_price)

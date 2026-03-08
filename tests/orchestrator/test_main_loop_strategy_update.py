@@ -91,7 +91,10 @@ def _make_stub(
 async def _run_main_loop_throttle(orch: BotOrchestrator) -> None:
     """Simulate what _main_loop does for the strategy-update throttle check."""
     now = time.monotonic()
-    if now - orch._last_active_strategies_update_at >= orch._regime_check_interval:
+    if (
+        orch._last_active_strategies_update_at == 0.0
+        or now - orch._last_active_strategies_update_at >= orch._regime_check_interval
+    ):
         await orch._update_active_strategies()
         orch._last_active_strategies_update_at = now
 

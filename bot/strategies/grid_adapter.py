@@ -183,8 +183,10 @@ class GridAdapter(BaseStrategy):
         sell_target = nearest_buy * (Decimal("1") + self._profit_per_grid)
         # SL = lower boundary of the entire grid (not per-position -5%).
         # Real grid trading: close ALL positions only when price exits the grid range.
-        stop_loss = self._grid_lower_price if self._grid_lower_price > 0 else nearest_buy * (
-            Decimal("1") - self._grid_range_pct
+        stop_loss = (
+            self._grid_lower_price
+            if self._grid_lower_price > 0
+            else nearest_buy * (Decimal("1") - self._grid_range_pct)
         )
 
         return BaseSignal(

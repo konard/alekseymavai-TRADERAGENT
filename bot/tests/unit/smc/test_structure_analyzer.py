@@ -10,15 +10,22 @@ Coverage targets:
 """
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
-from bot.core.smc.models import SMCContext, SMCPhase, StructureEvent, StructureType, SwingPoint, SwingType
+from bot.core.smc.models import (
+    SMCContext,
+    SMCPhase,
+    StructureEvent,
+    StructureType,
+    SwingPoint,
+    SwingType,
+)
 from bot.core.smc.structure_analyzer import SMCStructureAnalyzer, _CacheEntry
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +54,9 @@ def _make_df(n: int = 300, trend: str = "flat") -> pd.DataFrame:
     )
 
 
-def _make_swing_point(index: int = 0, price: float = 100.0, swing_type: SwingType = SwingType.HIGH) -> SwingPoint:
+def _make_swing_point(
+    index: int = 0, price: float = 100.0, swing_type: SwingType = SwingType.HIGH
+) -> SwingPoint:
     return SwingPoint(index=index, price=price, swing_type=swing_type)
 
 
@@ -74,9 +83,7 @@ def _make_smc_context(
     events = []
     if structural_levels:
         for i, price in enumerate(structural_levels):
-            events.append(
-                _make_structure_event(index=i * 10, break_price=price)
-            )
+            events.append(_make_structure_event(index=i * 10, break_price=price))
     return SMCContext(
         phase=phase,
         trend_bias=0.5 if phase in (SMCPhase.ACCUMULATION, SMCPhase.BULL_TREND) else -0.5,
@@ -138,7 +145,9 @@ class TestSMCStructureAnalyzerInit:
 class TestGetContext:
     def setup_method(self):
         # Use a very low TTL so we can test staleness
-        self.analyzer = SMCStructureAnalyzer(ttl_seconds=300.0, swing_strength=5, min_warmup_bars=50)
+        self.analyzer = SMCStructureAnalyzer(
+            ttl_seconds=300.0, swing_strength=5, min_warmup_bars=50
+        )
 
     def test_returns_smc_context(self):
         df = _make_df(300)
@@ -152,13 +161,17 @@ class TestGetContext:
 
     def test_cache_miss_calls_analyzer(self):
         df = _make_df(300)
-        with patch.object(self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze) as mock_analyze:
+        with patch.object(
+            self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze
+        ) as mock_analyze:
             self.analyzer.get_context("BTC/USDT", df)
             assert mock_analyze.call_count == 1
 
     def test_cache_hit_does_not_rerun_analyzer(self):
         df = _make_df(300)
-        with patch.object(self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze) as mock_analyze:
+        with patch.object(
+            self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze
+        ) as mock_analyze:
             self.analyzer.get_context("BTC/USDT", df)
             self.analyzer.get_context("BTC/USDT", df)
             # Second call should be served from cache
@@ -166,7 +179,9 @@ class TestGetContext:
 
     def test_stale_cache_reruns_analyzer(self):
         df = _make_df(300)
-        with patch.object(self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze) as mock_analyze:
+        with patch.object(
+            self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze
+        ) as mock_analyze:
             self.analyzer.get_context("BTC/USDT", df)
             # Manually expire the cache entry
             self.analyzer._cache["BTC/USDT"].updated_at = time.monotonic() - 400.0
@@ -175,7 +190,9 @@ class TestGetContext:
 
     def test_different_symbols_independent_cache(self):
         df = _make_df(300)
-        with patch.object(self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze) as mock_analyze:
+        with patch.object(
+            self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze
+        ) as mock_analyze:
             self.analyzer.get_context("BTC/USDT", df)
             self.analyzer.get_context("ETH/USDT", df)
             assert mock_analyze.call_count == 2
@@ -218,6 +235,7 @@ class TestGetStructuralLevels:
             structure_events=events,
         )
         from bot.core.smc.structure_analyzer import _CacheEntry
+
         self.analyzer._cache["BTC/USDT"] = _CacheEntry(context=ctx)
 
         levels = self.analyzer.get_structural_levels("BTC/USDT")
@@ -232,6 +250,7 @@ class TestGetStructuralLevels:
             bars_analyzed=10,
         )
         from bot.core.smc.structure_analyzer import _CacheEntry
+
         self.analyzer._cache["BTC/USDT"] = _CacheEntry(context=ctx)
         levels = self.analyzer.get_structural_levels("BTC/USDT")
         assert levels == []
@@ -253,12 +272,14 @@ class TestGetPhase:
     def test_returns_phase_from_cache(self):
         ctx = _make_smc_context(phase=SMCPhase.DISTRIBUTION)
         from bot.core.smc.structure_analyzer import _CacheEntry
+
         self.analyzer._cache["BTC/USDT"] = _CacheEntry(context=ctx)
         assert self.analyzer.get_phase("BTC/USDT") == SMCPhase.DISTRIBUTION
 
     def test_returns_accumulation_phase(self):
         ctx = _make_smc_context(phase=SMCPhase.ACCUMULATION)
         from bot.core.smc.structure_analyzer import _CacheEntry
+
         self.analyzer._cache["BTC/USDT"] = _CacheEntry(context=ctx)
         assert self.analyzer.get_phase("BTC/USDT") == SMCPhase.ACCUMULATION
 
@@ -270,7 +291,9 @@ class TestGetPhase:
 
 class TestInvalidation:
     def setup_method(self):
-        self.analyzer = SMCStructureAnalyzer(ttl_seconds=300.0, swing_strength=5, min_warmup_bars=50)
+        self.analyzer = SMCStructureAnalyzer(
+            ttl_seconds=300.0, swing_strength=5, min_warmup_bars=50
+        )
 
     def test_invalidate_removes_single_symbol(self):
         df = _make_df(300)
@@ -293,7 +316,9 @@ class TestInvalidation:
 
     def test_after_invalidate_next_call_recomputes(self):
         df = _make_df(300)
-        with patch.object(self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze) as mock_analyze:
+        with patch.object(
+            self.analyzer._analyzer, "analyze", wraps=self.analyzer._analyzer.analyze
+        ) as mock_analyze:
             self.analyzer.get_context("BTC/USDT", df)
             self.analyzer.invalidate("BTC/USDT")
             self.analyzer.get_context("BTC/USDT", df)
@@ -346,7 +371,7 @@ class TestSMCContextNewFields:
         assert 0.0 <= ctx.confidence <= 1.0
 
     def test_confidence_clamps_at_1(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             # Pydantic ge/le validation should reject > 1.0
             SMCContext(current_price=100.0, bar_index=0, bars_analyzed=5, confidence=1.5)
 
