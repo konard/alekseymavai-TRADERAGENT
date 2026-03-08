@@ -204,8 +204,8 @@ class DCAAdapter(BaseStrategy):
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
 
-            # Check take profit (based on average price)
-            tp_price = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
+            # Check take profit (stored per-position; updated when safety orders fill)
+            tp_price = pos["take_profit"]
             if current_price >= tp_price:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
                 continue
