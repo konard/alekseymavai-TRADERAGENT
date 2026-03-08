@@ -35,6 +35,16 @@ strategy_params:
   require_volume_confirmation: true
   min_volume_multiplier: "1.5"     # 1.5× average volume
 
+# =============================================================================
+# Two-phase Cooldown with SMC Confirmation (issue #360)
+# Controls the PRE_SWITCH → CONFIRMED transition gate.
+# =============================================================================
+strategy_switching:
+  pre_switch_duration_seconds: 1800    # 30 min minimum in PRE_SWITCH (default)
+  trend_confirm_duration_seconds: 3600 # 60 min for trend-reversal transitions
+  require_smc_confirmation: true       # Require BOS/CHoCH structural signal
+  tighten_stops_on_pre_switch: true    # Move stops to breakeven in PRE_SWITCH
+
 # Bot Configurations
 bots:
   # =========================================================================

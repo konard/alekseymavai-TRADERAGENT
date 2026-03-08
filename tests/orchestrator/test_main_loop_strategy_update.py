@@ -79,11 +79,15 @@ def _make_stub(
     # redis_client needed by _publish_event_sync
     orch.redis_client = None
     orch.config = type("C", (), {"name": "test_bot"})()
-    # StrategySelector: single source of truth for regime→strategy routing
+    # StrategySelector: single source of truth for regime→strategy routing.
+    # pre_switch_duration_seconds=0.0 and require_smc_confirmation=False bypass
+    # the two-phase gate so that regime switches complete in a single tick here.
     orch.strategy_selector = StrategySelector(
         registry=StrategyRegistry(),
         transition_cooldown_seconds=cooldown,
         min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+        pre_switch_duration_seconds=0.0,
+        require_smc_confirmation=False,
     )
     return orch
 
@@ -175,7 +179,10 @@ class TestRegimeChangeCausesStrategyChange:
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         orch._last_strategy_switch_at = 0.0  # no cooldown
 
-        await orch._update_active_strategies()
+        # Two-phase gate: first call enters PRE_SWITCH (timer=0, no SMC),
+        # second call exits PRE_SWITCH → CONFIRMED → executes transition.
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
 
         assert "dca" in orch._active_strategies
         assert "grid" not in orch._active_strategies
@@ -192,7 +199,9 @@ class TestRegimeChangeCausesStrategyChange:
         )
         orch._last_strategy_switch_at = 0.0
 
-        await orch._update_active_strategies()
+        # Two-phase gate: first call enters PRE_SWITCH, second call confirms.
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
 
         assert "grid" in orch._active_strategies
         assert "dca" in orch._active_strategies
@@ -219,15 +228,20 @@ class TestRegimeChangeCausesStrategyChange:
     async def test_update_after_interval_expired(self):
         """After interval expires, strategies follow the new regime."""
         orch = _make_stub(cooldown=0.0, regime_check_interval=60.0)
+        # Establish selector state: TIGHT_RANGE is the current regime
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         orch._active_strategies = {"grid"}
+        orch.strategy_selector._current_regime = MarketRegime.TIGHT_RANGE
         # Pretend last update was a long time ago (beyond interval)
         orch._last_active_strategies_update_at = time.monotonic() - 120.0
 
-        # New regime
+        # New regime — first run_main_loop enters PRE_SWITCH (timer=0, no SMC needed)
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         orch._last_strategy_switch_at = 0.0
+        await _run_main_loop_throttle(orch)  # PRE_SWITCH entered; update_at advances
 
+        # Expire the interval again and run a second time → CONFIRMED → switch executes
+        orch._last_active_strategies_update_at = time.monotonic() - 120.0
         await _run_main_loop_throttle(orch)
 
         # Strategies must have updated

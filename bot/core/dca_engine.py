@@ -3,7 +3,10 @@ DCAEngine - Dollar Cost Averaging strategy implementation
 Handles DCA trigger monitoring, position averaging, and take profit management
 """
 
+from __future__ import annotations
+
 from decimal import Decimal
+from typing import Optional
 
 from bot.utils.logger import get_logger
 
@@ -125,6 +128,12 @@ class DCAEngine:
         self.last_buy_price: Decimal | None = None
         self.highest_price_since_entry: Decimal | None = None
 
+        # Optional shared CorePosition for Hybrid mode coordination.
+        # When set, each DCA fill is mirrored into this shared object so
+        # GridEngine can adapt its order grid accordingly.
+        # When None (default), DCAEngine behaves exactly as before.
+        self._core_position: Optional[CorePosition] = None  # type: ignore[name-defined]  # noqa: F821
+
         # Statistics
         self.total_dca_steps = 0
         self.total_invested = Decimal("0")
@@ -214,6 +223,10 @@ class DCAEngine:
         self.highest_price_since_entry = current_price
         self.total_dca_steps += 1
         self.total_invested += current_price * self.amount_per_step
+
+        # Mirror fill into the shared CorePosition so Grid can adapt.
+        if self._core_position is not None:
+            self._core_position.update_from_fill(current_price, self.amount_per_step)
 
         return True
 
@@ -407,6 +420,33 @@ class DCAEngine:
                 "atr_stop_distance": self.trigger_percentage,
             }
         ]
+
+    # ------------------------------------------------------------------
+    # CorePosition integration (Hybrid mode)
+    # ------------------------------------------------------------------
+
+    def attach_core_position(self, core_position: CorePosition) -> None:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Attach a shared CorePosition for Hybrid-mode coordination.
+
+        Once attached, every DCA fill is mirrored into *core_position* so
+        GridEngine can read it and skip conflicting orders.
+
+        Pass ``None`` to detach and revert to standalone DCA behaviour.
+
+        Args:
+            core_position: Shared position object created by HybridCoordinator.
+        """
+        self._core_position = core_position
+
+    def detach_core_position(self) -> None:
+        """Detach the shared CorePosition (standalone DCA behaviour)."""
+        self._core_position = None
+
+    @property
+    def core_position(self) -> Optional[CorePosition]:  # type: ignore[name-defined]  # noqa: F821
+        """Read-only access to the attached CorePosition (may be None)."""
+        return self._core_position
 
     def reset(self) -> None:
         """Reset engine state (for testing or reinitialization)"""
