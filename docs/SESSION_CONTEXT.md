@@ -1,9 +1,9 @@
-# TRADERAGENT v2.0 - Session Context (Updated 2026-03-07)
+# TRADERAGENT v2.0 - Session Context (Updated 2026-03-08)
 
 ## Текущий статус проекта
 
-**Дата:** 7 марта 2026
-**Статус:** v2.0.0 + **Session 51: Phase 1 завершён — 43/43 пар, strategy_score_matrix готова**
+**Дата:** 8 марта 2026
+**Статус:** v2.0.0 + **Session 52: План рефакторинга «Единый разумный трейдер» — 5 issues (#356–#360) созданы**
 **Pass Rate:** 2197 tests passing (тестовый сервер 158.160.215.57)
 **Code Quality:** ruff PASS + black PASS
 **Последний коммит:** `59968da` (fix(backtest): auto-detect CSV timestamp format)
@@ -13,7 +13,73 @@
 
 ---
 
-## Последняя сессия (2026-03-06) — Session 50: Phase 1 backtest pipeline + архитектурные решения
+## Последняя сессия (2026-03-08) — Session 52: Архитектурный план «Единый разумный трейдер»
+
+### Задача
+На основе анализа `docs/bot_architecture.md`, `docs/persona.md` и результатов Phase 1 backtest разработать план рефакторинга бота в «единого разумного трейдера» — с SMC как первичным источником рыночного контекста, иерархическим управлением стратегиями и координированной работой стратегий.
+
+### Проблемы, выявленные при анализе
+
+1. **SMC отключён от принятия решений**: `MarketRegimeDetector` классифицирует режим по индикаторам (ADX/EMA/ATR), а `ACCUMULATION`/`DISTRIBUTION` существуют только формально — `analyze_with_smc()` не вызывается в основном цикле. Это противоречит `docs/persona.md`: «SMC — основной инструмент».
+2. **Стратегии-«коммунальная квартира»**: `BotOrchestrator` (99KB) напрямую управляет 5 стратегиями без общего контекста. Каждая работает по своим уровням, игнорируя SMC-структуру.
+3. **Нет совокупного риска по инструменту**: `RiskManager` контролирует per-strategy лимиты, но DCA ($3k) + Grid ($900) + TF ($1k) = $4.9k совокупной экспозиции — не отслеживается.
+4. **DCA и Grid мешают друг другу**: в Hybrid-режиме `HybridStrategy` просто переключается между `GRID_ONLY`/`DCA_ACTIVE` по ADX, вместо координированной работы.
+5. **Частые ложные переключения**: cooldown 600с + min_duration 120с + confidence 0.3 — пропускают шумные сигналы, стратегии «дёргаются».
+
+### Созданные Issues (план из 5 этапов, 3 волны)
+
+```
+Волна 1: #356 (Этап 1) — строго первый
+Волна 2: #357 + #358 (Этапы 2-3) — параллельно после Волны 1
+Волна 3: #359 + #360 (Этапы 4-5) — параллельно после Волны 2
+```
+
+| Issue | Этап | Заголовок | Приоритет | Зависимости |
+|-------|------|-----------|-----------|-------------|
+| [#356](https://github.com/alekseymavai/TRADERAGENT/issues/356) | 1 | Рефакторинг MarketRegimeDetector: интеграция SMC как первичного источника режима | 🔴 Высокий | — |
+| [#357](https://github.com/alekseymavai/TRADERAGENT/issues/357) | 2 | Создание StrategyConductor для иерархического управления стратегиями | 🔴 Высокий | #356 |
+| [#358](https://github.com/alekseymavai/TRADERAGENT/issues/358) | 3 | Внедрение портфельного риск-менеджмента с глобальным стоп-лоссом | 🔴 Высокий | #356 |
+| [#359](https://github.com/alekseymavai/TRADERAGENT/issues/359) | 4 | Координация DCA и Grid через единую базовую позицию (CorePosition) | 🟡 Средний | #357 |
+| [#360](https://github.com/alekseymavai/TRADERAGENT/issues/360) | 5 | Двухфазный Cooldown с SMC-подтверждением при переключении стратегий | 🟡 Средний | #357 |
+
+### Краткое описание каждого этапа
+
+#### Этап 1 (#356): SMCStructureAnalyzer + MarketRegimeDetector
+- Новый сервис `bot/core/smc/structure_analyzer.py` — кеширующий real-time SMC-анализатор
+- `MarketRegimeDetector.analyze()` → SMC-first: если CHoCH → ACCUMULATION/DISTRIBUTION без индикаторов
+- Заморозка режима: индикаторный шум не переключает режим, пока SMC-структура не сломана
+
+#### Этап 2 (#357): StrategyConductor
+- Новый класс `bot/orchestrator/strategy_conductor.py` — координирует стратегии
+- 4 режима торговли: ACCUMULATION, DISTRIBUTION, TREND_FOLLOWING, MEAN_REVERSION
+- `StrategyDirective` — «боевая задача» с SMC-уровнями, зонами ликвидности, ограничениями
+
+#### Этап 3 (#358): PortfolioRiskManager с глобальным стопом
+- Per-symbol агрегация позиций всех стратегий
+- `force_close_all(symbol)` при превышении `global_stop_loss_pct` (2.5%)
+- Стоп-лоссы стратегий → рекомендательные, глобальный стоп → приоритетный
+
+#### Этап 4 (#359): CorePosition для DCA+Grid
+- `CorePosition` — единая базовая позиция, управляемая DCA
+- Grid как «обёртка»: не ставит SELL в зоне набора DCA, ограничивает объём продаж
+
+#### Этап 5 (#360): Двухфазный Cooldown
+- `PRE_SWITCH` → запрет новых позиций, удержание существующих
+- Двойное подтверждение: таймер (30-60 мин) + SMC-сигнал (BOS/CHoCH)
+- `graceful_transition` v2: параллельный запуск новых + аккуратное закрытие старых
+
+### Итог сессии 52
+
+| | До | После |
+|--|----|----|
+| Архитектурный план | Отсутствовал | ✅ 5 этапов, 3 волны, зависимости определены |
+| GitHub Issues | #338–#344 (баги/фичи) | +5 issues (#356–#360) — рефакторинг «Единый трейдер» |
+| SMC роль | Подтверждающий (analyze_with_smc) | → Запланирован как первичный источник |
+| Координация стратегий | _active_strategies: set[str] | → Запланирован StrategyConductor + StrategyDirective |
+
+---
+
+## Предыдущая сессия (2026-03-06) — Session 50: Phase 1 backtest pipeline + архитектурные решения
 
 ### Задачи сессии
 1. Подготовить Phase 1 backtest pipeline к запуску на тестовом сервере.
@@ -203,6 +269,9 @@
 | **P1** | Phase 2 backtest: 37 пар с новыми параметрами | ⏳ После P1 |
 | **~~P1~~** | ~~Адаптивное переключение стратегий~~ | ✅ **Готово** |
 | **P2** | TrendFollower SHORT режим при BEAR_TREND | ⏳ Планируется |
+| **P2** | 🏗️ Рефакторинг «Единый разумный трейдер» — Волна 1: [#356](https://github.com/alekseymavai/TRADERAGENT/issues/356) SMCStructureAnalyzer | 🔴 Открыт |
+| **P2** | 🏗️ Рефакторинг — Волна 2: [#357](https://github.com/alekseymavai/TRADERAGENT/issues/357) StrategyConductor + [#358](https://github.com/alekseymavai/TRADERAGENT/issues/358) PortfolioRiskManager | ⏳ После #356 |
+| **P3** | 🏗️ Рефакторинг — Волна 3: [#359](https://github.com/alekseymavai/TRADERAGENT/issues/359) CorePosition + [#360](https://github.com/alekseymavai/TRADERAGENT/issues/360) Двухфазный Cooldown | ⏳ После #357 |
 
 ---
 
