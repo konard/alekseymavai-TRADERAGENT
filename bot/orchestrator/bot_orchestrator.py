@@ -1326,9 +1326,7 @@ class BotOrchestrator:
 
         # Per-symbol global stop-loss check (PortfolioRiskManager)
         if self._portfolio_rm is not None:
-            triggered = self._portfolio_rm.tick_global_stop_loss(
-                symbols=[str(self.config.symbol)]
-            )
+            triggered = self._portfolio_rm.tick_global_stop_loss(symbols=[str(self.config.symbol)])
             for symbol in triggered:
                 logger.critical(
                     "global_stop_loss_force_close",
