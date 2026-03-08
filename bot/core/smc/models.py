@@ -213,6 +213,20 @@ class SMCContext(BaseModel):
     warmup_complete: bool = False
     bars_analyzed: int = 0
 
+    # SMC confidence: blended signal quality (0.0 = unreliable, 1.0 = high conviction)
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Blended confidence in the SMC phase (0 = low, 1 = high conviction)",
+    )
+
+    # Key structural levels — break-prices of detected BOS/CHoCH events (most recent first)
+    structural_levels: list[float] = Field(
+        default_factory=list,
+        description="Break-prices of structural events (BOS/CHoCH), most recent first",
+    )
+
     # -----------------------------------------------------------------------
     # Convenience helpers
     # -----------------------------------------------------------------------
@@ -265,6 +279,7 @@ class SMCContext(BaseModel):
         return {
             "phase": self.phase.value,
             "trend_bias": round(self.trend_bias, 3),
+            "confidence": round(self.confidence, 3),
             "bar_index": self.bar_index,
             "current_price": self.current_price,
             "warmup_complete": self.warmup_complete,
@@ -275,6 +290,7 @@ class SMCContext(BaseModel):
             "order_blocks": len(self.order_blocks),
             "fair_value_gaps": len(self.fair_value_gaps),
             "liquidity_levels": len(self.liquidity_levels),
+            "structural_levels": self.structural_levels,
             "last_structure": (
                 self.last_structure.structure_type.value if self.last_structure else None
             ),

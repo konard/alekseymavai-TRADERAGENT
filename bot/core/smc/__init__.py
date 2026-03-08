@@ -15,10 +15,12 @@ from bot.core.smc.models import (
     SwingPoint,
     SwingType,
 )
+from bot.core.smc.structure_analyzer import SMCStructureAnalyzer
 from bot.core.smc.swing_detector import find_swing_points
 
 __all__ = [
     "SMCAnalyzer",
+    "SMCStructureAnalyzer",
     "SMCContext",
     "SMCPhase",
     "SwingPoint",

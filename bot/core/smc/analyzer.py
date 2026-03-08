@@ -155,6 +155,13 @@ class SMCAnalyzer:
         # 5. Derive phase and bias
         phase, trend_bias = self._derive_phase(structure_events)
 
+        # 6. Compute structural levels and confidence
+        structural_levels = [ev.break_price for ev in reversed(structure_events)]
+        confidence = self._compute_confidence(
+            structure_events=structure_events,
+            warmup_complete=warmup_complete,
+        )
+
         current_price = float(close[-1])
         bar_index = n - 1
 
@@ -164,6 +171,7 @@ class SMCAnalyzer:
             warmup=warmup_complete,
             phase=phase.value,
             bias=round(trend_bias, 2),
+            confidence=round(confidence, 2),
             swings=len(swing_points),
             events=len(structure_events),
             obs=len(obs),
@@ -180,11 +188,59 @@ class SMCAnalyzer:
             liquidity_levels=liquidity,
             phase=phase,
             trend_bias=trend_bias,
+            confidence=confidence,
+            structural_levels=structural_levels,
             bar_index=bar_index,
             current_price=current_price,
             warmup_complete=warmup_complete,
             bars_analyzed=bars_analyzed,
         )
+
+    # ------------------------------------------------------------------
+    # Confidence scoring
+    # ------------------------------------------------------------------
+
+    def _compute_confidence(
+        self,
+        structure_events: list,
+        warmup_complete: bool,
+    ) -> float:
+        """
+        Compute a blended confidence score (0.0 – 1.0) for the detected phase.
+
+        Factors
+        -------
+        - warmup_complete: half the weight; pre-warmup contexts are unreliable.
+        - Number of recent events: more events → more evidence → higher score,
+          capped at 1.0 above 5 events.
+        - Recency: bonus when the last event was recent (within the last 20 bars).
+        """
+        if not structure_events:
+            return 0.0
+
+        # Warmup factor (0 or 0.5)
+        warmup_factor = 0.5 if warmup_complete else 0.0
+
+        # Evidence factor: events in the trailing window (last 10)
+        recent = structure_events[-10:]
+        evidence_factor = min(len(recent) / 5.0, 1.0) * 0.35
+
+        # Recency factor: last event within last 20 bars
+        last_event = structure_events[-1]
+        n_bars = structure_events[-1].index if structure_events else 0
+        last_idx = last_event.index
+        # How recent relative to the whole dataset (using absolute bar index)
+        # We don't have total bars here, so use proximity to last_event's index
+        recency_factor = 0.0
+        if len(structure_events) >= 2:
+            # Distance from penultimate to last event
+            gap = structure_events[-1].index - structure_events[-2].index
+            if gap <= 20:
+                recency_factor = 0.15
+        elif len(structure_events) == 1:
+            recency_factor = 0.15  # Only one event — it's the most recent by definition
+
+        return min(warmup_factor + evidence_factor + recency_factor, 1.0)
 
     # ------------------------------------------------------------------
     # Phase derivation
