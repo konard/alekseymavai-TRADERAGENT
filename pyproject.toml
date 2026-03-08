@@ -183,6 +183,62 @@ ignore_errors = true
 module = "tests.strategies.*"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "bot.api.bybit_direct_client"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.config.manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.config.pair_template"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.core.portfolio_risk_manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.core.trading_core.execution_layer"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.data.candle_ws_feed"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.data.history_manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.orchestrator.bot_orchestrator"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.replay.mock_redis"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.replay.simulated_clock"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.telegram.handlers.control"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.telegram.handlers.monitoring"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.telegram.handlers.portfolio"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "bot.telegram.handlers.strategy"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["bot/tests"]

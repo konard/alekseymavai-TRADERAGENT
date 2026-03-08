@@ -6,6 +6,8 @@ must implement for integration with BotOrchestrator v2.0.
 
 Unified types:
 - SignalDirection: LONG / SHORT
+- TradingMode: High-level trading mode (ACCUMULATION, DISTRIBUTION, TREND_FOLLOWING, MEAN_REVERSION)
+- StrategyDirective: Context package passed from StrategyConductor to each strategy
 - BaseSignal: Common signal structure with strategy-specific metadata
 - BaseMarketAnalysis: Common market analysis result
 """
@@ -15,9 +17,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from bot.core.smc.models import LiquidityLevel
 
 # =============================================================================
 # Unified Enums
@@ -43,6 +48,86 @@ class ExitReason(str, Enum):
     SIGNAL_REVERSED = "signal_reversed"
     RISK_LIMIT = "risk_limit"
     TIMEOUT = "timeout"
+
+
+class TradingMode(str, Enum):
+    """High-level trading mode assigned by StrategyConductor.
+
+    Describes *what* the strategy should do, not *how*.
+
+    Modes
+    -----
+    ACCUMULATION
+        Buy-side bias.  DCA accumulates at lower boundary; Grid bounces to upper
+        boundary; SMC seeks long entries.  Trend-Follower is off.
+
+    DISTRIBUTION
+        Sell-side bias.  Grid works the upper boundary; SMC seeks short entries.
+        DCA and Trend-Follower are off.
+
+    TREND_FOLLOWING
+        Follow the established trend.  TF is the main strategy; DCA buys dips
+        on pullbacks; Grid runs minimal; SMC levels used for SL/TP.
+
+    MEAN_REVERSION
+        Range-bound environment.  Grid is dominant; DCA is minimal; TF is off;
+        SMC levels define range boundaries.
+    """
+
+    ACCUMULATION = "accumulation"
+    DISTRIBUTION = "distribution"
+    TREND_FOLLOWING = "trend_following"
+    MEAN_REVERSION = "mean_reversion"
+
+
+@dataclass
+class StrategyDirective:
+    """Context package passed from StrategyConductor to each strategy on regime
+    change or SMC level update.
+
+    Strategies use the directive to align their entry/exit logic with the
+    unified SMC picture instead of computing their own levels independently.
+
+    Fields
+    ------
+    mode
+        The current trading mode (see :class:`TradingMode`).
+    price_range
+        The working price range ``(lower, upper)`` derived from SMC structure
+        levels or recent swing points.  Strategies should limit orders to this
+        range.
+    key_levels
+        Significant SMC structural break-prices (BOS / CHoCH).  Used for
+        placing SL/TP and avoiding entries near level clusters.
+    liquidity_zones
+        Active liquidity pools (:class:`~bot.core.smc.models.LiquidityLevel`).
+        Empty list when no SMC context is available.
+    capital_allocation
+        Share of total capital assigned to this strategy in ``[0.0, 1.0]``.
+    restrictions
+        Arbitrary key→value guard rails, e.g.
+        ``{"no_sell_below": 29000.0, "no_buy_above": 35000.0}``.
+    """
+
+    mode: TradingMode
+    price_range: tuple[float, float]
+    key_levels: list[float] = field(default_factory=list)
+    liquidity_zones: list["LiquidityLevel"] = field(default_factory=list)
+    capital_allocation: float = 1.0
+    restrictions: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to plain dictionary (JSON-safe)."""
+        return {
+            "mode": self.mode.value,
+            "price_range": list(self.price_range),
+            "key_levels": self.key_levels,
+            "liquidity_zones": [
+                {"price": lz.price, "type": lz.liquidity_type.value} for lz in self.liquidity_zones
+            ],
+            "capital_allocation": self.capital_allocation,
+            "restrictions": self.restrictions,
+        }
 
 
 # =============================================================================
@@ -316,6 +401,18 @@ class BaseStrategy(ABC):
             ],
             "performance": performance.to_dict(),
         }
+
+    def set_directive(self, directive: "StrategyDirective") -> None:  # noqa: B027
+        """
+        Apply a StrategyConductor directive to this strategy.
+
+        Called by :class:`~bot.orchestrator.strategy_conductor.StrategyConductor`
+        on regime change or SMC level update so that all active strategies share
+        the same unified price levels and trading context.
+
+        Default: no-op. Strategies that want to honour directives should override
+        and store the directive for use in ``generate_signal`` / ``update_positions``.
+        """
 
     def reset(self) -> None:  # noqa: B027
         """

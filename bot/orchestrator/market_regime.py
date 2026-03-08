@@ -315,7 +315,7 @@ class MarketRegimeDetector:
         # Priority 1 — SMC phase (CHoCH-driven, beats indicator noise)
         # ---------------------------------------------------------------
         smc_regime: MarketRegime | None = None
-        active_smc_context: "SMCContext | None" = None
+        active_smc_context: SMCContext | None = None
 
         if smc_context is not None:
             from bot.core.smc.models import SMCPhase
@@ -430,9 +430,7 @@ class MarketRegimeDetector:
             "bb_upper": float(bb_upper.iloc[-1]) if not pd.isna(bb_upper.iloc[-1]) else 0.0,
             "bb_middle": float(bb_middle.iloc[-1]) if not pd.isna(bb_middle.iloc[-1]) else 0.0,
             "bb_lower": float(bb_lower.iloc[-1]) if not pd.isna(bb_lower.iloc[-1]) else 0.0,
-            "avg_volume": (
-                float(avg_volume.iloc[-1]) if not pd.isna(avg_volume.iloc[-1]) else 0.0
-            ),
+            "avg_volume": (float(avg_volume.iloc[-1]) if not pd.isna(avg_volume.iloc[-1]) else 0.0),
             "plus_di": float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0.0,
             "minus_di": float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0.0,
             "data_points": len(df),
@@ -520,7 +518,9 @@ class MarketRegimeDetector:
             return analysis
 
         # Blend base confidence with SMC warmup quality
-        smc_confidence = min(analysis.confidence * 0.6 + (0.4 if smc_context.warmup_complete else 0.0), 1.0)
+        smc_confidence = min(
+            analysis.confidence * 0.6 + (0.4 if smc_context.warmup_complete else 0.0), 1.0
+        )
 
         details = dict(analysis.analysis_details)
         details["smc_phase"] = smc_context.phase.value

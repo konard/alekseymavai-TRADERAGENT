@@ -20,6 +20,7 @@ from bot.core.dca_engine import DCAEngine
 from bot.core.grid_engine import GridEngine, GridType
 from bot.core.portfolio_risk_manager import PortfolioRiskManager
 from bot.core.risk_manager import RiskManager
+from bot.core.smc.structure_analyzer import SMCStructureAnalyzer
 from bot.core.trading_core import TradingCore, TradingCoreConfig
 from bot.data.candle_ws_feed import CandleWSFeed
 from bot.data.history_manager import HistoryManager
@@ -28,12 +29,12 @@ from bot.database.models import BotStateSnapshot
 from bot.orchestrator import state_persistence as sp
 from bot.orchestrator.events import EventType, TradingEvent
 from bot.orchestrator.health_monitor import HealthCheckResult, HealthMonitor, HealthThresholds
-from bot.core.smc.structure_analyzer import SMCStructureAnalyzer
 from bot.orchestrator.market_regime import (
     MarketRegimeDetector,
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.strategy_conductor import StrategyConductor
 from bot.orchestrator.strategy_registry import (
     StrategyInstance,
     StrategyRegistry,
@@ -192,6 +193,12 @@ class BotOrchestrator:
             transition_cooldown_seconds=self._strategy_switch_cooldown,
             min_regime_duration_seconds=float(self._MIN_REGIME_DURATION_SECONDS),
         )
+
+        # StrategyConductor: distributes a shared SMC context (key levels,
+        # liquidity zones, working range) to every active strategy so they
+        # operate with a unified market picture instead of independently
+        # recomputing their own levels.
+        self.strategy_conductor = StrategyConductor(registry=self.strategy_registry)
 
         # Manual strategy lock (prevents auto-switching when locked)
         self._strategy_locked: bool = False
@@ -715,6 +722,15 @@ class BotOrchestrator:
             )
             self._last_strategy_switch_at = time.monotonic()
             self._active_strategies = intended
+
+        # Dispatch shared SMC context (key levels, liquidity zones, price range)
+        # to every active strategy via StrategyConductor regardless of whether a
+        # transition occurred — regime data may have refreshed with new levels.
+        # Guard with getattr for backward-compatibility with test stubs that
+        # create BotOrchestrator via object.__new__() without all attributes.
+        conductor = getattr(self, "strategy_conductor", None)
+        if conductor is not None:
+            conductor.on_regime_change(analysis)
         # If no transition needed, _active_strategies stays unchanged.
 
     def lock_strategy(self, strategies: set[str]) -> None:
@@ -811,7 +827,7 @@ class BotOrchestrator:
             if "smc" in deactivated and self.smc_strategy:
                 try:
                     adapter = self.smc_strategy
-                    for pos_id, pos in list(adapter._positions.items()):
+                    for _pos_id, pos in list(adapter._positions.items()):
                         if self.current_price:
                             base_amount = float(
                                 Decimal(str(pos.get("size", 0))) / self.current_price
@@ -868,9 +884,12 @@ class BotOrchestrator:
                 # Update which strategies should run based on regime (#283, #292).
                 # Throttled to _regime_check_interval so we don't re-evaluate every tick —
                 # regime data itself only refreshes that often.  The first iteration always
-                # runs (monotonic() ≫ 0, so now - 0.0 is always ≥ interval).
+                # runs because _last_active_strategies_update_at starts at 0.0.
                 _now = time.monotonic()
-                if _now - self._last_active_strategies_update_at >= self._regime_check_interval:
+                if (
+                    self._last_active_strategies_update_at == 0.0
+                    or _now - self._last_active_strategies_update_at >= self._regime_check_interval
+                ):
                     await self._update_active_strategies()
                     self._last_active_strategies_update_at = _now
 
