@@ -30,10 +30,11 @@ Usage:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from bot.utils.logger import get_logger
 
@@ -325,8 +326,7 @@ class PortfolioRiskManager:
                 status=RiskCheckStatus.REJECTED_SYMBOL_COOLDOWN,
                 approved=False,
                 reason=(
-                    f"Symbol {symbol} is in cooldown after force-close "
-                    f"({remaining}s remaining)"
+                    f"Symbol {symbol} is in cooldown after force-close " f"({remaining}s remaining)"
                 ),
             )
 
@@ -432,9 +432,7 @@ class PortfolioRiskManager:
         if symbol not in self._symbol_providers:
             return
         self._symbol_providers[symbol] = [
-            (name, p)
-            for name, p in self._symbol_providers[symbol]
-            if name != strategy_name
+            (name, p) for name, p in self._symbol_providers[symbol] if name != strategy_name
         ]
 
     # ------------------------------------------------------------------
