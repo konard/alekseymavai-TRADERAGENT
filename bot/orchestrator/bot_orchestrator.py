@@ -377,6 +377,23 @@ class BotOrchestrator:
                 max_positions=pydantic_smc.max_positions,
             )
 
+        # Register strategy position providers with PortfolioRiskManager for
+        # per-symbol global stop-loss aggregation.
+        if self._portfolio_rm is not None:
+            symbol = str(self.config.symbol)
+            for strategy_name, adapter in [
+                (f"{self.config.name}:dca", self.dca_engine),
+                (f"{self.config.name}:grid", self.grid_engine),
+                (f"{self.config.name}:trend_follower", self.trend_follower_strategy),
+                (f"{self.config.name}:smc", self.smc_strategy),
+            ]:
+                if adapter is not None and hasattr(adapter, "get_open_positions"):
+                    self._portfolio_rm.register_symbol_provider(
+                        symbol=symbol,
+                        strategy_name=strategy_name,
+                        provider=adapter,  # type: ignore[arg-type]
+                    )
+
         # Try to load persisted state
         await self.load_state()
 
@@ -1287,6 +1304,104 @@ class BotOrchestrator:
                 reason=risk_status["halt_reason"],
             )
             await self.emergency_stop()
+
+        # Per-symbol global stop-loss check (PortfolioRiskManager)
+        if self._portfolio_rm is not None:
+            triggered = self._portfolio_rm.tick_global_stop_loss(
+                symbols=[str(self.config.symbol)]
+            )
+            for symbol in triggered:
+                logger.critical(
+                    "global_stop_loss_force_close",
+                    symbol=symbol,
+                    bot_name=self.config.name,
+                )
+                await self._force_close_all_positions(symbol)
+
+    async def _force_close_all_positions(self, symbol: str) -> None:
+        """
+        Force-close all open positions for *symbol* across every active strategy.
+
+        Called when ``PortfolioRiskManager.tick_global_stop_loss`` detects that
+        aggregate per-symbol risk has exceeded ``global_stop_loss_pct``.
+
+        Actions:
+        1. Cancel all open orders for the symbol.
+        2. Close all open positions via market ``reduceOnly=True`` orders.
+        3. Publish a ``FORCE_CLOSE_ALL`` event (for Telegram notifications etc.).
+        """
+        logger.critical(
+            "force_close_all_positions",
+            symbol=symbol,
+            bot_name=self.config.name,
+        )
+
+        # Cancel all open exchange orders for the symbol
+        try:
+            await self.exchange.cancel_all_orders(symbol)
+            logger.info("force_close_all_orders_cancelled", symbol=symbol)
+        except Exception as exc:
+            logger.error("force_close_cancel_orders_failed", symbol=symbol, error=str(exc))
+
+        # Close all positions known to internal strategy adapters.
+        # We use get_active_positions() from each strategy then send a
+        # reduceOnly market order for each open position.
+        all_positions = []
+        for strategy_obj in [
+            self.smc_strategy,
+            self.trend_follower_strategy,
+        ]:
+            if strategy_obj is not None and hasattr(strategy_obj, "get_active_positions"):
+                all_positions.extend(strategy_obj.get_active_positions())
+
+        for pos_info in all_positions:
+            try:
+                close_side = "sell" if pos_info.direction.value == "long" else "buy"
+                await self.exchange.create_order(
+                    symbol=symbol,
+                    order_type="market",
+                    side=close_side,
+                    amount=float(pos_info.size),
+                    params={"reduceOnly": True},
+                )
+                logger.info(
+                    "force_close_position_executed",
+                    position_id=pos_info.position_id,
+                    symbol=symbol,
+                    side=close_side,
+                    size=str(pos_info.size),
+                )
+            except Exception as exc:
+                logger.error(
+                    "force_close_position_failed",
+                    position_id=pos_info.position_id,
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+        # Close Grid and DCA positions as well
+        if self.grid_engine:
+            try:
+                await self.exchange.cancel_all_orders(symbol)
+            except Exception as exc:
+                logger.error("force_close_grid_cancel_failed", symbol=symbol, error=str(exc))
+
+        if self.dca_engine and self.dca_engine.position is not None:
+            try:
+                await self._close_dca_position()
+                logger.info("force_close_dca_position_closed", symbol=symbol)
+            except Exception as exc:
+                logger.error("force_close_dca_failed", symbol=symbol, error=str(exc))
+
+        await self._publish_event(
+            EventType.EMERGENCY,
+            {
+                "type": "force_close_all",
+                "symbol": symbol,
+                "bot_name": self.config.name,
+                "reason": "global_stop_loss_triggered",
+            },
+        )
 
     def _portfolio_rm_check(self, amount: Decimal) -> bool:
         """Check portfolio-level risk before committing capital.

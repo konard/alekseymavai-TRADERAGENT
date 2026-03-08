@@ -388,6 +388,26 @@ class DCAEngine:
             "realized_profit": float(self.realized_profit),
         }
 
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open positions in the format expected by PortfolioRiskManager
+        for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (total invested in quote currency)
+          - 'atr_stop_distance': Decimal  (trigger_percentage as fractional stop proxy)
+        """
+        if self.position is None:
+            return []
+        return [
+            {
+                "symbol": self.symbol,
+                "size": self.position.total_cost,
+                "atr_stop_distance": self.trigger_percentage,
+            }
+        ]
+
     def reset(self) -> None:
         """Reset engine state (for testing or reinitialization)"""
         self.position = None

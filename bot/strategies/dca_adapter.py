@@ -279,6 +279,35 @@ class DCAAdapter(BaseStrategy):
             )
         return result
 
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open positions in the format expected by PortfolioRiskManager
+        for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (total invested in quote currency)
+          - 'atr_stop_distance': Decimal  (fractional stop distance from avg_price)
+        """
+        result = []
+        for pos in self._positions.values():
+            avg = pos["avg_price"]
+            sl = pos["stop_loss"]
+            size = pos["total_invested"]
+            # atr_stop_distance as fraction of avg_price
+            if avg > 0 and sl > 0:
+                stop_distance = abs(avg - sl) / avg
+            else:
+                stop_distance = Decimal("0")
+            result.append(
+                {
+                    "symbol": self._symbol,
+                    "size": size,
+                    "atr_stop_distance": stop_distance,
+                }
+            )
+        return result
+
     def get_performance(self) -> StrategyPerformance:
         total = len(self._closed_trades)
         if total == 0:

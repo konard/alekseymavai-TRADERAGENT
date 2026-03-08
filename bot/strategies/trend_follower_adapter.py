@@ -282,6 +282,36 @@ class TrendFollowerAdapter(BaseStrategy):
 
         return result
 
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open positions in the format expected by PortfolioRiskManager
+        for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (position size in quote currency)
+          - 'atr_stop_distance': Decimal  (fractional ATR stop distance)
+        """
+        result = []
+        symbol = self._config.symbol if hasattr(self._config, "symbol") else "UNKNOWN"
+        positions = self._strategy.position_manager.active_positions
+        for pos in positions.values():
+            entry = pos.entry_price if hasattr(pos, "entry_price") else Decimal("0")
+            sl = pos.levels.stop_loss if hasattr(pos, "levels") else Decimal("0")
+            size = pos.size if hasattr(pos, "size") else Decimal("0")
+            if entry > 0 and sl > 0:
+                stop_distance = abs(entry - sl) / entry
+            else:
+                stop_distance = Decimal("0")
+            result.append(
+                {
+                    "symbol": symbol,
+                    "size": size,
+                    "atr_stop_distance": stop_distance,
+                }
+            )
+        return result
+
     def get_performance(self) -> StrategyPerformance:
         """Get performance from underlying strategy statistics."""
         stats = self._strategy.get_statistics()
