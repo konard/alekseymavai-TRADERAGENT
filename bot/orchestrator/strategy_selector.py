@@ -833,9 +833,7 @@ class StrategySelector:
         # --- RoutingConfig path (issue #370) ---
         if self._routing_config is not None:
             conditions = self._build_routing_conditions(regime, recommended, analysis)
-            strategy_configs: list[StrategyConfig] = self._routing_config.get_strategies(
-                conditions
-            )
+            strategy_configs: list[StrategyConfig] = self._routing_config.get_strategies(conditions)
             return [
                 StrategyWeight(
                     strategy_type=sc.name,
