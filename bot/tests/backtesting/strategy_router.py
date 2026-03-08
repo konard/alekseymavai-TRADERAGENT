@@ -1,14 +1,25 @@
 """
-StrategyRouter — mirrors BotOrchestrator._update_active_strategies() for backtests.
+StrategyRouter — unified strategy routing for backtests (issue #368 / #371).
 
-Maps market regime → active strategy set with a cooldown guard to prevent
-rapid oscillation, exactly as the live bot does.
+Uses the same ``RoutingConfig`` (``configs/strategy_routing.yaml``) as the
+live ``StrategySelector``, so Live and Backtest routing decisions are always
+derived from the same single source of truth.
+
+Key behaviour:
+- ``on_bar()`` maps ``RegimeAnalysis.regime`` → active strategy set via
+  ``RoutingConfig.get_strategies()``.
+- HYBRID recommendation is handled via ``RoutingConfig.get_hybrid_weights()``.
+- REDUCE_EXPOSURE / HOLD are honoured the same way as the live selector.
+- A bar-based cooldown prevents rapid strategy oscillation (mirrors the
+  live bot's ``transition_cooldown_seconds`` gate).
 
 Usage::
 
-    router = StrategyRouter(cooldown_bars=60)
+    router = StrategyRouter()                        # default routing YAML
+    router = StrategyRouter(routing_config=my_cfg)   # custom config
+
     event = router.on_bar(regime_analysis, current_bar=i)
-    active_strategies = event.active_strategies
+    active = event.active_strategies   # set[str]
 """
 
 from __future__ import annotations
@@ -21,27 +32,9 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.routing_config import RoutingConfig
 
 logger = logging.getLogger(__name__)
-
-
-# Mirrors BotOrchestrator._REGIME_TO_STRATEGIES
-_REGIME_TO_STRATEGIES: dict[RecommendedStrategy, set[str]] = {
-    RecommendedStrategy.GRID: {"grid"},
-    RecommendedStrategy.DCA: {"dca"},
-    RecommendedStrategy.HYBRID: {"grid", "dca"},
-    RecommendedStrategy.HOLD: set(),
-    RecommendedStrategy.REDUCE_EXPOSURE: set(),
-}
-
-# TrendFollower is the PRIMARY strategy for bull trends — replaces Grid/DCA
-_TF_PRIMARY_REGIMES = {"bull_trend"}
-
-# DCA is the PRIMARY strategy for bear trends
-_DCA_PRIMARY_REGIMES = {"bear_trend"}
-
-# SMC activates only for breakout/volatile — exclusive, not additive
-_SMC_PRIMARY_REGIMES = {"volatile_transition", "breakout"}
 
 
 @dataclass
@@ -60,28 +53,25 @@ class StrategyRouter:
     """
     Stateful strategy router for backtesting.
 
-    Mirrors the production logic in BotOrchestrator._update_active_strategies()
-    — including cooldown, trending-regime bonuses for trend_follower / SMC,
-    and the "no regime yet → enable everything" bootstrap behaviour.
+    Uses ``RoutingConfig`` (loaded from ``configs/strategy_routing.yaml``) so
+    that routing decisions are identical to those made by the live
+    ``StrategySelector``.
 
     Args:
-        cooldown_bars:  Minimum number of bars that must pass between two
-                        strategy switches (equivalent to cooldown_seconds=600
-                        at 10 bars/minute → 60 bars for M5 data).
-        enable_smc:     Whether to allow SMC strategy activation (default: False
-                        to match OrchestratorBacktestConfig.enable_smc=False).
-        enable_trend_follower: Whether to allow trend_follower activation.
+        cooldown_bars:    Minimum bars between two strategy switches.
+        routing_config:   Explicit RoutingConfig instance.  When *None* the
+                          default ``configs/strategy_routing.yaml`` is loaded.
     """
 
     def __init__(
         self,
         cooldown_bars: int = 60,
-        enable_smc: bool = False,
-        enable_trend_follower: bool = True,
+        routing_config: RoutingConfig | None = None,
     ) -> None:
         self.cooldown_bars = cooldown_bars
-        self.enable_smc = enable_smc
-        self.enable_trend_follower = enable_trend_follower
+        self._routing_config: RoutingConfig = (
+            routing_config if routing_config is not None else RoutingConfig()
+        )
 
         self._active_strategies: set[str] = set()  # empty until first regime is known
         self._last_switch_bar: int = -cooldown_bars  # allow switch on bar 0
@@ -107,7 +97,6 @@ class StrategyRouter:
             StrategyRouterEvent with full routing state.
         """
         if regime is None:
-            # No regime data yet — keep everything active (backward-compat)
             return StrategyRouterEvent(
                 active_strategies=self._active_strategies.copy(),
                 activated=set(),
@@ -189,7 +178,7 @@ class StrategyRouter:
 
     def reset(self) -> None:
         """Reset router state (use between independent backtest runs)."""
-        self._active_strategies = set()  # empty until first regime is known
+        self._active_strategies = set()
         self._last_switch_bar = -self.cooldown_bars
         self._switch_history.clear()
 
@@ -204,23 +193,26 @@ class StrategyRouter:
 
     def _compute_target_strategies(self, regime: RegimeAnalysis) -> set[str]:
         """
-        Compute the desired strategy set for a given regime — EXCLUSIVE routing.
+        Compute the desired strategy set for a given regime.
 
-        Priority (highest first):
-        1. TF-primary regimes  (bull_trend)          → {trend_follower}  if enabled
-        2. DCA-primary regimes (bear_trend)           → {dca}
-        3. SMC-primary regimes (breakout/volatile)   → {smc}             if enabled
-        4. Base mapping via _REGIME_TO_STRATEGIES     → {grid} / {} etc.
+        Delegates to ``RoutingConfig.get_strategies()`` with special handling
+        for HYBRID, REDUCE_EXPOSURE, and HOLD recommendations — matching the
+        live ``StrategySelector._get_target_strategies()`` logic exactly.
         """
-        rv = regime.regime.value
+        recommended = regime.recommended_strategy
 
-        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
-            return {"trend_follower"}
+        # HYBRID: use hybrid_weights from RoutingConfig
+        if recommended == RecommendedStrategy.HYBRID:
+            return {sc.type for sc in self._routing_config.get_hybrid_weights()}
 
-        if rv in _DCA_PRIMARY_REGIMES:
-            return {"dca"}
+        # REDUCE_EXPOSURE: no active strategies
+        if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
+            return set()
 
-        if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
-            return {"smc"}
+        # HOLD: keep current strategies unchanged
+        if recommended == RecommendedStrategy.HOLD:
+            return self._active_strategies.copy()
 
-        return _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
+        # Standard regime lookup
+        configs = self._routing_config.get_strategies({"market_regime": regime.regime})
+        return {sc.type for sc in configs}

@@ -1,16 +1,17 @@
 """
 Unit tests for bot/tests/backtesting/strategy_router.py
 
-Tests cover:
-- Regime-to-strategy mapping
-- Cooldown blocking
-- Trend-regime strategy additions
-- Reset
+Tests cover the unified RoutingConfig-backed StrategyRouter (issue #368 / #371):
+- Regime-to-strategy mapping via RoutingConfig
+- HYBRID recommendation handling
+- HOLD / REDUCE_EXPOSURE behaviour
+- Cooldown blocking and expiry
+- Activated / deactivated tracking
+- Switch history recording
+- Reset behaviour
 """
 
 from datetime import datetime, timezone
-
-import pytest
 
 from bot.orchestrator.market_regime import (
     MarketRegime,
@@ -46,12 +47,12 @@ def _make_regime(
 
 
 class TestStrategyRouter:
-    def test_no_regime_returns_all(self) -> None:
+    def test_no_regime_returns_empty(self) -> None:
+        """When no regime is known yet, the router returns its current (empty) state."""
         router = StrategyRouter()
         event = router.on_bar(regime=None, current_bar=0)
-        # Should return the initial "everything active" set
-        assert "grid" in event.active_strategies
-        assert "dca" in event.active_strategies
+        # New unified router starts empty — strategies are only activated once a
+        # regime is detected (matches live StrategySelector behaviour).
         assert event.cooldown_remaining == 0
         assert event.activated == set()
 
@@ -69,49 +70,65 @@ class TestStrategyRouter:
         assert "dca" in event.active_strategies
         assert "grid" not in event.active_strategies
 
-    def test_hybrid_regime(self) -> None:
+    def test_hybrid_regime_includes_tf_grid_dca(self) -> None:
+        """HYBRID recommendation activates all three strategies from hybrid_weights."""
         router = StrategyRouter(cooldown_bars=0)
         regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
         event = router.on_bar(regime, current_bar=0)
         assert "grid" in event.active_strategies
         assert "dca" in event.active_strategies
+        assert "trend_follower" in event.active_strategies
 
-    def test_hold_regime_deactivates_all(self) -> None:
+    def test_bull_trend_dca_includes_tf_and_dca(self) -> None:
+        """BULL_TREND + DCA recommendation → trend_follower + dca from routing config."""
         router = StrategyRouter(cooldown_bars=0)
-        # First bar — establish a non-empty previous set
+        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.DCA)
+        event = router.on_bar(regime, current_bar=0)
+        assert "trend_follower" in event.active_strategies
+        assert "dca" in event.active_strategies
+
+    def test_hold_keeps_current_strategies(self) -> None:
+        """HOLD keeps whatever was previously active (does not empty the set)."""
+        router = StrategyRouter(cooldown_bars=0)
+        # First: establish grid
         router.on_bar(
             _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), current_bar=0
         )
-        regime = _make_regime(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD)
-        event = router.on_bar(regime, current_bar=1)
+        # Then: HOLD — should keep grid
+        event = router.on_bar(
+            _make_regime(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.HOLD),
+            current_bar=1,
+        )
+        assert "grid" in event.active_strategies
+
+    def test_reduce_exposure_deactivates_all(self) -> None:
+        """REDUCE_EXPOSURE should result in no active strategies."""
+        router = StrategyRouter(cooldown_bars=0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), current_bar=0
+        )
+        event = router.on_bar(
+            _make_regime(MarketRegime.VOLATILE_TRANSITION, RecommendedStrategy.REDUCE_EXPOSURE),
+            current_bar=1,
+        )
         assert event.active_strategies == set()
 
-    def test_trend_follower_in_bull_trend(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=True)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
+    def test_smc_strategy_in_accumulation(self) -> None:
+        """ACCUMULATION regime → smc strategy (via RoutingConfig)."""
+        router = StrategyRouter(cooldown_bars=0)
+        regime = _make_regime(MarketRegime.ACCUMULATION, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=0)
-        assert "trend_follower" in event.active_strategies
+        assert "smc" in event.active_strategies
 
-    def test_trend_follower_disabled(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
-        event = router.on_bar(regime, current_bar=0)
-        assert "trend_follower" not in event.active_strategies
-
-    def test_smc_disabled_by_default(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_smc=False)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
-        event = router.on_bar(regime, current_bar=0)
-        assert "smc" not in event.active_strategies
-
-    def test_smc_enabled_in_trending(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_smc=True)
-        regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
+    def test_smc_strategy_in_distribution(self) -> None:
+        """DISTRIBUTION regime → smc strategy (via RoutingConfig)."""
+        router = StrategyRouter(cooldown_bars=0)
+        regime = _make_regime(MarketRegime.DISTRIBUTION, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=0)
         assert "smc" in event.active_strategies
 
     def test_cooldown_blocks_switch(self) -> None:
-        router = StrategyRouter(cooldown_bars=10, enable_trend_follower=False)
+        router = StrategyRouter(cooldown_bars=10)
         # Establish initial state (grid only)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         # Try to switch to DCA 5 bars later — cooldown should block
@@ -122,7 +139,7 @@ class TestStrategyRouter:
         assert "grid" in event.active_strategies
 
     def test_cooldown_expires_after_n_bars(self) -> None:
-        router = StrategyRouter(cooldown_bars=5, enable_trend_follower=False)
+        router = StrategyRouter(cooldown_bars=5)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         # 6 bars later — cooldown should have expired
         regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
@@ -132,7 +149,7 @@ class TestStrategyRouter:
         assert "grid" not in event.active_strategies
 
     def test_activated_deactivated_tracking(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
+        router = StrategyRouter(cooldown_bars=0)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         event = router.on_bar(
             _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), current_bar=1
@@ -141,7 +158,7 @@ class TestStrategyRouter:
         assert "grid" in event.deactivated
 
     def test_switch_history_recorded(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
+        router = StrategyRouter(cooldown_bars=0)
         # Bar 0: bootstrap → GRID (switch #1)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         # Bar 1: GRID → DCA (switch #2)
@@ -152,16 +169,17 @@ class TestStrategyRouter:
         assert last_switch["bar"] == 1
         assert "dca" in last_switch["to"]
 
-    def test_reset_clears_history(self) -> None:
+    def test_reset_clears_history_and_state(self) -> None:
         router = StrategyRouter(cooldown_bars=0)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), 1)
         router.reset()
         assert router.switch_history == []
-        assert "grid" in router._active_strategies  # reset to initial set
+        # After reset, strategies are empty (same as initial state)
+        assert router._active_strategies == set()
 
     def test_no_switch_if_same_regime(self) -> None:
-        router = StrategyRouter(cooldown_bars=0, enable_trend_follower=False)
+        router = StrategyRouter(cooldown_bars=0)
         regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         # Bar 0: bootstrap → GRID (switch #1 recorded)
         router.on_bar(regime, 0)

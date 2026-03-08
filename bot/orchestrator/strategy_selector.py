@@ -7,6 +7,14 @@ Responsibilities:
 - Resolve overlapping signal conflicts via priority ranking
 - Track transition history for analysis
 - Two-phase PRE_SWITCH / CONFIRMED logic with SMC confirmation (issue #360)
+
+Routing source (issue #368 — Epic #1):
+- When a ``RoutingConfig`` instance is provided (or created from the default
+  ``configs/strategy_routing.yaml``), all regime→strategy mappings are read
+  from the shared config file so Live and Backtest use the same rules.
+- Legacy ``regime_strategies`` / ``hybrid_weights`` kwargs are still accepted
+  and take precedence over the YAML config when supplied, preserving backward
+  compatibility for tests that inject custom mappings.
 """
 
 from dataclasses import dataclass
@@ -19,6 +27,7 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.routing_config import RoutingConfig, StrategyConfig
 from bot.orchestrator.strategy_registry import (
     StrategyRegistry,
     StrategyState,
@@ -169,6 +178,11 @@ HYBRID_STRATEGY_WEIGHTS: list[StrategyWeight] = [
 ]
 
 
+def _strategy_config_to_weight(sc: StrategyConfig) -> StrategyWeight:
+    """Convert a RoutingConfig StrategyConfig into a StrategyWeight."""
+    return StrategyWeight(strategy_type=sc.type, weight=sc.weight, priority=sc.priority)
+
+
 @dataclass
 class TransitionRecord:
     """Record of a strategy transition."""
@@ -254,12 +268,15 @@ class StrategySelector:
         transition_smc_requirements: (
             dict[tuple[MarketRegime, MarketRegime] | str, str | None] | None
         ) = None,
+        routing_config: RoutingConfig | None = None,
     ):
         """
         Args:
             registry: Strategy registry for lifecycle management.
             regime_strategies: Custom mapping of regimes to strategy weights.
+                When provided, takes precedence over *routing_config*.
             hybrid_weights: Custom weights for hybrid mode.
+                When provided, takes precedence over *routing_config*.
             transition_cooldown_seconds: Minimum time between transitions (default 5 min).
             min_regime_duration_seconds: Minimum regime duration before transition (default 2 min).
             max_transition_history: Max transition records to keep.
@@ -269,10 +286,34 @@ class StrategySelector:
             tighten_stops_on_pre_switch: Signal strategies to tighten stops in PRE_SWITCH.
             transition_timers: Custom per-transition timer overrides.
             transition_smc_requirements: Custom per-transition SMC signal requirements.
+            routing_config: Unified routing config (issue #368).  When *None* and
+                *regime_strategies* is also *None*, a RoutingConfig is created from
+                the default ``configs/strategy_routing.yaml``.
         """
         self._registry = registry
-        self._regime_strategies = regime_strategies or DEFAULT_REGIME_STRATEGIES
-        self._hybrid_weights = hybrid_weights or HYBRID_STRATEGY_WEIGHTS
+
+        # Resolve routing config — used when no explicit regime_strategies are supplied
+        self._routing_config: RoutingConfig | None
+        if regime_strategies is not None:
+            # Explicit mapping takes full precedence; no RoutingConfig needed
+            self._regime_strategies: dict[MarketRegime, list[StrategyWeight]] | None = (
+                regime_strategies
+            )
+            self._routing_config = routing_config  # store for inspection but not used
+        else:
+            self._regime_strategies = None  # will delegate to routing_config
+            self._routing_config = routing_config if routing_config is not None else RoutingConfig()
+
+        # Hybrid weights: explicit arg > routing_config > hardcoded default
+        if hybrid_weights is not None:
+            self._hybrid_weights: list[StrategyWeight] = hybrid_weights
+        elif self._routing_config is not None:
+            self._hybrid_weights = [
+                _strategy_config_to_weight(sc) for sc in self._routing_config.get_hybrid_weights()
+            ]
+        else:
+            self._hybrid_weights = HYBRID_STRATEGY_WEIGHTS
+
         self._transition_cooldown = transition_cooldown_seconds
         self._min_regime_duration = min_regime_duration_seconds
         self._max_history = max_transition_history
@@ -572,6 +613,10 @@ class StrategySelector:
             "cancelled_pre_switch_count": self._cancelled_pre_switch_count,
             "require_smc_confirmation": self._require_smc_confirmation,
             "tighten_stops_on_pre_switch": self._tighten_stops_on_pre_switch,
+            # Routing config source (issue #368)
+            "routing_config_path": (
+                str(self._routing_config.config_path) if self._routing_config else None
+            ),
         }
 
     # =========================================================================
@@ -815,13 +860,22 @@ class StrategySelector:
         if recommended == RecommendedStrategy.HOLD:
             return self._get_current_weights()
 
-        return list(self._regime_strategies.get(regime, []))
+        return self._lookup_regime_strategies(regime)
+
+    def _lookup_regime_strategies(self, regime: MarketRegime) -> list[StrategyWeight]:
+        """Lookup strategy weights for a regime via the explicit map or RoutingConfig."""
+        if self._regime_strategies is not None:
+            return list(self._regime_strategies.get(regime, []))
+        if self._routing_config is not None:
+            configs = self._routing_config.get_strategies({"market_regime": regime})
+            return [_strategy_config_to_weight(sc) for sc in configs]
+        return []
 
     def _get_current_weights(self) -> list[StrategyWeight]:
         """Get weights for currently active regime."""
         if self._current_regime is None:
             return []
-        return list(self._regime_strategies.get(self._current_regime, []))
+        return self._lookup_regime_strategies(self._current_regime)
 
     def _check_transition_blocked(self, analysis: RegimeAnalysis) -> tuple[bool, str]:
         """
