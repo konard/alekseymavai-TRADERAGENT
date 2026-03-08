@@ -1,12 +1,19 @@
 """
-StrategyRouter — mirrors BotOrchestrator._update_active_strategies() for backtests.
+StrategyRouter — mirrors StrategySelector routing logic for backtests.
 
-Maps market regime → active strategy set with a cooldown guard to prevent
-rapid oscillation, exactly as the live bot does.
+Uses RoutingConfig as the single source of truth for strategy selection rules,
+replacing the hard-coded _REGIME_TO_STRATEGIES dict that previously diverged from
+the live-bot's StrategySelector.
+
+The router produces a set of active strategy *names* (str) per bar, with a
+cooldown guard to prevent rapid oscillation — exactly as the live bot does.
 
 Usage::
 
-    router = StrategyRouter(cooldown_bars=60)
+    from bot.orchestrator.routing_config import RoutingConfig
+
+    cfg = RoutingConfig("configs/strategy_routing.yaml")
+    router = StrategyRouter(routing_config=cfg, cooldown_bars=2)
     event = router.on_bar(regime_analysis, current_bar=i)
     active_strategies = event.active_strategies
 """
@@ -21,27 +28,9 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.routing_config import RoutingConfig, StrategyConfig
 
 logger = logging.getLogger(__name__)
-
-
-# Mirrors BotOrchestrator._REGIME_TO_STRATEGIES
-_REGIME_TO_STRATEGIES: dict[RecommendedStrategy, set[str]] = {
-    RecommendedStrategy.GRID: {"grid"},
-    RecommendedStrategy.DCA: {"dca"},
-    RecommendedStrategy.HYBRID: {"grid", "dca"},
-    RecommendedStrategy.HOLD: set(),
-    RecommendedStrategy.REDUCE_EXPOSURE: set(),
-}
-
-# TrendFollower is the PRIMARY strategy for bull trends — replaces Grid/DCA
-_TF_PRIMARY_REGIMES = {"bull_trend"}
-
-# DCA is the PRIMARY strategy for bear trends
-_DCA_PRIMARY_REGIMES = {"bear_trend"}
-
-# SMC activates only for breakout/volatile — exclusive, not additive
-_SMC_PRIMARY_REGIMES = {"volatile_transition", "breakout"}
 
 
 @dataclass
@@ -60,30 +49,36 @@ class StrategyRouter:
     """
     Stateful strategy router for backtesting.
 
-    Mirrors the production logic in BotOrchestrator._update_active_strategies()
-    — including cooldown, trending-regime bonuses for trend_follower / SMC,
-    and the "no regime yet → enable everything" bootstrap behaviour.
+    Uses :class:`~bot.orchestrator.routing_config.RoutingConfig` as the single
+    source of truth for strategy selection rules, mirroring the production
+    ``StrategySelector`` (issue #371).
+
+    The same ``_build_routing_conditions`` logic is used as in
+    ``StrategySelector._build_routing_conditions()`` so both live and backtest
+    produce identical strategy sets for any given ``RegimeAnalysis``.
 
     Args:
-        cooldown_bars:  Minimum number of bars that must pass between two
-                        strategy switches (equivalent to cooldown_seconds=600
-                        at 10 bars/minute → 60 bars for M5 data).
-        enable_smc:     Whether to allow SMC strategy activation (default: False
-                        to match OrchestratorBacktestConfig.enable_smc=False).
-        enable_trend_follower: Whether to allow trend_follower activation.
+        routing_config:        RoutingConfig instance loaded from
+                               ``configs/strategy_routing.yaml``.
+        cooldown_bars:         Minimum number of bars that must pass between two
+                               strategy switches (equivalent to cooldown_seconds=600
+                               at 10 bars/minute → 2 bars for M5 data).
+        initial_strategies:    Override the bootstrap set (used before the first
+                               regime analysis arrives). Defaults to ``{"grid", "dca"}``.
     """
 
     def __init__(
         self,
-        cooldown_bars: int = 60,
-        enable_smc: bool = False,
-        enable_trend_follower: bool = True,
+        routing_config: RoutingConfig,
+        cooldown_bars: int = 2,
+        initial_strategies: set[str] | None = None,
     ) -> None:
+        self._routing_config = routing_config
         self.cooldown_bars = cooldown_bars
-        self.enable_smc = enable_smc
-        self.enable_trend_follower = enable_trend_follower
 
-        self._initial_strategies: set[str] = {"grid", "dca"}  # default "all active" bootstrap
+        self._initial_strategies: set[str] = (
+            initial_strategies.copy() if initial_strategies is not None else {"grid", "dca"}
+        )
         self._active_strategies: set[str] = self._initial_strategies.copy()
         self._last_switch_bar: int = -cooldown_bars  # allow switch on bar 0
         self._switch_history: list[dict[str, Any]] = []
@@ -108,7 +103,7 @@ class StrategyRouter:
             StrategyRouterEvent with full routing state.
         """
         if regime is None:
-            # No regime data yet — keep everything active (backward-compat)
+            # No regime data yet — keep everything active (bootstrap)
             return StrategyRouterEvent(
                 active_strategies=self._active_strategies.copy(),
                 activated=set(),
@@ -132,9 +127,11 @@ class StrategyRouter:
                 cooldown_remaining = self.cooldown_bars - bars_since_switch
                 logger.debug(
                     "strategy_switch_blocked_by_cooldown",
-                    cooldown_remaining=cooldown_remaining,
-                    current=sorted(prev),
-                    wanted=sorted(target),
+                    extra={
+                        "cooldown_remaining": cooldown_remaining,
+                        "current": sorted(prev),
+                        "wanted": sorted(target),
+                    },
                 )
                 return StrategyRouterEvent(
                     active_strategies=prev.copy(),
@@ -165,10 +162,12 @@ class StrategyRouter:
 
             logger.debug(
                 "strategy_switch_executed",
-                bar=current_bar,
-                activated=sorted(activated),
-                deactivated=sorted(deactivated),
-                regime=regime.regime.value,
+                extra={
+                    "bar": current_bar,
+                    "activated": sorted(activated),
+                    "deactivated": sorted(deactivated),
+                    "regime": regime.regime.value,
+                },
             )
 
         return StrategyRouterEvent(
@@ -205,31 +204,47 @@ class StrategyRouter:
 
     def _compute_target_strategies(self, regime: RegimeAnalysis) -> set[str]:
         """
-        Compute the desired strategy set for a given regime — ADDITIVE routing.
+        Compute the desired strategy set for a given regime.
 
-        Steps:
-        1. Start with base set from _REGIME_TO_STRATEGIES (grid/dca/etc.)
-        2. For DCA-primary regimes (bear_trend): use {dca} as base
-        3. For TF-primary regimes (bull_trend): add trend_follower if enabled
-        4. For SMC-primary regimes (breakout/volatile): add smc if enabled
+        Delegates to :meth:`RoutingConfig.get_strategies` using the same
+        condition-building logic as ``StrategySelector._build_routing_conditions``
+        so that live and backtest routing always produce identical results.
+
+        Special cases (mirrors StrategySelector._get_target_strategies):
+        - REDUCE_EXPOSURE → empty set (no strategies active)
+        - HOLD            → keep current active strategies unchanged
         """
-        rv = regime.regime.value
+        recommended = regime.recommended_strategy
 
-        # Step 1 & 2: determine base set
-        if rv in _DCA_PRIMARY_REGIMES:
-            base = {"dca"}
-        else:
-            base = _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
+        # REDUCE_EXPOSURE: no strategies active — always takes precedence
+        if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
+            return set()
 
-        # Step 3: add trend_follower for trending regimes
-        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
-            base.add("trend_follower")
+        # HOLD: keep whatever is currently active
+        if recommended == RecommendedStrategy.HOLD:
+            return self._active_strategies.copy()
 
-        # Step 4: add smc for volatile/breakout regimes
-        if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
-            base.add("smc")
-        # Also add smc for trending regimes when enabled
-        elif self.enable_smc and rv in _TF_PRIMARY_REGIMES:
-            base.add("smc")
+        # Build conditions dict the same way as StrategySelector
+        conditions = self._build_routing_conditions(regime)
+        strategy_configs: list[StrategyConfig] = self._routing_config.get_strategies(conditions)
+        return {sc.name for sc in strategy_configs}
 
-        return base
+    @staticmethod
+    def _build_routing_conditions(regime: RegimeAnalysis) -> dict[str, Any]:
+        """
+        Build the conditions dict passed to :meth:`RoutingConfig.get_strategies`.
+
+        Exactly mirrors ``StrategySelector._build_routing_conditions`` so that
+        live and backtest routing share the same matching logic.
+
+        Keys produced:
+        - ``market_regime``:   regime value string (e.g. ``"bull_trend"``)
+        - ``confluence_high``: ``True`` when ``confluence_score >= 0.7`` or
+                               ``recommended == HYBRID``
+        """
+        conditions: dict[str, Any] = {"market_regime": regime.regime.value}
+        if regime.recommended_strategy == RecommendedStrategy.HYBRID or (
+            regime.confluence_score >= 0.7
+        ):
+            conditions["confluence_high"] = True
+        return conditions
