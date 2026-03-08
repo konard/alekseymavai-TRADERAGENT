@@ -2,6 +2,7 @@
 
 from bot.core.trading_core.config import TradingCoreConfig
 from bot.core.trading_core.core import TradingCore
+from bot.core.trading_core.core_position import CorePosition
 from bot.core.trading_core.execution_layer import (
     BacktestExecutionLayer,
     ExecutionLayer,
@@ -17,6 +18,7 @@ from bot.core.trading_core.time_provider import (
 __all__ = [
     "TradingCoreConfig",
     "TradingCore",
+    "CorePosition",
     "HybridCoordinator",
     "CoordinatedDecision",
     "TimeProvider",
