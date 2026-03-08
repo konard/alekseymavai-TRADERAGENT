@@ -83,7 +83,8 @@ class StrategyRouter:
         self.enable_smc = enable_smc
         self.enable_trend_follower = enable_trend_follower
 
-        self._active_strategies: set[str] = set()  # empty until first regime is known
+        self._initial_strategies: set[str] = {"grid", "dca"}  # default "all active" bootstrap
+        self._active_strategies: set[str] = self._initial_strategies.copy()
         self._last_switch_bar: int = -cooldown_bars  # allow switch on bar 0
         self._switch_history: list[dict[str, Any]] = []
 
@@ -189,7 +190,7 @@ class StrategyRouter:
 
     def reset(self) -> None:
         """Reset router state (use between independent backtest runs)."""
-        self._active_strategies = set()  # empty until first regime is known
+        self._active_strategies = self._initial_strategies.copy()
         self._last_switch_bar = -self.cooldown_bars
         self._switch_history.clear()
 
@@ -204,23 +205,31 @@ class StrategyRouter:
 
     def _compute_target_strategies(self, regime: RegimeAnalysis) -> set[str]:
         """
-        Compute the desired strategy set for a given regime — EXCLUSIVE routing.
+        Compute the desired strategy set for a given regime — ADDITIVE routing.
 
-        Priority (highest first):
-        1. TF-primary regimes  (bull_trend)          → {trend_follower}  if enabled
-        2. DCA-primary regimes (bear_trend)           → {dca}
-        3. SMC-primary regimes (breakout/volatile)   → {smc}             if enabled
-        4. Base mapping via _REGIME_TO_STRATEGIES     → {grid} / {} etc.
+        Steps:
+        1. Start with base set from _REGIME_TO_STRATEGIES (grid/dca/etc.)
+        2. For DCA-primary regimes (bear_trend): use {dca} as base
+        3. For TF-primary regimes (bull_trend): add trend_follower if enabled
+        4. For SMC-primary regimes (breakout/volatile): add smc if enabled
         """
         rv = regime.regime.value
 
-        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
-            return {"trend_follower"}
-
+        # Step 1 & 2: determine base set
         if rv in _DCA_PRIMARY_REGIMES:
-            return {"dca"}
+            base = {"dca"}
+        else:
+            base = _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
 
+        # Step 3: add trend_follower for trending regimes
+        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
+            base.add("trend_follower")
+
+        # Step 4: add smc for volatile/breakout regimes
         if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
-            return {"smc"}
+            base.add("smc")
+        # Also add smc for trending regimes when enabled
+        elif self.enable_smc and rv in _TF_PRIMARY_REGIMES:
+            base.add("smc")
 
-        return _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
+        return base
