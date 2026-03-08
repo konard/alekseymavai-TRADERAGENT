@@ -414,6 +414,49 @@ class BaseStrategy(ABC):
         and store the directive for use in ``generate_signal`` / ``update_positions``.
         """
 
+    def enter_pre_switch(self, tighten_stops: bool = True) -> None:  # noqa: B027
+        """
+        Enter PRE_SWITCH mode (issue #360).
+
+        Called by the orchestrator when ``StrategySelector`` detects a potential
+        regime change but has not yet confirmed it.  While in PRE_SWITCH:
+        - The strategy must NOT open new positions (see ``restrict_new_entries``).
+        - Existing positions are held.
+        - When *tighten_stops* is True the strategy should move open stop-losses
+          to breakeven / apply a tighter trailing stop.
+
+        Default: no-op.  Strategies that wish to react to PRE_SWITCH should
+        override this method and update their internal entry-restriction flag.
+
+        Args:
+            tighten_stops: When True, tighten stop-losses on existing positions.
+        """
+
+    def exit_pre_switch(self) -> None:  # noqa: B027
+        """
+        Exit PRE_SWITCH mode and return to normal operation (issue #360).
+
+        Called by the orchestrator when the pending regime change was cancelled
+        (regime returned to stable) so that the strategy can resume opening new
+        positions.
+
+        Default: no-op.
+        """
+
+    def restrict_new_entries(self) -> bool:
+        """
+        Return True when the strategy must not open new positions (issue #360).
+
+        During PRE_SWITCH the orchestrator will call this before forwarding any
+        signal from ``generate_signal`` to order execution.  If this returns
+        True the signal is discarded without placing an order.
+
+        Default: False (never restricted).  Strategies that implement
+        ``enter_pre_switch`` should also override this to return True while
+        in pre-switch mode.
+        """
+        return False
+
     def reset(self) -> None:  # noqa: B027
         """
         Reset strategy state. Used for backtesting.
