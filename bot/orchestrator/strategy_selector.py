@@ -7,6 +7,7 @@ Responsibilities:
 - Resolve overlapping signal conflicts via priority ranking
 - Track transition history for analysis
 - Two-phase PRE_SWITCH / CONFIRMED logic with SMC confirmation (issue #360)
+- Route via RoutingConfig (issue #370) when provided
 """
 
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
+from bot.orchestrator.routing_config import RoutingConfig, StrategyConfig
 from bot.orchestrator.strategy_registry import (
     StrategyRegistry,
     StrategyState,
@@ -254,12 +256,15 @@ class StrategySelector:
         transition_smc_requirements: (
             dict[tuple[MarketRegime, MarketRegime] | str, str | None] | None
         ) = None,
+        routing_config: RoutingConfig | None = None,
     ):
         """
         Args:
             registry: Strategy registry for lifecycle management.
             regime_strategies: Custom mapping of regimes to strategy weights.
+                Ignored when *routing_config* is supplied.
             hybrid_weights: Custom weights for hybrid mode.
+                Ignored when *routing_config* is supplied.
             transition_cooldown_seconds: Minimum time between transitions (default 5 min).
             min_regime_duration_seconds: Minimum regime duration before transition (default 2 min).
             max_transition_history: Max transition records to keep.
@@ -269,6 +274,9 @@ class StrategySelector:
             tighten_stops_on_pre_switch: Signal strategies to tighten stops in PRE_SWITCH.
             transition_timers: Custom per-transition timer overrides.
             transition_smc_requirements: Custom per-transition SMC signal requirements.
+            routing_config: When supplied, strategy selection is delegated to
+                :class:`~bot.orchestrator.routing_config.RoutingConfig` instead of the
+                hard-coded *regime_strategies* / *hybrid_weights* dicts (issue #370).
         """
         self._registry = registry
         self._regime_strategies = regime_strategies or DEFAULT_REGIME_STRATEGIES
@@ -283,6 +291,7 @@ class StrategySelector:
         self._transition_smc_requirements = (
             transition_smc_requirements or TRANSITION_SMC_REQUIREMENTS
         )
+        self._routing_config = routing_config
 
         self._last_transition_time: datetime | None = None
         self._current_regime: MarketRegime | None = None
@@ -345,7 +354,7 @@ class StrategySelector:
         now = datetime.now(timezone.utc)
 
         # Get target strategies for the detected regime
-        target_weights = self._get_target_strategies(regime, recommended)
+        target_weights = self._get_target_strategies(regime, recommended, analysis)
         target_types = {w.strategy_type for w in target_weights}
 
         # Get currently active strategy types
@@ -800,27 +809,81 @@ class StrategySelector:
         self._pre_switch_smc_confirmed = False
 
     def _get_target_strategies(
-        self, regime: MarketRegime, recommended: RecommendedStrategy
+        self,
+        regime: MarketRegime,
+        recommended: RecommendedStrategy,
+        analysis: "RegimeAnalysis | None" = None,
     ) -> list[StrategyWeight]:
-        """Get target strategy weights for the given regime and recommendation."""
+        """Get target strategy weights for the given regime and recommendation.
+
+        When *routing_config* was supplied at construction time the selection is
+        delegated to :meth:`RoutingConfig.get_strategies` using the current market
+        conditions as the matching context.  The legacy *regime_strategies* /
+        *hybrid_weights* dicts are used as the fallback when no ``routing_config``
+        was provided (backwards-compatible behaviour).
+        """
+        # Reduce exposure: no strategies active (always takes precedence)
+        if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
+            return []
+
+        # Hold: keep current strategies unchanged
+        if recommended == RecommendedStrategy.HOLD:
+            return self._get_current_weights()
+
+        # --- RoutingConfig path (issue #370) ---
+        if self._routing_config is not None:
+            conditions = self._build_routing_conditions(regime, recommended, analysis)
+            strategy_configs: list[StrategyConfig] = self._routing_config.get_strategies(conditions)
+            return [
+                StrategyWeight(
+                    strategy_type=sc.name,
+                    weight=float(sc.params.get("weight", 1.0)),
+                    priority=int(sc.params.get("priority", 1)),
+                )
+                for sc in strategy_configs
+            ]
+
+        # --- Legacy hard-coded path ---
         # Hybrid mode overrides default weights
         if recommended == RecommendedStrategy.HYBRID:
             return list(self._hybrid_weights)
 
-        # Reduce exposure: no strategies active
-        if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
-            return []
-
-        # Hold: keep current, return empty (no change)
-        if recommended == RecommendedStrategy.HOLD:
-            return self._get_current_weights()
-
         return list(self._regime_strategies.get(regime, []))
+
+    @staticmethod
+    def _build_routing_conditions(
+        regime: MarketRegime,
+        recommended: RecommendedStrategy,
+        analysis: "RegimeAnalysis | None",
+    ) -> dict[str, Any]:
+        """Build the conditions dict passed to :meth:`RoutingConfig.get_strategies`.
+
+        Keys produced:
+        - ``market_regime``: regime value string (e.g. ``"bull_trend"``)
+        - ``confluence_high``: ``True`` when ``confluence_score >= 0.7`` (HYBRID signal)
+        """
+        conditions: dict[str, Any] = {"market_regime": regime.value}
+        if recommended == RecommendedStrategy.HYBRID or (
+            analysis is not None and analysis.confluence_score >= 0.7
+        ):
+            conditions["confluence_high"] = True
+        return conditions
 
     def _get_current_weights(self) -> list[StrategyWeight]:
         """Get weights for currently active regime."""
         if self._current_regime is None:
             return []
+        if self._routing_config is not None:
+            conditions: dict[str, Any] = {"market_regime": self._current_regime.value}
+            strategy_configs = self._routing_config.get_strategies(conditions)
+            return [
+                StrategyWeight(
+                    strategy_type=sc.name,
+                    weight=float(sc.params.get("weight", 1.0)),
+                    priority=int(sc.params.get("priority", 1)),
+                )
+                for sc in strategy_configs
+            ]
         return list(self._regime_strategies.get(self._current_regime, []))
 
     def _check_transition_blocked(self, analysis: RegimeAnalysis) -> tuple[bool, str]:
