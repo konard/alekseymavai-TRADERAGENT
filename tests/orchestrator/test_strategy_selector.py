@@ -249,6 +249,9 @@ class TestSelectMethod:
             registry,
             transition_cooldown_seconds=300.0,
             min_regime_duration_seconds=0,
+            # Skip two-phase gate so the legacy cooldown check is exercised directly
+            pre_switch_duration_seconds=0.0,
+            require_smc_confirmation=False,
         )
         # Simulate a recent transition
         selector._last_transition_time = datetime.now(timezone.utc)
@@ -258,7 +261,10 @@ class TestSelectMethod:
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
         )
-        result = selector.select(analysis)
+        # First call: enters PRE_SWITCH (timer=0, no SMC) then immediately CONFIRMED
+        # but the legacy cooldown gate then blocks it.
+        selector.select(analysis)   # enters PRE_SWITCH
+        result = selector.select(analysis)  # exits PRE_SWITCH → CONFIRMED → cooldown blocks
 
         assert not result.transition_needed
         assert "cooldown" in result.reason.lower()
@@ -269,6 +275,9 @@ class TestSelectMethod:
             registry,
             transition_cooldown_seconds=0,
             min_regime_duration_seconds=120.0,
+            # Skip two-phase gate so the legacy duration gate is exercised directly
+            pre_switch_duration_seconds=0.0,
+            require_smc_confirmation=False,
         )
 
         # Establish a prior regime first (duration/confidence gates only apply after first call)
@@ -280,13 +289,15 @@ class TestSelectMethod:
         first_result = selector.select(first)
         await selector.execute_transition(first_result)
 
-        # Now a young regime should be blocked
+        # Now a young regime should be blocked: first call enters PRE_SWITCH (timer=0),
+        # second call exits PRE_SWITCH → CONFIRMED → but duration gate blocks it.
         analysis = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
             regime_duration=30,  # Too short
         )
-        result = selector.select(analysis)
+        selector.select(analysis)  # enters PRE_SWITCH
+        result = selector.select(analysis)  # exits PRE_SWITCH → duration gate blocks
 
         assert not result.transition_needed
         assert "too young" in result.reason.lower()
@@ -297,6 +308,9 @@ class TestSelectMethod:
             registry,
             transition_cooldown_seconds=0,
             min_regime_duration_seconds=0,
+            # Skip two-phase gate so the legacy confidence gate is exercised directly
+            pre_switch_duration_seconds=0.0,
+            require_smc_confirmation=False,
         )
 
         # Establish a prior regime first (duration/confidence gates only apply after first call)
@@ -308,13 +322,15 @@ class TestSelectMethod:
         first_result = selector.select(first)
         await selector.execute_transition(first_result)
 
-        # Now a low-confidence analysis should be blocked
+        # Now a low-confidence analysis should be blocked: first call enters PRE_SWITCH
+        # (timer=0), second call exits PRE_SWITCH → CONFIRMED → confidence gate blocks.
         analysis = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
             confidence=0.1,  # Too low
         )
-        result = selector.select(analysis)
+        selector.select(analysis)  # enters PRE_SWITCH
+        result = selector.select(analysis)  # exits PRE_SWITCH → confidence gate blocks
 
         assert not result.transition_needed
         assert "confidence" in result.reason.lower()
@@ -363,7 +379,12 @@ class TestExecuteTransition:
     async def test_transition_stops_old_starts_new(self):
         registry = _make_registry_with_strategies()
         selector = StrategySelector(
-            registry, transition_cooldown_seconds=0, min_regime_duration_seconds=0
+            registry,
+            transition_cooldown_seconds=0,
+            min_regime_duration_seconds=0,
+            # Skip two-phase gate: timer=0, no SMC required → CONFIRMED on second tick
+            pre_switch_duration_seconds=0.0,
+            require_smc_confirmation=False,
         )
 
         # Start with grid active
@@ -375,6 +396,9 @@ class TestExecuteTransition:
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
         )
+        # First call: enters PRE_SWITCH (timer=0 → CONFIRMED on next tick)
+        selector.select(analysis)
+        # Second call: CONFIRMED → transition_needed=True
         result = selector.select(analysis)
         record = await selector.execute_transition(result)
 
@@ -718,6 +742,9 @@ class TestIntegrationWithBotOrchestrator:
             registry,
             transition_cooldown_seconds=0.0,
             min_regime_duration_seconds=120.0,
+            # Skip two-phase gate so the legacy duration gate is exercised directly
+            pre_switch_duration_seconds=0.0,
+            require_smc_confirmation=False,
         )
 
         # Establish first regime
@@ -730,13 +757,15 @@ class TestIntegrationWithBotOrchestrator:
         result = selector.select(first)
         await selector.execute_transition(result)
 
-        # Second call with young regime — should be blocked
+        # Second call with young regime — first tick enters PRE_SWITCH (timer=0),
+        # second tick exits PRE_SWITCH → CONFIRMED → duration gate blocks.
         second = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.DCA,
             confidence=0.8,
             regime_duration=30,  # too young
         )
-        result2 = selector.select(second)
+        selector.select(second)  # enters PRE_SWITCH
+        result2 = selector.select(second)  # exits PRE_SWITCH → duration gate blocks
         assert result2.transition_needed is False
         assert "too young" in result2.reason.lower()

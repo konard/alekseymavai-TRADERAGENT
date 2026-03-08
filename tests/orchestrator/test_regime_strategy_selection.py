@@ -65,11 +65,15 @@ def _make_orchestrator_stub(cooldown: float = 0.0) -> BotOrchestrator:
     orch._last_regime_update_at = 1.0      # non-zero: skip eager fetch in tests
     orch._regime_stale_threshold = 120.0
     orch.detect_market_regime = AsyncMock(return_value=None)
-    # StrategySelector: single source of truth for regime→strategy routing
+    # StrategySelector: single source of truth for regime→strategy routing.
+    # pre_switch_duration_seconds=0.0 and require_smc_confirmation=False bypass
+    # the two-phase gate so that regime switches complete in a single tick here.
     orch.strategy_selector = StrategySelector(
         registry=StrategyRegistry(),
         transition_cooldown_seconds=cooldown,
         min_regime_duration_seconds=BotOrchestrator._MIN_REGIME_DURATION_SECONDS,
+        pre_switch_duration_seconds=0.0,
+        require_smc_confirmation=False,
     )
     return orch
 
@@ -221,16 +225,18 @@ class TestStrategySwitchCooldown:
 
     @pytest.mark.asyncio
     async def test_no_cooldown_allows_immediate_switch(self) -> None:
-        """With cooldown=0, switches happen immediately."""
+        """With cooldown=0, switches happen after the two-phase gate clears (2 ticks)."""
         orch = _make_orchestrator_stub(cooldown=0.0)
         # First: set to grid
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
         assert "grid" in orch._active_strategies
 
-        # Switch immediately to DCA
+        # Switch to DCA — two-phase gate with timer=0, no SMC:
+        # tick 1 enters PRE_SWITCH, tick 2 clears → CONFIRMED → executes.
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
@@ -252,7 +258,7 @@ class TestStrategySwitchCooldown:
 
     @pytest.mark.asyncio
     async def test_cooldown_allows_switch_after_expiry(self) -> None:
-        """Switch allowed once cooldown has elapsed."""
+        """Switch allowed once cooldown has elapsed (two-phase gate bypassed with timer=0)."""
         orch = _make_orchestrator_stub(cooldown=0.1)  # 100ms
         # First: set to grid
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
@@ -262,9 +268,11 @@ class TestStrategySwitchCooldown:
         # Wait for cooldown to expire
         await asyncio.sleep(0.15)
 
-        # Now switch should work
+        # Switch to DCA — two-phase gate with timer=0, no SMC:
+        # tick 1 enters PRE_SWITCH, tick 2 clears → CONFIRMED → cooldown expired → executes.
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
 
     @pytest.mark.asyncio
@@ -317,14 +325,16 @@ class TestStrategySwitchCooldown:
         orch = _make_orchestrator_stub(cooldown=0.0)
         assert orch._last_strategy_switch_at == 0.0
 
-        # First switch
+        # First switch (no two-phase gate — no prior regime)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
-        # Switch
+        # Switch to DCA — two-phase gate with timer=0, no SMC:
+        # tick 1 enters PRE_SWITCH, tick 2 clears → CONFIRMED → switch executes.
         before = time.monotonic()
         orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         after = time.monotonic()
 
         assert before <= orch._last_strategy_switch_at <= after
@@ -435,16 +445,17 @@ class TestConfidenceGate:
 
     @pytest.mark.asyncio
     async def test_confidence_at_threshold_allows_switch(self) -> None:
-        """Switch is allowed when confidence equals the minimum threshold."""
+        """Switch is allowed when confidence equals the minimum threshold (after 2-phase gate)."""
         orch = _make_orchestrator_stub(cooldown=0.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
-        # Exactly at threshold (0.3) → allowed
+        # Exactly at threshold (0.3) → allowed once PRE_SWITCH gate clears.
         orch._current_regime = _make_regime(
             MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.3
         )
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
 
     @pytest.mark.asyncio
@@ -457,7 +468,8 @@ class TestConfidenceGate:
         orch._current_regime = _make_regime(
             MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, confidence=0.9
         )
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
@@ -497,7 +509,7 @@ class TestDurationGate:
 
     @pytest.mark.asyncio
     async def test_regime_at_min_duration_allows_switch(self) -> None:
-        """Switch is allowed when regime duration equals the minimum."""
+        """Switch is allowed when regime duration equals the minimum (after 2-phase gate)."""
         orch = _make_orchestrator_stub(cooldown=0.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
@@ -505,12 +517,13 @@ class TestDurationGate:
         mature = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         mature.regime_duration_seconds = 120  # exactly at threshold → allowed
         orch._current_regime = mature
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_old_regime_allows_switch(self) -> None:
-        """Switch proceeds when regime is well past the minimum duration."""
+        """Switch proceeds when regime is well past the minimum duration (after 2-phase gate)."""
         orch = _make_orchestrator_stub(cooldown=0.0)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
@@ -518,7 +531,8 @@ class TestDurationGate:
         old = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         old.regime_duration_seconds = 3600
         orch._current_regime = old
-        await orch._update_active_strategies()
+        await orch._update_active_strategies()  # PRE_SWITCH entered
+        await orch._update_active_strategies()  # CONFIRMED → switch executed
         assert "dca" in orch._active_strategies
 
     @pytest.mark.asyncio

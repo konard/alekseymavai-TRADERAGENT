@@ -6,6 +6,7 @@ Responsibilities:
 - Manage smooth transitions between strategies (cooldown, min duration)
 - Resolve overlapping signal conflicts via priority ranking
 - Track transition history for analysis
+- Two-phase PRE_SWITCH / CONFIRMED logic with SMC confirmation (issue #360)
 """
 
 from dataclasses import dataclass
@@ -35,6 +36,96 @@ class TransitionState(str, Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     COOLDOWN = "cooldown"
+
+
+class TransitionPhase(str, Enum):
+    """Two-phase transition state for regime switching (issue #360).
+
+    STABLE
+        Current regime is stable; strategies run normally.
+
+    PRE_SWITCH
+        A potential regime change was detected.  New positions are blocked;
+        existing positions are held.  Both a timer *and* an SMC structural
+        confirmation (BOS / CHoCH) must be satisfied before advancing.
+
+    CONFIRMED
+        Both criteria (timer + SMC signal) are met.  The transition has been
+        approved and will execute on the next orchestrator tick.
+
+    TRANSITIONING
+        Graceful hand-off in progress: new strategies warming up while old
+        strategies close existing positions before being deactivated.
+    """
+
+    STABLE = "stable"
+    PRE_SWITCH = "pre_switch"
+    CONFIRMED = "confirmed"
+    TRANSITIONING = "transitioning"
+
+
+# ---------------------------------------------------------------------------
+# Per-transition-type confirmation requirements
+# ---------------------------------------------------------------------------
+
+# Minimum time (seconds) a PRE_SWITCH phase must persist before a transition
+# type is eligible for confirmation.  Keyed by (from_regime, to_regime) pairs;
+# falls back to the default entry when no specific rule matches.
+_DEFAULT_PRE_SWITCH_SECONDS = 1800.0  # 30 min default
+
+TRANSITION_TIMERS: dict[tuple[MarketRegime, MarketRegime] | str, float] = {
+    # Range → Trend: 30 min
+    (MarketRegime.TIGHT_RANGE, MarketRegime.BULL_TREND): 1800.0,
+    (MarketRegime.TIGHT_RANGE, MarketRegime.BEAR_TREND): 1800.0,
+    (MarketRegime.WIDE_RANGE, MarketRegime.BULL_TREND): 1800.0,
+    (MarketRegime.WIDE_RANGE, MarketRegime.BEAR_TREND): 1800.0,
+    # Trend → Range: 45 min
+    (MarketRegime.BULL_TREND, MarketRegime.TIGHT_RANGE): 2700.0,
+    (MarketRegime.BULL_TREND, MarketRegime.WIDE_RANGE): 2700.0,
+    (MarketRegime.BEAR_TREND, MarketRegime.TIGHT_RANGE): 2700.0,
+    (MarketRegime.BEAR_TREND, MarketRegime.WIDE_RANGE): 2700.0,
+    # Trend → Counter-trend: 60 min
+    (MarketRegime.BULL_TREND, MarketRegime.BEAR_TREND): 3600.0,
+    (MarketRegime.BEAR_TREND, MarketRegime.BULL_TREND): 3600.0,
+    # Any → ACCUMULATION / DISTRIBUTION: 30 min
+    (MarketRegime.TIGHT_RANGE, MarketRegime.ACCUMULATION): 1800.0,
+    (MarketRegime.WIDE_RANGE, MarketRegime.ACCUMULATION): 1800.0,
+    (MarketRegime.BULL_TREND, MarketRegime.ACCUMULATION): 1800.0,
+    (MarketRegime.BEAR_TREND, MarketRegime.ACCUMULATION): 1800.0,
+    (MarketRegime.TIGHT_RANGE, MarketRegime.DISTRIBUTION): 1800.0,
+    (MarketRegime.WIDE_RANGE, MarketRegime.DISTRIBUTION): 1800.0,
+    (MarketRegime.BULL_TREND, MarketRegime.DISTRIBUTION): 1800.0,
+    (MarketRegime.BEAR_TREND, MarketRegime.DISTRIBUTION): 1800.0,
+    # Default fallback
+    "default": _DEFAULT_PRE_SWITCH_SECONDS,
+}
+
+# SMC confirmation signal types required per transition type.
+# Values match the ``smc_signal`` keys returned by RegimeAnalysis.analysis_details.
+#   "BOS"   – Break of Structure (trend continuation confirmed)
+#   "CHoCH" – Change of Character (trend reversal confirmed)
+#   None    – no SMC confirmation required for this pair
+TRANSITION_SMC_REQUIREMENTS: dict[tuple[MarketRegime, MarketRegime] | str, str | None] = {
+    (MarketRegime.TIGHT_RANGE, MarketRegime.BULL_TREND): "BOS",
+    (MarketRegime.WIDE_RANGE, MarketRegime.BULL_TREND): "BOS",
+    (MarketRegime.TIGHT_RANGE, MarketRegime.BEAR_TREND): "BOS",
+    (MarketRegime.WIDE_RANGE, MarketRegime.BEAR_TREND): "BOS",
+    (MarketRegime.BULL_TREND, MarketRegime.BEAR_TREND): "CHoCH",
+    (MarketRegime.BEAR_TREND, MarketRegime.BULL_TREND): "CHoCH",
+    (MarketRegime.BULL_TREND, MarketRegime.TIGHT_RANGE): None,  # absence of BOS over 2h
+    (MarketRegime.BULL_TREND, MarketRegime.WIDE_RANGE): None,
+    (MarketRegime.BEAR_TREND, MarketRegime.TIGHT_RANGE): None,
+    (MarketRegime.BEAR_TREND, MarketRegime.WIDE_RANGE): None,
+    (MarketRegime.TIGHT_RANGE, MarketRegime.ACCUMULATION): "CHoCH",
+    (MarketRegime.WIDE_RANGE, MarketRegime.ACCUMULATION): "CHoCH",
+    (MarketRegime.BULL_TREND, MarketRegime.ACCUMULATION): "CHoCH",
+    (MarketRegime.BEAR_TREND, MarketRegime.ACCUMULATION): "CHoCH",
+    (MarketRegime.TIGHT_RANGE, MarketRegime.DISTRIBUTION): "CHoCH",
+    (MarketRegime.WIDE_RANGE, MarketRegime.DISTRIBUTION): "CHoCH",
+    (MarketRegime.BULL_TREND, MarketRegime.DISTRIBUTION): "CHoCH",
+    (MarketRegime.BEAR_TREND, MarketRegime.DISTRIBUTION): "CHoCH",
+    "default": None,
+}
 
 
 @dataclass
@@ -137,6 +228,15 @@ class StrategySelector:
 
     Coordinates with StrategyRegistry for lifecycle management and
     MarketRegimeDetector for regime-based routing decisions.
+
+    Two-phase PRE_SWITCH / CONFIRMED logic (issue #360):
+    - On detecting a potential regime change the selector enters PRE_SWITCH.
+    - Strategies are NOT switched immediately; new entries are blocked.
+    - After the required timer *and* SMC confirmation are satisfied the
+      selector advances to CONFIRMED and executes the graceful transition.
+    - If the pending regime disappears before confirmation the selector
+      returns to STABLE and increments the ``cancelled_pre_switch_count``
+      metric for analysis.
     """
 
     def __init__(
@@ -147,6 +247,13 @@ class StrategySelector:
         transition_cooldown_seconds: float = 300.0,
         min_regime_duration_seconds: float = 120.0,
         max_transition_history: int = 50,
+        require_smc_confirmation: bool = True,
+        pre_switch_duration_seconds: float | None = None,
+        tighten_stops_on_pre_switch: bool = True,
+        transition_timers: dict[tuple[MarketRegime, MarketRegime] | str, float] | None = None,
+        transition_smc_requirements: (
+            dict[tuple[MarketRegime, MarketRegime] | str, str | None] | None
+        ) = None,
     ):
         """
         Args:
@@ -156,6 +263,12 @@ class StrategySelector:
             transition_cooldown_seconds: Minimum time between transitions (default 5 min).
             min_regime_duration_seconds: Minimum regime duration before transition (default 2 min).
             max_transition_history: Max transition records to keep.
+            require_smc_confirmation: When True, transitions also require a BOS/CHoCH signal.
+            pre_switch_duration_seconds: Override for the default PRE_SWITCH timer (seconds).
+                When None the per-transition table (TRANSITION_TIMERS) is used.
+            tighten_stops_on_pre_switch: Signal strategies to tighten stops in PRE_SWITCH.
+            transition_timers: Custom per-transition timer overrides.
+            transition_smc_requirements: Custom per-transition SMC signal requirements.
         """
         self._registry = registry
         self._regime_strategies = regime_strategies or DEFAULT_REGIME_STRATEGIES
@@ -163,10 +276,24 @@ class StrategySelector:
         self._transition_cooldown = transition_cooldown_seconds
         self._min_regime_duration = min_regime_duration_seconds
         self._max_history = max_transition_history
+        self._require_smc_confirmation = require_smc_confirmation
+        self._pre_switch_duration_override = pre_switch_duration_seconds
+        self._tighten_stops_on_pre_switch = tighten_stops_on_pre_switch
+        self._transition_timers = transition_timers or TRANSITION_TIMERS
+        self._transition_smc_requirements = (
+            transition_smc_requirements or TRANSITION_SMC_REQUIREMENTS
+        )
 
         self._last_transition_time: datetime | None = None
         self._current_regime: MarketRegime | None = None
         self._transition_history: list[TransitionRecord] = []
+
+        # Two-phase PRE_SWITCH state (issue #360)
+        self._transition_phase: TransitionPhase = TransitionPhase.STABLE
+        self._pre_switch_target_regime: MarketRegime | None = None
+        self._pre_switch_started_at: datetime | None = None
+        self._pre_switch_smc_confirmed: bool = False
+        self._cancelled_pre_switch_count: int = 0
 
     @property
     def current_regime(self) -> MarketRegime | None:
@@ -183,12 +310,29 @@ class StrategySelector:
         """Time of last completed transition."""
         return self._last_transition_time
 
+    @property
+    def transition_phase(self) -> TransitionPhase:
+        """Current two-phase transition state."""
+        return self._transition_phase
+
+    @property
+    def cancelled_pre_switch_count(self) -> int:
+        """Number of PRE_SWITCH phases that were cancelled (regime returned to STABLE)."""
+        return self._cancelled_pre_switch_count
+
     def select(self, analysis: RegimeAnalysis) -> SelectionResult:
         """
         Determine which strategies should be active based on regime analysis.
 
         Does NOT execute transitions — returns a SelectionResult describing
-        what should change. Call `execute_transition()` to apply.
+        what should change. Call ``execute_transition()`` to apply.
+
+        Two-phase PRE_SWITCH logic (issue #360):
+        - When a regime change is detected the selector first enters PRE_SWITCH.
+        - The transition is only approved (``transition_needed=True``) once both
+          the per-transition timer *and* the SMC structural signal are satisfied.
+        - If the potential target regime disappears during PRE_SWITCH, the
+          selector returns to STABLE and increments ``cancelled_pre_switch_count``.
 
         Args:
             analysis: Current market regime analysis.
@@ -198,6 +342,7 @@ class StrategySelector:
         """
         regime = analysis.regime
         recommended = analysis.recommended_strategy
+        now = datetime.now(timezone.utc)
 
         # Get target strategies for the detected regime
         target_weights = self._get_target_strategies(regime, recommended)
@@ -215,7 +360,26 @@ class StrategySelector:
         strategies_to_start = [w for w in target_weights if w.strategy_type in to_start_types]
         transition_needed = bool(to_start_types or to_stop_types)
 
-        # Check if transition is allowed
+        # -----------------------------------------------------------------------
+        # Two-phase PRE_SWITCH gate (issue #360)
+        # -----------------------------------------------------------------------
+        if transition_needed and self._current_regime is not None:
+            # Determine whether we should use the two-phase gate.
+            # The gate is skipped for the very first regime selection (startup).
+            result = self._apply_two_phase_gate(
+                analysis=analysis,
+                now=now,
+                active_types=active_types,
+                regime=regime,
+                recommended=recommended,
+            )
+            if result is not None:
+                # Gate returned a non-None result → either PRE_SWITCH hold or ready
+                return result
+
+        # -----------------------------------------------------------------------
+        # Legacy single-phase gate (cooldown / short regime / confidence)
+        # -----------------------------------------------------------------------
         if transition_needed:
             blocked, reason = self._check_transition_blocked(analysis)
             if blocked:
@@ -228,6 +392,11 @@ class StrategySelector:
                     transition_needed=False,
                     reason=reason,
                 )
+
+        # If a PRE_SWITCH was active for a *different* target regime but now the
+        # regime changed back to the current one (no transition needed), cancel it.
+        if not transition_needed and self._transition_phase == TransitionPhase.PRE_SWITCH:
+            self._cancel_pre_switch(reason="Regime returned to stable; no transition needed")
 
         reason = self._build_reason(
             regime, recommended, to_start_types, to_stop_types, to_keep_types
@@ -305,6 +474,8 @@ class StrategySelector:
             record.state = TransitionState.COMPLETED
             self._current_regime = result.regime
             self._last_transition_time = record.timestamp
+            # Reset two-phase state now that the transition is done
+            self._reset_transition_phase()
 
             logger.info(
                 "strategy_transition_completed",
@@ -317,6 +488,8 @@ class StrategySelector:
 
         except Exception as e:
             record.state = TransitionState.CANCELLED
+            # Also reset two-phase state on failure so we can retry
+            self._reset_transition_phase()
             logger.error(
                 "strategy_transition_failed",
                 error=str(e),
@@ -387,11 +560,248 @@ class StrategySelector:
             "transition_cooldown_seconds": self._transition_cooldown,
             "min_regime_duration_seconds": self._min_regime_duration,
             "history_count": len(self._transition_history),
+            # Two-phase PRE_SWITCH status (issue #360)
+            "transition_phase": self._transition_phase.value,
+            "pre_switch_target_regime": (
+                self._pre_switch_target_regime.value
+                if self._pre_switch_target_regime
+                else None
+            ),
+            "pre_switch_started_at": (
+                self._pre_switch_started_at.isoformat() if self._pre_switch_started_at else None
+            ),
+            "pre_switch_smc_confirmed": self._pre_switch_smc_confirmed,
+            "cancelled_pre_switch_count": self._cancelled_pre_switch_count,
+            "require_smc_confirmation": self._require_smc_confirmation,
+            "tighten_stops_on_pre_switch": self._tighten_stops_on_pre_switch,
         }
 
     # =========================================================================
     # Internal Methods
     # =========================================================================
+
+    # ------------------------------------------------------------------
+    # Two-phase PRE_SWITCH helpers (issue #360)
+    # ------------------------------------------------------------------
+
+    def _apply_two_phase_gate(
+        self,
+        analysis: RegimeAnalysis,
+        now: datetime,
+        active_types: set[str],
+        regime: MarketRegime,
+        recommended: RecommendedStrategy,
+    ) -> "SelectionResult | None":
+        """
+        Evaluate the two-phase PRE_SWITCH / CONFIRMED gate.
+
+        Returns a *blocking* ``SelectionResult`` (transition_needed=False) when
+        the gate has not yet been cleared, or ``None`` when the gate is cleared
+        and the caller should proceed with a normal transition.
+        """
+        from_regime = self._current_regime  # guaranteed non-None by caller
+
+        if self._transition_phase == TransitionPhase.STABLE:
+            # First detection of a potential regime change → enter PRE_SWITCH
+            self._enter_pre_switch(target=regime, now=now)
+            logger.info(
+                "pre_switch_entered",
+                from_regime=from_regime.value if from_regime else None,
+                to_regime=regime.value,
+                require_smc=self._require_smc_confirmation,
+                tighten_stops=self._tighten_stops_on_pre_switch,
+            )
+            return SelectionResult(
+                strategies_to_start=[],
+                strategies_to_stop=[],
+                strategies_to_keep=list(active_types),
+                regime=regime,
+                recommended=recommended,
+                transition_needed=False,
+                reason=(
+                    f"PRE_SWITCH entered: waiting for timer + SMC confirmation "
+                    f"({from_regime.value if from_regime else '?'} → {regime.value})"
+                ),
+            )
+
+        if self._transition_phase == TransitionPhase.PRE_SWITCH:
+            # We are already in PRE_SWITCH — check whether the target changed
+            if regime != self._pre_switch_target_regime:
+                # Target regime changed; cancel current PRE_SWITCH and start fresh
+                self._cancel_pre_switch(
+                    reason=f"Target regime changed from "
+                    f"{self._pre_switch_target_regime} to {regime}"
+                )
+                self._enter_pre_switch(target=regime, now=now)
+                return SelectionResult(
+                    strategies_to_start=[],
+                    strategies_to_stop=[],
+                    strategies_to_keep=list(active_types),
+                    regime=regime,
+                    recommended=recommended,
+                    transition_needed=False,
+                    reason=(
+                        f"PRE_SWITCH restarted: target changed to {regime.value}"
+                    ),
+                )
+
+            # Update SMC confirmation state from latest analysis
+            if not self._pre_switch_smc_confirmed:
+                self._pre_switch_smc_confirmed = self._check_smc_signal(
+                    from_regime=from_regime,
+                    to_regime=regime,
+                    analysis=analysis,
+                )
+
+            # Check whether both criteria are met
+            timer_ok = self._check_pre_switch_timer(
+                from_regime=from_regime,
+                to_regime=regime,
+                now=now,
+            )
+            smc_ok = (not self._require_smc_confirmation) or self._pre_switch_smc_confirmed
+
+            if timer_ok and smc_ok:
+                # Advance to CONFIRMED → signal the caller to execute the transition
+                self._transition_phase = TransitionPhase.CONFIRMED
+                logger.info(
+                    "pre_switch_confirmed",
+                    from_regime=from_regime.value if from_regime else None,
+                    to_regime=regime.value,
+                    timer_elapsed_s=(
+                        (now - self._pre_switch_started_at).total_seconds()
+                        if self._pre_switch_started_at
+                        else None
+                    ),
+                    smc_confirmed=self._pre_switch_smc_confirmed,
+                )
+                # Return None → let the caller proceed with the actual transition
+                return None
+
+            # Gate not yet cleared — log waiting state and block
+            elapsed = (
+                (now - self._pre_switch_started_at).total_seconds()
+                if self._pre_switch_started_at
+                else 0.0
+            )
+            required_timer = self._get_pre_switch_timer(from_regime=from_regime, to_regime=regime)
+            logger.debug(
+                "pre_switch_waiting",
+                from_regime=from_regime.value if from_regime else None,
+                to_regime=regime.value,
+                elapsed_s=elapsed,
+                required_s=required_timer,
+                timer_ok=timer_ok,
+                smc_ok=smc_ok,
+            )
+            return SelectionResult(
+                strategies_to_start=[],
+                strategies_to_stop=[],
+                strategies_to_keep=list(active_types),
+                regime=regime,
+                recommended=recommended,
+                transition_needed=False,
+                reason=(
+                    f"PRE_SWITCH pending ({elapsed:.0f}s / {required_timer:.0f}s elapsed; "
+                    f"smc={'ok' if smc_ok else 'pending'})"
+                ),
+            )
+
+        if self._transition_phase == TransitionPhase.CONFIRMED:
+            # Already confirmed — proceed with the transition
+            return None
+
+        # TRANSITIONING: another transition is in progress; block
+        return SelectionResult(
+            strategies_to_start=[],
+            strategies_to_stop=[],
+            strategies_to_keep=list(active_types),
+            regime=regime,
+            recommended=recommended,
+            transition_needed=False,
+            reason="Transition already in TRANSITIONING phase; waiting for completion",
+        )
+
+    def _enter_pre_switch(self, target: MarketRegime, now: datetime) -> None:
+        """Enter PRE_SWITCH phase for the given target regime."""
+        self._transition_phase = TransitionPhase.PRE_SWITCH
+        self._pre_switch_target_regime = target
+        self._pre_switch_started_at = now
+        self._pre_switch_smc_confirmed = False
+
+    def _cancel_pre_switch(self, reason: str) -> None:
+        """Cancel the current PRE_SWITCH phase and return to STABLE."""
+        self._cancelled_pre_switch_count += 1
+        logger.info(
+            "pre_switch_cancelled",
+            reason=reason,
+            target_regime=(
+                self._pre_switch_target_regime.value if self._pre_switch_target_regime else None
+            ),
+            cancelled_total=self._cancelled_pre_switch_count,
+        )
+        self._transition_phase = TransitionPhase.STABLE
+        self._pre_switch_target_regime = None
+        self._pre_switch_started_at = None
+        self._pre_switch_smc_confirmed = False
+
+    def _get_pre_switch_timer(
+        self, from_regime: MarketRegime | None, to_regime: MarketRegime
+    ) -> float:
+        """Return the required PRE_SWITCH duration in seconds for this transition."""
+        if self._pre_switch_duration_override is not None:
+            return self._pre_switch_duration_override
+        if from_regime is not None:
+            key = (from_regime, to_regime)
+            if key in self._transition_timers:
+                return self._transition_timers[key]
+        return self._transition_timers.get("default", _DEFAULT_PRE_SWITCH_SECONDS)
+
+    def _check_pre_switch_timer(
+        self, from_regime: MarketRegime | None, to_regime: MarketRegime, now: datetime
+    ) -> bool:
+        """Return True when the PRE_SWITCH timer requirement is satisfied."""
+        if self._pre_switch_started_at is None:
+            return False
+        required = self._get_pre_switch_timer(from_regime=from_regime, to_regime=to_regime)
+        elapsed = (now - self._pre_switch_started_at).total_seconds()
+        return elapsed >= required
+
+    def _check_smc_signal(
+        self,
+        from_regime: MarketRegime | None,
+        to_regime: MarketRegime,
+        analysis: RegimeAnalysis,
+    ) -> bool:
+        """
+        Return True when the required SMC structural signal is present.
+
+        Checks ``analysis.analysis_details["smc_signal"]`` for the expected
+        signal type (BOS / CHoCH).  When no SMC signal is required for the
+        given transition pair, returns True immediately.
+        """
+        if from_regime is not None:
+            key = (from_regime, to_regime)
+            required_signal = self._transition_smc_requirements.get(
+                key,
+                self._transition_smc_requirements.get("default"),
+            )
+        else:
+            required_signal = self._transition_smc_requirements.get("default")
+
+        if required_signal is None:
+            # No SMC signal required → always satisfied
+            return True
+
+        detected = analysis.analysis_details.get("smc_signal")
+        return detected == required_signal
+
+    def _reset_transition_phase(self) -> None:
+        """Reset two-phase state to STABLE after a completed transition."""
+        self._transition_phase = TransitionPhase.STABLE
+        self._pre_switch_target_regime = None
+        self._pre_switch_started_at = None
+        self._pre_switch_smc_confirmed = False
 
     def _get_target_strategies(
         self, regime: MarketRegime, recommended: RecommendedStrategy

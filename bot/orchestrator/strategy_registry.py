@@ -1,8 +1,15 @@
 """
 StrategyRegistry - Manages multiple trading strategy instances with independent lifecycles.
 
-Each strategy has its own state machine (idle → active → paused → stopped → error)
-and can be started/stopped independently by the BotOrchestrator.
+Each strategy has its own state machine:
+  idle → starting → active → paused → stopping → stopped → idle
+                                    ↓
+                              pre_switch  (new entries blocked; issue #360)
+
+The PRE_SWITCH state is entered when StrategySelector detects a potential
+regime change but has not yet confirmed it.  Strategies in PRE_SWITCH hold
+existing positions but do not open new ones.  They return to ACTIVE if the
+regime stabilises, or advance to STOPPING when a confirmed transition executes.
 """
 
 import asyncio
@@ -23,6 +30,7 @@ class StrategyState(str, Enum):
     IDLE = "idle"
     STARTING = "starting"
     ACTIVE = "active"
+    PRE_SWITCH = "pre_switch"  # New entries blocked; existing positions held (issue #360)
     PAUSED = "paused"
     STOPPING = "stopping"
     STOPPED = "stopped"
@@ -33,7 +41,17 @@ class StrategyState(str, Enum):
 _VALID_TRANSITIONS: dict[StrategyState, set[StrategyState]] = {
     StrategyState.IDLE: {StrategyState.STARTING},
     StrategyState.STARTING: {StrategyState.ACTIVE, StrategyState.ERROR},
-    StrategyState.ACTIVE: {StrategyState.PAUSED, StrategyState.STOPPING, StrategyState.ERROR},
+    StrategyState.ACTIVE: {
+        StrategyState.PRE_SWITCH,
+        StrategyState.PAUSED,
+        StrategyState.STOPPING,
+        StrategyState.ERROR,
+    },
+    StrategyState.PRE_SWITCH: {
+        StrategyState.ACTIVE,   # regime returned to stable
+        StrategyState.STOPPING, # confirmed transition → graceful close
+        StrategyState.ERROR,
+    },
     StrategyState.PAUSED: {StrategyState.ACTIVE, StrategyState.STOPPING, StrategyState.ERROR},
     StrategyState.STOPPING: {StrategyState.STOPPED, StrategyState.ERROR},
     StrategyState.STOPPED: {StrategyState.IDLE},
@@ -334,11 +352,33 @@ class StrategyRegistry:
         instance.stopped_at = None
         return True
 
+    async def enter_pre_switch(self, strategy_id: str) -> bool:
+        """Transition an ACTIVE strategy to PRE_SWITCH (new entries blocked)."""
+        instance = self.get(strategy_id)
+        if not instance:
+            return False
+        return await instance.transition_to(StrategyState.PRE_SWITCH)
+
+    async def exit_pre_switch(self, strategy_id: str) -> bool:
+        """Return a PRE_SWITCH strategy to ACTIVE (regime stabilised)."""
+        instance = self.get(strategy_id)
+        if not instance:
+            return False
+        return await instance.transition_to(StrategyState.ACTIVE)
+
+    def get_pre_switch(self) -> list[StrategyInstance]:
+        """Get all strategies in PRE_SWITCH state."""
+        return [s for s in self._strategies.values() if s.state == StrategyState.PRE_SWITCH]
+
     async def stop_all(self) -> dict[str, bool]:
-        """Stop all active/paused strategies. Returns dict of results."""
+        """Stop all active/paused/pre_switch strategies. Returns dict of results."""
         results = {}
         for strategy_id, instance in self._strategies.items():
-            if instance.state in (StrategyState.ACTIVE, StrategyState.PAUSED):
+            if instance.state in (
+                StrategyState.ACTIVE,
+                StrategyState.PAUSED,
+                StrategyState.PRE_SWITCH,
+            ):
                 results[strategy_id] = await self.stop_strategy(strategy_id)
         return results
 
