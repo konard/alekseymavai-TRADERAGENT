@@ -508,9 +508,7 @@ class GridEngine:
                 # This order pushes us over the cap — cancel it
                 if order.order_id is not None:
                     self.cancel_order(order.order_id)
-                    report["sell_cancelled_cap"].append(
-                        order.order_id or f"level-{order.level}"
-                    )
+                    report["sell_cancelled_cap"].append(order.order_id or f"level-{order.level}")
                     logger.info(
                         "grid_sell_cancelled_cap",
                         symbol=self.symbol,
