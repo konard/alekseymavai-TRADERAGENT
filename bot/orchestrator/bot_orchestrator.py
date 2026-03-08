@@ -28,6 +28,7 @@ from bot.database.models import BotStateSnapshot
 from bot.orchestrator import state_persistence as sp
 from bot.orchestrator.events import EventType, TradingEvent
 from bot.orchestrator.health_monitor import HealthCheckResult, HealthMonitor, HealthThresholds
+from bot.core.smc.structure_analyzer import SMCStructureAnalyzer
 from bot.orchestrator.market_regime import (
     MarketRegimeDetector,
     RecommendedStrategy,
@@ -162,6 +163,10 @@ class BotOrchestrator:
         # v2.0: Multi-strategy components
         self.strategy_registry = StrategyRegistry(max_strategies=10)
         self.market_regime_detector = MarketRegimeDetector()
+        # SMC structure analyzer: caches SMCContext per symbol with 5-minute TTL.
+        # Provides SMC phase/structural levels to MarketRegimeDetector on every
+        # regime check, independently of whether the SMC trading strategy is active.
+        self.smc_structure_analyzer = SMCStructureAnalyzer()
         self.health_monitor = HealthMonitor(
             registry=self.strategy_registry,
             thresholds=HealthThresholds(),
@@ -2214,19 +2219,14 @@ class BotOrchestrator:
             )
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
 
-            # Use SMC context from the live SMC strategy when it is warmed up.
-            # This allows the regime detector to recognise ACCUMULATION /
-            # DISTRIBUTION phases (CHoCH signals) that pure ADX/EMA cannot see.
-            smc_ctx = None
-            if self.smc_strategy is not None:
-                ms = getattr(self.smc_strategy._strategy, "market_structure", None)
-                if ms is not None:
-                    smc_ctx = ms.get_smc_context()
+            # Use SMCStructureAnalyzer as primary SMC source (independent of the
+            # SMC trading strategy).  It maintains a 5-minute TTL cache per symbol,
+            # so multiple callers share one context without redundant computation.
+            smc_ctx = self.smc_structure_analyzer.get_context(self.config.symbol, df)
 
-            if smc_ctx is not None and smc_ctx.warmup_complete:
-                analysis = self.market_regime_detector.analyze_with_smc(df, smc_ctx)
-            else:
-                analysis = self.market_regime_detector.analyze(df)
+            # Pass context to the unified two-level classifier; it handles
+            # ACCUMULATION/DISTRIBUTION detection and the indicator-noise freeze.
+            analysis = self.market_regime_detector.analyze(df, smc_context=smc_ctx)
 
             # Check for regime change
             old_regime = self._current_regime

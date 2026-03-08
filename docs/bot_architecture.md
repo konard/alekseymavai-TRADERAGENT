@@ -101,22 +101,42 @@ flowchart TD
 
 Запускается каждые **60 секунд** (`regime_check_interval_seconds`).
 
+### 3.1 Двухуровневая классификация (v3.0)
+
+Режим определяется в два приоритетных уровня:
+
+1. **Приоритет 1 — SMC-фаза** (`SMCStructureAnalyzer`, TTL-кэш 5 мин):
+   Если `SMCContext.phase == ACCUMULATION` или `DISTRIBUTION` и `warmup_complete=True` → режим устанавливается немедленно, без проверки индикаторов.
+   Дополнительно: **freeze** — пока SMC-структура активна, шум ADX/EMA не может сменить режим. Заморозка снимается только при явном CHoCH в противоположном направлении.
+
+2. **Приоритет 2 — Индикаторы** (ADX/EMA/ATR с гистерезисом):
+   Используется как fallback для всех остальных режимов.
+   ATR уточняет волатильность в любом режиме.
+
 ```mermaid
 flowchart TD
-    OHLCV[OHLCV H1\n100 свечей] --> IND[Расчёт индикаторов]
+    OHLCV[OHLCV H1\n100 свечей] --> SMC_SA[SMCStructureAnalyzer\nТТL-кэш 5 мин]
+    OHLCV --> IND[Расчёт индикаторов]
+
+    SMC_SA --> SMC_CTX[SMCContext\nphase / trend_bias\nconfidence / structural_levels]
+
+    SMC_CTX --> P1{Приоритет 1\nSMC фаза?\nwarmup_complete?}
+
+    P1 --> |"phase=ACCUMULATION\nwarmup=True"| ACCUM_FR[FREEZE → ACCUMULATION]
+    P1 --> |"phase=DISTRIBUTION\nwarmup=True"| DIST_FR[FREEZE → DISTRIBUTION]
+    P1 --> |"freeze активна?\n(нет нового CHoCH)"| FREEZE[Удерживать режим\nАкк./Дист.]
+    P1 --> |"CHoCH ← противоп.направление"| FREEZE_OFF[Снять freeze\n→ Приоритет 2]
+    P1 --> |"нет SMC-сигнала"| IND
 
     IND --> EMA[EMA 20 / EMA 50]
     IND --> ADX[ADX 14]
     IND --> ATR[ATR 14 %]
-    IND --> RSI[RSI 14]
-    IND --> BB[Bollinger Bands 20]
-    IND --> VOL[Volume Ratio]
 
     EMA --> REGIME
     ADX --> REGIME
     ATR --> REGIME
 
-    REGIME{Классификация\nрежима\nс гистерезисом}
+    REGIME{Приоритет 2\nКлассификация\nс гистерезисом}
 
     REGIME --> |"ADX ≥ 32\nEMA20 > EMA50"| BULL[BULL_TREND]
     REGIME --> |"ADX ≥ 32\nEMA20 < EMA50"| BEAR[BEAR_TREND]
@@ -125,8 +145,9 @@ flowchart TD
     REGIME --> |"ADX 22-32\nATR < 2%"| QUIET[QUIET_TRANSITION]
     REGIME --> |"ADX 22-32\nATR ≥ 2%"| VOLAT[VOLATILE_TRANSITION]
 
-    REGIME --> |"SMC CHoCH ↑"| ACCUM[ACCUMULATION]
-    REGIME --> |"SMC CHoCH ↓"| DIST[DISTRIBUTION]
+    ACCUM_FR --> REC_SMC[→ SMC]
+    DIST_FR --> REC_SMC
+    FREEZE --> REC_SMC
 
     BULL --> CONF{confluence ≥ 0.7?}
     CONF --> |да| REC_HYB[→ HYBRID]
@@ -136,8 +157,6 @@ flowchart TD
     WIDE --> REC_GRID
     QUIET --> REC_GRID2[→ GRID]
     VOLAT --> REC_RED[→ REDUCE_EXPOSURE]
-    ACCUM --> REC_SMC[→ SMC]
-    DIST --> REC_SMC
 ```
 
 ### Параметры детектора
@@ -158,7 +177,15 @@ flowchart TD
 | `atr_volatile_threshold` | 2.0% | Граница quiet/volatile transition | |
 | `confluence_threshold` | 0.7 | Порог для HYBRID-режима | |
 
-> **Комментарий:** ___
+### SMCStructureAnalyzer параметры
+
+| Параметр | Значение | Описание |
+|----------|----------|----------|
+| `ttl_seconds` | 300 (5 мин) | TTL кэша SMCContext на символ |
+| `swing_strength` | 5 | Баров для подтверждения свинга |
+| `min_warmup_bars` | 200 | Минимум свечей для валидного контекста |
+
+> **Комментарий:** Версия v3.0. `SMCStructureAnalyzer` — независимый от SMC-стратегии сервис, работает всегда. `SMCContext.confidence` и `structural_levels` добавлены для downstream-компонентов.
 
 ---
 

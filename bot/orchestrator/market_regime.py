@@ -36,7 +36,7 @@ Indicators:
 """
 
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -105,9 +105,12 @@ class RegimeAnalysis:
     timestamp: datetime
     analysis_details: dict[str, Any]
 
+    # SMC context that triggered the regime (None for indicator-only analyses)
+    smc_context: "SMCContext | None" = field(default=None)
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary."""
-        return {
+        d: dict[str, Any] = {
             "regime": self.regime.value,
             "confidence": round(self.confidence, 4),
             "recommended_strategy": self.recommended_strategy.value,
@@ -124,7 +127,9 @@ class RegimeAnalysis:
             "previous_regime": self.previous_regime.value if self.previous_regime else None,
             "timestamp": self.timestamp.isoformat(),
             "analysis_details": self.analysis_details,
+            "smc_context": self.smc_context.to_dict() if self.smc_context is not None else None,
         }
+        return d
 
 
 class MarketRegimeDetector:
@@ -192,6 +197,10 @@ class MarketRegimeDetector:
         # Log-spam suppression
         self._insufficient_data_count: int = 0
 
+        # SMC freeze state: when ACCUMULATION or DISTRIBUTION is active, indicator
+        # noise cannot switch regime.  Cleared only on CHoCH in opposite direction.
+        self._frozen_smc_regime: MarketRegime | None = None
+
     @property
     def last_analysis(self) -> RegimeAnalysis | None:
         """Return the most recent analysis result."""
@@ -202,13 +211,31 @@ class MarketRegimeDetector:
         """Return regime analysis history (most recent first)."""
         return self._regime_history.copy()
 
-    def analyze(self, df: pd.DataFrame) -> RegimeAnalysis:
+    def analyze(
+        self,
+        df: pd.DataFrame,
+        smc_context: "SMCContext | None" = None,
+    ) -> RegimeAnalysis:
         """
         Analyze market data and detect current regime.
+
+        Two-level classification (v3.0):
+        1. Priority 1 — SMC phase (when smc_context provided and warmup complete):
+           ACCUMULATION or DISTRIBUTION regimes are set immediately from CHoCH,
+           bypassing all indicator checks.  A "freeze" is engaged that prevents
+           indicator noise from switching the regime while SMC structure is intact.
+           The freeze is released only when an explicit CHoCH in the opposite
+           direction is detected by the SMC analyzer.
+        2. Priority 2 — Indicators (ADX/EMA/ATR hysteresis): current logic as
+           fallback for all other regimes.  ATR is used to refine volatility in
+           any regime regardless of the classification path taken.
 
         Args:
             df: OHLCV DataFrame with columns: open, high, low, close, volume.
                 Must have sufficient rows for all indicator calculations.
+            smc_context: Optional SMCContext produced by SMCStructureAnalyzer or
+                SMCAnalyzer.  When provided and warmup_complete, takes priority
+                for ACCUMULATION/DISTRIBUTION detection.
 
         Returns:
             RegimeAnalysis with regime, confidence, and strategy recommendation.
@@ -282,15 +309,84 @@ class MarketRegimeDetector:
         adx_factor = min(current_adx / 50.0, 1.0)
         trend_strength = ema_trend * (0.5 + 0.5 * adx_factor)
 
-        # Detect regime (v2.0: state-dependent hysteresis)
-        current_regime = self._last_analysis.regime if self._last_analysis else None
-        regime = self._classify_regime(
-            adx=current_adx,
-            atr_pct=atr_pct,
-            ema_fast=current_ema_fast,
-            ema_slow=current_ema_slow,
-            current_regime=current_regime,
-        )
+        # ---------------------------------------------------------------
+        # Two-level regime classification (v3.0)
+        # ---------------------------------------------------------------
+        # Priority 1 — SMC phase (CHoCH-driven, beats indicator noise)
+        # ---------------------------------------------------------------
+        smc_regime: MarketRegime | None = None
+        active_smc_context: "SMCContext | None" = None
+
+        if smc_context is not None:
+            from bot.core.smc.models import SMCPhase
+
+            if smc_context.phase == SMCPhase.ACCUMULATION and smc_context.warmup_complete:
+                smc_regime = MarketRegime.ACCUMULATION
+                active_smc_context = smc_context
+                # Engage freeze: only CHoCH_BEAR can release it
+                self._frozen_smc_regime = MarketRegime.ACCUMULATION
+
+            elif smc_context.phase == SMCPhase.DISTRIBUTION and smc_context.warmup_complete:
+                smc_regime = MarketRegime.DISTRIBUTION
+                active_smc_context = smc_context
+                # Engage freeze: only CHoCH_BULL can release it
+                self._frozen_smc_regime = MarketRegime.DISTRIBUTION
+
+            else:
+                # Check whether the freeze should be released.
+                # Release condition: CHoCH in the opposite direction of the frozen regime.
+                if self._frozen_smc_regime is not None and smc_context.warmup_complete:
+                    last_choch = smc_context.last_choch
+                    if last_choch is not None:
+                        from bot.core.smc.models import StructureType
+
+                        if (
+                            self._frozen_smc_regime == MarketRegime.ACCUMULATION
+                            and last_choch.structure_type == StructureType.CHOCH_BEAR
+                        ):
+                            logger.info(
+                                "smc_freeze_released",
+                                frozen=self._frozen_smc_regime.value,
+                                trigger="choch_bear",
+                            )
+                            self._frozen_smc_regime = None
+
+                        elif (
+                            self._frozen_smc_regime == MarketRegime.DISTRIBUTION
+                            and last_choch.structure_type == StructureType.CHOCH_BULL
+                        ):
+                            logger.info(
+                                "smc_freeze_released",
+                                frozen=self._frozen_smc_regime.value,
+                                trigger="choch_bull",
+                            )
+                            self._frozen_smc_regime = None
+
+        # ---------------------------------------------------------------
+        # Priority 2 — Indicator-based classification (ADX/EMA hysteresis)
+        # ---------------------------------------------------------------
+        if smc_regime is not None:
+            # SMC phase takes priority — use it directly.
+            regime = smc_regime
+
+        elif self._frozen_smc_regime is not None:
+            # Freeze is active: hold the SMC regime, ignore indicator noise.
+            regime = self._frozen_smc_regime
+            logger.debug(
+                "smc_freeze_active",
+                frozen_regime=self._frozen_smc_regime.value,
+            )
+
+        else:
+            # Standard indicator path (existing logic unchanged).
+            current_regime = self._last_analysis.regime if self._last_analysis else None
+            regime = self._classify_regime(
+                adx=current_adx,
+                atr_pct=atr_pct,
+                ema_fast=current_ema_fast,
+                ema_slow=current_ema_slow,
+                current_regime=current_regime,
+            )
 
         # Calculate confluence score
         confluence_score = self._calculate_confluence(
@@ -315,9 +411,38 @@ class MarketRegimeDetector:
             adx=current_adx,
         )
 
+        # When SMC regime is active, blend confidence with SMC warmup quality.
+        # Warmup-complete contexts get a 0.4 bonus; pre-warmup contexts are penalised.
+        if active_smc_context is not None:
+            warmup_bonus = 0.4 if active_smc_context.warmup_complete else 0.0
+            confidence = min(confidence * 0.6 + warmup_bonus, 1.0)
+
         # Regime tracking
         regime_duration = self._get_regime_duration(regime)
         previous_regime = self._get_previous_regime(regime)
+
+        # Build analysis details (add SMC info when context is active)
+        details: dict[str, Any] = {
+            "current_price": current_price,
+            "ema_fast": current_ema_fast,
+            "ema_slow": current_ema_slow,
+            "atr": current_atr,
+            "bb_upper": float(bb_upper.iloc[-1]) if not pd.isna(bb_upper.iloc[-1]) else 0.0,
+            "bb_middle": float(bb_middle.iloc[-1]) if not pd.isna(bb_middle.iloc[-1]) else 0.0,
+            "bb_lower": float(bb_lower.iloc[-1]) if not pd.isna(bb_lower.iloc[-1]) else 0.0,
+            "avg_volume": (
+                float(avg_volume.iloc[-1]) if not pd.isna(avg_volume.iloc[-1]) else 0.0
+            ),
+            "plus_di": float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0.0,
+            "minus_di": float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0.0,
+            "data_points": len(df),
+        }
+
+        if active_smc_context is not None:
+            details["smc_phase"] = active_smc_context.phase.value
+            details["smc_trend_bias"] = active_smc_context.trend_bias
+            details["smc_confidence"] = active_smc_context.confidence
+            details["smc_warmup_complete"] = active_smc_context.warmup_complete
 
         analysis = RegimeAnalysis(
             regime=regime,
@@ -335,38 +460,29 @@ class MarketRegimeDetector:
             regime_duration_seconds=regime_duration,
             previous_regime=previous_regime,
             timestamp=datetime.now(timezone.utc),
-            analysis_details={
-                "current_price": current_price,
-                "ema_fast": current_ema_fast,
-                "ema_slow": current_ema_slow,
-                "atr": current_atr,
-                "bb_upper": float(bb_upper.iloc[-1]) if not pd.isna(bb_upper.iloc[-1]) else 0.0,
-                "bb_middle": float(bb_middle.iloc[-1]) if not pd.isna(bb_middle.iloc[-1]) else 0.0,
-                "bb_lower": float(bb_lower.iloc[-1]) if not pd.isna(bb_lower.iloc[-1]) else 0.0,
-                "avg_volume": (
-                    float(avg_volume.iloc[-1]) if not pd.isna(avg_volume.iloc[-1]) else 0.0
-                ),
-                "plus_di": float(plus_di.iloc[-1]) if not pd.isna(plus_di.iloc[-1]) else 0.0,
-                "minus_di": float(minus_di.iloc[-1]) if not pd.isna(minus_di.iloc[-1]) else 0.0,
-                "data_points": len(df),
-            },
+            analysis_details=details,
+            smc_context=active_smc_context,
         )
 
         self._last_analysis = analysis
         self._update_regime_history(analysis)
 
-        logger.info(
-            "market_regime_detected",
-            regime=regime.value,
-            confidence=round(confidence, 3),
-            recommended=recommended.value,
-            confluence=round(confluence_score, 3),
-            trend_strength=round(trend_strength, 3),
-            adx=round(current_adx, 2),
-            bb_width=round(current_bb_width, 2),
-            volume_ratio=round(current_volume_ratio, 2),
-            regime_duration=regime_duration,
-        )
+        log_kwargs: dict[str, Any] = {
+            "regime": regime.value,
+            "confidence": round(confidence, 3),
+            "recommended": recommended.value,
+            "confluence": round(confluence_score, 3),
+            "trend_strength": round(trend_strength, 3),
+            "adx": round(current_adx, 2),
+            "bb_width": round(current_bb_width, 2),
+            "volume_ratio": round(current_volume_ratio, 2),
+            "regime_duration": regime_duration,
+            "smc_frozen": self._frozen_smc_regime.value if self._frozen_smc_regime else None,
+        }
+        if active_smc_context is not None:
+            log_kwargs["smc_phase"] = active_smc_context.phase.value
+            log_kwargs["smc_bias"] = round(active_smc_context.trend_bias, 3)
+        logger.info("market_regime_detected", **log_kwargs)
 
         return analysis
 
@@ -374,22 +490,25 @@ class MarketRegimeDetector:
         """
         Analyze market data and refine regime classification with SMC phase data.
 
-        Calls analyze(df) first, then overrides the regime to ACCUMULATION or
-        DISTRIBUTION when the SMCContext reports those phases (CHoCH signals).
-        The overridden analysis is stored in _last_analysis and history so that
-        subsequent strategy routing picks up the correct recommendation.
+        Backward-compatible shim: always overrides the regime to ACCUMULATION or
+        DISTRIBUTION when the SMCContext phase matches, even before warmup is
+        complete (confidence is blended accordingly to reflect lower certainty).
+
+        For new code, prefer calling analyze(df, smc_context=ctx) which only
+        activates the SMC priority when warmup_complete=True.
 
         Args:
             df: OHLCV DataFrame (same requirements as analyze()).
-            smc_context: SMCContext returned by SMCAnalyzer.analyze().
+            smc_context: SMCContext returned by SMCAnalyzer or SMCStructureAnalyzer.
 
         Returns:
-            RegimeAnalysis — regime may be ACCUMULATION or DISTRIBUTION if
-            SMCContext indicates a phase transition.
+            RegimeAnalysis — regime is ACCUMULATION or DISTRIBUTION when the
+            SMCContext indicates a CHoCH phase; standard indicator regime otherwise.
         """
         from bot.core.smc.models import SMCPhase
 
-        analysis = self.analyze(df)
+        # Run indicator analysis first (no SMC context so freeze logic is skipped)
+        analysis = self.analyze(df, smc_context=None)
 
         smc_regime: MarketRegime | None = None
         if smc_context.phase == SMCPhase.ACCUMULATION:
@@ -401,12 +520,13 @@ class MarketRegimeDetector:
             return analysis
 
         # Blend base confidence with SMC warmup quality
-        smc_confidence = analysis.confidence * 0.6 + (0.4 if smc_context.warmup_complete else 0.0)
+        smc_confidence = min(analysis.confidence * 0.6 + (0.4 if smc_context.warmup_complete else 0.0), 1.0)
 
         details = dict(analysis.analysis_details)
         details["smc_phase"] = smc_context.phase.value
         details["smc_trend_bias"] = smc_context.trend_bias
         details["smc_warmup_complete"] = smc_context.warmup_complete
+        details["smc_confidence"] = smc_context.confidence
 
         overridden = dataclasses.replace(
             analysis,
@@ -414,12 +534,16 @@ class MarketRegimeDetector:
             recommended_strategy=RecommendedStrategy.SMC,
             confidence=smc_confidence,
             analysis_details=details,
+            smc_context=smc_context,
         )
 
-        # Replace the entry that analyze() stored so history is consistent
+        # Update state so history is consistent
         self._last_analysis = overridden
         if self._regime_history:
             self._regime_history[0] = overridden
+
+        # Engage the freeze (same as the analyze() path)
+        self._frozen_smc_regime = smc_regime
 
         logger.info(
             "smc_regime_override",
