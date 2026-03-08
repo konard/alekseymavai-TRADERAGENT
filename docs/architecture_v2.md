@@ -241,7 +241,7 @@ flowchart TD
     RESULT --> GRACE[graceful_transition\n→ cancel + close]
 ```
 
-### Backtest — StrategyRouter
+### Backtest — StrategyRouter (issue #371 — синхронизирован с live)
 
 ```mermaid
 flowchart TD
@@ -249,42 +249,50 @@ flowchart TD
 
     ROUTER --> CD_BT{Cooldown\n2 бара?}
     CD_BT --> |blocked| KEEP_BT[Оставить текущие]
-    CD_BT --> |OK| PRIO
+    CD_BT --> |OK| COND
 
-    subgraph PRIO [Приоритетный маппинг]
-        P1["bull_trend → {trend_follower}"]
-        P2["bear_trend → {dca}"]
-        P3["volatile/breakout → {smc}"]
-        P4["tight/wide_range → {grid}"]
+    COND["_build_routing_conditions\n(тот же метод что и StrategySelector)"] --> RC
+
+    subgraph RC [RoutingConfig YAML — единый источник правил]
+        R1["bull_trend + confluence_high → {dca, grid, tf}"]
+        R2["bull_trend → {trend_follower, dca}"]
+        R3["bear_trend → {dca}"]
+        R4["tight/wide_range → {grid}"]
+        R5["volatile_transition → {smc}"]
+        R6["accumulation/distribution → {smc}"]
     end
 
-    PRIO --> FORCE_CLOSE["force_close_all\n(deactivated strategies)\n→ pnl_delta"]
+    RC --> FORCE_CLOSE["force_close_all\n(deactivated strategies)\n→ pnl_delta"]
     FORCE_CLOSE --> ACTIVE[active_strategies\n+ weights]
 ```
 
-### Сравнение маппинга режим → стратегии
+### Сравнение маппинга режим → стратегии (после issue #371)
 
-| Режим | Live Bot (StrategySelector) | Backtest (StrategyRouter) |
-|-------|---------------------------|--------------------------|
-| `TIGHT_RANGE` | Grid (1.0) | Grid |
-| `WIDE_RANGE` | Grid (1.0) | Grid |
-| `QUIET_TRANSITION` | Grid (0.7) | Grid |
-| `VOLATILE_TRANSITION` | SMC (1.0) | SMC |
-| `BULL_TREND` | TF (0.7) + DCA (0.3) | **TF only** |
-| `BULL_TREND` + conf ≥ 0.7 | DCA + Grid + TF (hybrid) | **TF only** |
-| `BEAR_TREND` | DCA (1.0) | DCA |
-| `ACCUMULATION` | SMC (1.0) | *(не в маппинге)* |
-| `DISTRIBUTION` | SMC (1.0) | *(не в маппинге)* |
-| `NO_REGIME` / fallback | {grid, dca, tf, smc} (все) | {} (пустое множество) |
+| Режим | Live Bot (StrategySelector) | Backtest (StrategyRouter) | Статус |
+|-------|---------------------------|--------------------------|--------|
+| `TIGHT_RANGE` | Grid (1.0) | Grid (1.0) | ✅ Синхронизировано |
+| `WIDE_RANGE` | Grid (1.0) | Grid (1.0) | ✅ Синхронизировано |
+| `QUIET_TRANSITION` | Grid (0.7) | Grid (0.7) | ✅ Синхронизировано |
+| `VOLATILE_TRANSITION` | SMC (1.0) | SMC (1.0) | ✅ Синхронизировано |
+| `BULL_TREND` | TF (0.7) + DCA (0.3) | TF (0.7) + DCA (0.3) | ✅ Синхронизировано |
+| `BULL_TREND` + conf ≥ 0.7 | DCA + Grid + TF (hybrid) | DCA + Grid + TF (hybrid) | ✅ Синхронизировано |
+| `BEAR_TREND` | DCA (1.0) | DCA (1.0) | ✅ Синхронизировано |
+| `ACCUMULATION` | SMC (1.0) | SMC (1.0) | ✅ Синхронизировано |
+| `DISTRIBUTION` | SMC (1.0) | SMC (1.0) | ✅ Синхронизировано |
+| `REDUCE_EXPOSURE` | {} (пустое) | {} (пустое) | ✅ Синхронизировано |
+| `HOLD` | текущие стратегии | текущие стратегии | ✅ Синхронизировано |
+| `NO_REGIME` / fallback | {grid, dca, tf, smc} | {grid, dca} bootstrap | 🟡 Bootstrap в backtest |
 
-### Последствия расхождения
+### Решение проблемы расхождения (issue #371)
 
-| Сценарий | Live Bot | Backtest |
-|----------|----------|----------|
-| BULL_TREND | TF + DCA одновременно (конкуренция за капитал) | Только TF, DCA = 0 trades |
-| BULL_TREND + high conf | DCA + Grid + TF (3 стратегии) | Только TF |
-| ACCUMULATION | SMC торгует | SMC **не активируется** (нет маппинга) |
-| NO_REGIME | Все 4 стратегии работают | Ничего не работает |
+Расхождение устранено: `StrategyRouter` теперь использует `RoutingConfig`
+(тот же YAML-файл `configs/strategy_routing.yaml`), что и `StrategySelector`.
+Оба компонента применяют идентичный метод `_build_routing_conditions()` для
+формирования ключей поиска, поэтому для любого `RegimeAnalysis` live и backtest
+возвращают **строго идентичные** наборы стратегий, веса и приоритеты.
+
+Проверка синхронизации: `tests/integration/test_live_backtest_routing_sync.py`
+(1000+ случайных сценариев + все основные режимы + граничные случаи).
 
 ---
 
@@ -675,11 +683,11 @@ ETHUSDT, +30, 8, 0.5, -150, 3, ..., 0, 0
 | Аспект | Live Bot | Backtest V3.0 | Статус синхронизации |
 |--------|----------|---------------|---------------------|
 | **Тик** | 1с async | M5 бар (300с) | ✅ Ожидаемо |
-| **Routing** | StrategySelector (weighted) | StrategyRouter (exclusive) | 🔴 **Расхождение** |
+| **Routing** | StrategySelector (weighted) | StrategyRouter (RoutingConfig) | ✅ **Синхронизировано** (#371) |
 | **Cooldown** | 300с wall-clock | 2 бара M5 (600с) | ✅ Согласовано |
 | **Regime check** | 60с (override) | 12 баров (1ч) | 🟡 Разная частота |
 | **Transition** | graceful (cancel+close) | force_close_all | ✅ Функционально |
-| **ACCUMULATION** | → SMC (StrategySelector) | **Нет маппинга** | 🔴 **Расхождение** |
+| **ACCUMULATION** | → SMC (StrategySelector) | → SMC (RoutingConfig) | ✅ **Синхронизировано** (#371) |
 | **Hybrid** | HybridCoordinator | **Нет** | 🔴 **Расхождение** |
 | **SMC volume** | require=True | require=False | ✅ Ожидаемо |
 | **SMC throttle** | 5 мин | Настраиваемый | ✅ Согласовано |
@@ -702,31 +710,36 @@ ETHUSDT, +30, 8, 0.5, -150, 3, ..., 0, 0
 
 ## 16. Известные расхождения и план синхронизации
 
-### 🔴 Критические расхождения
+### ✅ Устранённые расхождения (issue #371)
 
-#### 1. Routing: weighted vs exclusive
+#### 1. Routing: unified via RoutingConfig ✅
 
-**Live:** `BULL_TREND` → TF (0.7) + DCA (0.3) одновременно
-**Backtest:** `BULL_TREND` → только TF
+**Ранее (до #371):** `StrategyRouter` использовал захардкоженный `_REGIME_TO_STRATEGIES`,
+расходившийся с `StrategySelector`. Например, `BULL_TREND` давал только TF в backtest,
+тогда как live активировал TF + DCA.
 
-**Влияние:** Grid PnL в bull/bear режимах = 0 в backtest (деактивирован), но ≠ 0 в live.
-**Fix:** Реализовать `StrategySelector`-based routing в backtest engine.
+**Решение:** `StrategyRouter` теперь принимает `RoutingConfig` и использует **тот же
+YAML-файл** (`configs/strategy_routing.yaml`) и **тот же метод `_build_routing_conditions()`**,
+что и `StrategySelector`. Это гарантирует полную идентичность routing в live и backtest.
 
-#### 2. ACCUMULATION/DISTRIBUTION не в backtest routing
+**Доказательство:** `tests/integration/test_live_backtest_routing_sync.py` — 1000+
+случайных сценариев, все основные режимы и граничные случаи.
 
-**Live:** SMC активируется при CHoCH (через StrategySelector)
-**Backtest:** StrategyRouter не имеет маппинга для этих режимов
+#### 2. ACCUMULATION/DISTRIBUTION ✅
 
-**Влияние:** SMC = 0 trades в Phase 1 (одна из причин).
-**Fix:** Добавить `accumulation → {smc}`, `distribution → {smc}` в StrategyRouter.
+**Ранее:** StrategyRouter не имел маппинга для этих режимов.
+**Решение:** Через YAML-правила `accumulation → {smc}`, `distribution → {smc}` (уже в
+`configs/strategy_routing.yaml`).
+
+### 🔴 Оставшиеся критические расхождения
 
 #### 3. Hybrid mode не в backtest
 
 **Live:** Grid + DCA координируются через HybridCoordinator
-**Backtest:** Нет координации, только эксклюзивный routing
+**Backtest:** Нет координации, только routing без HybridCoordinator
 
-**Влияние:** Hybrid-режим не тестируется в backtest.
-**Fix:** Интегрировать TradingCore.HybridCoordinator в BacktestOrchestratorEngine.
+**Влияние:** Hybrid-режим не тестируется полностью в backtest.
+**Fix:** Интегрировать TradingCore.HybridCoordinator в BacktestOrchestratorEngine (Этап 2).
 
 ### 🟡 Некритические расхождения
 
