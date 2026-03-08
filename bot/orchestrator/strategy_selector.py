@@ -65,7 +65,8 @@ DEFAULT_REGIME_STRATEGIES: dict[MarketRegime, list[StrategyWeight]] = {
         StrategyWeight(strategy_type="dca", weight=0.3, priority=2),
     ],
     MarketRegime.BEAR_TREND: [
-        StrategyWeight(strategy_type="dca", weight=1.0, priority=1),
+        StrategyWeight(strategy_type="dca", weight=0.7, priority=1),
+        StrategyWeight(strategy_type="trend_follower", weight=0.3, priority=2),
     ],
     MarketRegime.UNKNOWN: [],
 }

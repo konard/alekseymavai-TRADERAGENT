@@ -40,8 +40,8 @@ _TF_PRIMARY_REGIMES = {"bull_trend"}
 # DCA is the PRIMARY strategy for bear trends
 _DCA_PRIMARY_REGIMES = {"bear_trend"}
 
-# SMC activates only for breakout/volatile — exclusive, not additive
-_SMC_PRIMARY_REGIMES = {"volatile_transition", "breakout"}
+# SMC activates for trending/volatile regimes when enabled
+_SMC_PRIMARY_REGIMES = {"volatile_transition", "breakout", "bull_trend", "bear_trend"}
 
 
 @dataclass
@@ -83,7 +83,7 @@ class StrategyRouter:
         self.enable_smc = enable_smc
         self.enable_trend_follower = enable_trend_follower
 
-        self._active_strategies: set[str] = set()  # empty until first regime is known
+        self._active_strategies: set[str] = {"grid", "dca"}  # default all-enabled bootstrap set
         self._last_switch_bar: int = -cooldown_bars  # allow switch on bar 0
         self._switch_history: list[dict[str, Any]] = []
 
@@ -189,7 +189,7 @@ class StrategyRouter:
 
     def reset(self) -> None:
         """Reset router state (use between independent backtest runs)."""
-        self._active_strategies = set()  # empty until first regime is known
+        self._active_strategies = {"grid", "dca"}  # default all-enabled bootstrap set
         self._last_switch_bar = -self.cooldown_bars
         self._switch_history.clear()
 
@@ -204,23 +204,30 @@ class StrategyRouter:
 
     def _compute_target_strategies(self, regime: RegimeAnalysis) -> set[str]:
         """
-        Compute the desired strategy set for a given regime — EXCLUSIVE routing.
+        Compute the desired strategy set for a given regime — ADDITIVE routing.
 
-        Priority (highest first):
-        1. TF-primary regimes  (bull_trend)          → {trend_follower}  if enabled
-        2. DCA-primary regimes (bear_trend)           → {dca}
-        3. SMC-primary regimes (breakout/volatile)   → {smc}             if enabled
-        4. Base mapping via _REGIME_TO_STRATEGIES     → {grid} / {} etc.
+        Starts with the base set from the recommendation mapping, then adds
+        specialist strategies on top:
+        1. Base set from _REGIME_TO_STRATEGIES (via recommended_strategy)
+        2. DCA-primary regimes (bear_trend)  → {dca} exclusively
+        3. TF-primary regimes  (bull_trend)  → add trend_follower if enabled
+        4. SMC-primary regimes (volatile)    → add smc if enabled
         """
         rv = regime.regime.value
 
-        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
-            return {"trend_follower"}
-
+        # Bear trend: DCA-only (no grid)
         if rv in _DCA_PRIMARY_REGIMES:
             return {"dca"}
 
-        if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
-            return {"smc"}
+        # Start with the base recommendation mapping
+        result = _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
 
-        return _REGIME_TO_STRATEGIES.get(regime.recommended_strategy, set()).copy()
+        # Additively include TF for trending regimes when enabled
+        if self.enable_trend_follower and rv in _TF_PRIMARY_REGIMES:
+            result.add("trend_follower")
+
+        # Additively include SMC for volatile/breakout regimes when enabled
+        if self.enable_smc and rv in _SMC_PRIMARY_REGIMES:
+            result.add("smc")
+
+        return result
