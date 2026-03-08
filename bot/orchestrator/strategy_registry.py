@@ -48,8 +48,8 @@ _VALID_TRANSITIONS: dict[StrategyState, set[StrategyState]] = {
         StrategyState.ERROR,
     },
     StrategyState.PRE_SWITCH: {
-        StrategyState.ACTIVE,   # regime returned to stable
-        StrategyState.STOPPING, # confirmed transition → graceful close
+        StrategyState.ACTIVE,  # regime returned to stable
+        StrategyState.STOPPING,  # confirmed transition → graceful close
         StrategyState.ERROR,
     },
     StrategyState.PAUSED: {StrategyState.ACTIVE, StrategyState.STOPPING, StrategyState.ERROR},

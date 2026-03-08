@@ -563,9 +563,7 @@ class StrategySelector:
             # Two-phase PRE_SWITCH status (issue #360)
             "transition_phase": self._transition_phase.value,
             "pre_switch_target_regime": (
-                self._pre_switch_target_regime.value
-                if self._pre_switch_target_regime
-                else None
+                self._pre_switch_target_regime.value if self._pre_switch_target_regime else None
             ),
             "pre_switch_started_at": (
                 self._pre_switch_started_at.isoformat() if self._pre_switch_started_at else None
@@ -640,9 +638,7 @@ class StrategySelector:
                     regime=regime,
                     recommended=recommended,
                     transition_needed=False,
-                    reason=(
-                        f"PRE_SWITCH restarted: target changed to {regime.value}"
-                    ),
+                    reason=(f"PRE_SWITCH restarted: target changed to {regime.value}"),
                 )
 
             # Update SMC confirmation state from latest analysis
