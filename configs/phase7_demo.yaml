@@ -72,6 +72,8 @@ bots:
       stop_loss_percentage: "0.12"    # 12% stop loss
       max_daily_loss: "600"           # Max $600 daily loss
       min_order_size: "66"            # Min $66 per order (> 0.001 BTC)
+      global_stop_loss_pct: "0.025"   # 2.5% of total capital aggregate risk triggers force-close
+      force_close_cooldown_seconds: 1800  # 30-minute cooldown after force-close
 
     notifications:
       enabled: false

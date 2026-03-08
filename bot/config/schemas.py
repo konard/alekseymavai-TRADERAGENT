@@ -387,6 +387,24 @@ class RiskManagementConfig(BaseModel):
         gt=0,
         description="Minimum order size in quote currency",
     )
+    global_stop_loss_pct: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=1,
+        description=(
+            "Per-symbol global stop-loss as fraction of total capital (e.g. 0.025 = 2.5%). "
+            "When aggregate exposure across all strategies on one symbol exceeds this "
+            "threshold, force_close_all is triggered. None disables the feature."
+        ),
+    )
+    force_close_cooldown_seconds: int = Field(
+        default=1800,
+        ge=0,
+        description=(
+            "Cooldown in seconds after a force_close_all event before new entries "
+            "on that symbol are allowed again (default 1800 = 30 min)."
+        ),
+    )
 
 
 class NotificationConfig(BaseModel):

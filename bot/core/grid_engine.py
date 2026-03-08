@@ -375,3 +375,26 @@ class GridEngine:
 
         logger.warning("Order not found for cancellation", order_id=order_id)
         return False
+
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open buy-side positions in the format expected by
+        PortfolioRiskManager for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (notional value: price × amount)
+          - 'atr_stop_distance': Decimal  (profit_per_grid as fractional proxy for stop)
+        """
+        result = []
+        for order in self.active_orders.values():
+            if order.side == "buy":
+                notional = order.price * order.amount
+                result.append(
+                    {
+                        "symbol": self.symbol,
+                        "size": notional,
+                        "atr_stop_distance": self.profit_per_grid,
+                    }
+                )
+        return result

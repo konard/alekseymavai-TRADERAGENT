@@ -9,6 +9,17 @@ PortfolioRiskManager:
     Wraps SharedCapitalPool with portfolio-level stop-loss, correlation
     limits, and per-pair exposure caps.
 
+    Per-symbol global stop-loss:
+    When multiple strategies run on the same symbol simultaneously, their
+    combined exposure is tracked. If aggregate risk exceeds
+    ``global_stop_loss_pct``, ``force_close_all(symbol)`` is triggered
+    automatically:
+    - All strategy adapters registered for that symbol are asked to close
+      their positions (via their ``get_open_positions()`` + close callbacks).
+    - New entries for that symbol are blocked during a configurable cooldown.
+    - The event is logged (Telegram notification is responsibility of the
+      caller — pass ``on_force_close`` callback).
+
 Usage:
     prm = PortfolioRiskManager(total_capital=Decimal("10000"))
     result = prm.check_allocation("bot_btc", Decimal("2000"))
@@ -18,14 +29,32 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+@runtime_checkable
+class StrategyPositionProvider(Protocol):
+    """
+    Protocol for strategy adapters that expose open positions for
+    per-symbol risk aggregation.
+    """
+
+    def get_open_positions(self) -> list[dict[str, Any]]:
+        """
+        Return a list of open position dicts, each containing at minimum:
+          - 'symbol': str          — trading pair (e.g. 'BTC/USDT')
+          - 'size': Decimal        — position size in quote currency
+          - 'atr_stop_distance': Decimal — distance to stop-loss (risk per unit)
+        """
+        ...
 
 
 class RiskCheckStatus(str, Enum):
@@ -36,6 +65,7 @@ class RiskCheckStatus(str, Enum):
     REJECTED_PAIR_LIMIT = "rejected_pair_limit"
     REJECTED_PORTFOLIO_HALTED = "rejected_portfolio_halted"
     REJECTED_CORRELATION = "rejected_correlation"
+    REJECTED_SYMBOL_COOLDOWN = "rejected_symbol_cooldown"
 
 
 @dataclass
@@ -59,6 +89,15 @@ class BotAllocation:
     allocated: Decimal = Decimal("0")  # reserved/committed capital
     deployed: Decimal = Decimal("0")  # actually in open positions
     max_limit: Decimal = Decimal("0")  # hard cap for this bot
+
+
+@dataclass
+class SymbolRiskState:
+    """Tracks per-symbol global stop-loss cooldown state."""
+
+    symbol: str
+    force_closed_at: float = 0.0  # monotonic timestamp of last force-close
+    is_cooling_down: bool = False
 
 
 class SharedCapitalPool:
@@ -201,11 +240,19 @@ class PortfolioRiskManager:
         max_single_pair_pct: float = 0.25,
         max_correlation_limit: float = 0.80,
         portfolio_stop_loss_pct: float = 0.15,
+        global_stop_loss_pct: float | None = None,
+        force_close_cooldown_seconds: int = 1800,
     ) -> None:
         self.total_capital = total_capital
         self.max_single_pair_pct = Decimal(str(max_single_pair_pct))
         self.max_correlation_limit = max_correlation_limit
         self.portfolio_stop_loss_pct = Decimal(str(portfolio_stop_loss_pct))
+
+        # Per-symbol global stop-loss (None → feature disabled)
+        self.global_stop_loss_pct: Decimal | None = (
+            Decimal(str(global_stop_loss_pct)) if global_stop_loss_pct is not None else None
+        )
+        self.force_close_cooldown_seconds: int = force_close_cooldown_seconds
 
         self._pool = SharedCapitalPool(
             total_capital=total_capital,
@@ -222,6 +269,17 @@ class PortfolioRiskManager:
         self._active_symbols: set[str] = set()
         # Manual correlation overrides: (sym_a, sym_b) → float
         self._correlation_overrides: dict[tuple[str, str], float] = {}
+
+        # Per-symbol cooldown state after force_close_all
+        self._symbol_risk: dict[str, SymbolRiskState] = {}
+
+        # Registered strategy position providers for per-symbol aggregation.
+        # symbol → list of (strategy_name, provider)
+        self._symbol_providers: dict[str, list[tuple[str, StrategyPositionProvider]]] = {}
+
+        # Optional callback invoked when force_close_all is triggered.
+        # Signature: on_force_close(symbol: str, reason: str) -> None
+        self._on_force_close: Callable[[str, str], None] | None = None
 
     # ------------------------------------------------------------------
     # Core API
@@ -255,6 +313,21 @@ class PortfolioRiskManager:
                 status=RiskCheckStatus.REJECTED_PORTFOLIO_HALTED,
                 approved=False,
                 reason=f"Portfolio halted: {self._halt_reason}",
+            )
+
+        # 1b. Per-symbol cooldown check (after force_close_all)
+        if symbol and self._is_symbol_cooling_down(symbol):
+            state = self._symbol_risk[symbol]
+            remaining = int(
+                self.force_close_cooldown_seconds - (time.monotonic() - state.force_closed_at)
+            )
+            return RiskCheckResult(
+                status=RiskCheckStatus.REJECTED_SYMBOL_COOLDOWN,
+                approved=False,
+                reason=(
+                    f"Symbol {symbol} is in cooldown after force-close "
+                    f"({remaining}s remaining)"
+                ),
             )
 
         # 2. Per-pair cap check
@@ -311,6 +384,231 @@ class PortfolioRiskManager:
         self._pool.release(bot_name, amount)
         if symbol and symbol in self._active_symbols:
             self._active_symbols.discard(symbol)
+
+    # ------------------------------------------------------------------
+    # Per-symbol position provider registry
+    # ------------------------------------------------------------------
+
+    def set_force_close_callback(self, callback: Callable[[str, str], None]) -> None:
+        """
+        Register a callback invoked when ``force_close_all`` is triggered.
+
+        Args:
+            callback: ``on_force_close(symbol, reason) -> None``.  Typically
+                      sends a Telegram alert and initiates exchange-level
+                      order cancellation.
+        """
+        self._on_force_close = callback
+
+    def register_symbol_provider(
+        self,
+        symbol: str,
+        strategy_name: str,
+        provider: StrategyPositionProvider,
+    ) -> None:
+        """
+        Register a strategy adapter as a position data provider for *symbol*.
+
+        Args:
+            symbol:         Trading pair (e.g. 'BTC/USDT').
+            strategy_name:  Unique name of the strategy (for logging).
+            provider:       Object that implements ``get_open_positions()``.
+        """
+        if symbol not in self._symbol_providers:
+            self._symbol_providers[symbol] = []
+        # Avoid duplicate registration
+        for name, _ in self._symbol_providers[symbol]:
+            if name == strategy_name:
+                return
+        self._symbol_providers[symbol].append((strategy_name, provider))
+        logger.info(
+            "symbol_provider_registered",
+            symbol=symbol,
+            strategy=strategy_name,
+        )
+
+    def unregister_symbol_provider(self, symbol: str, strategy_name: str) -> None:
+        """Remove a previously registered position provider."""
+        if symbol not in self._symbol_providers:
+            return
+        self._symbol_providers[symbol] = [
+            (name, p)
+            for name, p in self._symbol_providers[symbol]
+            if name != strategy_name
+        ]
+
+    # ------------------------------------------------------------------
+    # Per-symbol exposure aggregation
+    # ------------------------------------------------------------------
+
+    def _get_total_exposure(self, symbol: str) -> Decimal:
+        """
+        Sum aggregate risk exposure for all strategies on *symbol*.
+
+        Exposure per position = ``size × atr_stop_distance``.
+        Falls back to ``size`` alone if ``atr_stop_distance`` is absent.
+
+        Returns:
+            Total exposure in quote currency.
+        """
+        providers = self._symbol_providers.get(symbol, [])
+        total = Decimal("0")
+        for strategy_name, provider in providers:
+            try:
+                positions = provider.get_open_positions()
+            except Exception as exc:  # pragma: no cover
+                logger.warning(
+                    "get_open_positions_failed",
+                    strategy=strategy_name,
+                    symbol=symbol,
+                    error=str(exc),
+                )
+                continue
+            for pos in positions:
+                if pos.get("symbol") != symbol:
+                    continue
+                size = Decimal(str(pos.get("size", "0")))
+                atr_stop = Decimal(str(pos.get("atr_stop_distance", "1")))
+                total += size * atr_stop
+        return total
+
+    def check_global_stop_loss(self, symbol: str) -> bool:
+        """
+        Return True if per-symbol global stop-loss is triggered.
+
+        Checks whether aggregate risk exposure on *symbol* expressed as a
+        fraction of total capital exceeds ``global_stop_loss_pct``.
+        Returns False when ``global_stop_loss_pct`` is not configured or
+        the symbol has no registered providers.
+        """
+        if self.global_stop_loss_pct is None:
+            return False
+        if self.total_capital <= 0:
+            return False
+        exposure = self._get_total_exposure(symbol)
+        exposure_pct = exposure / self.total_capital
+        if exposure_pct >= self.global_stop_loss_pct:
+            logger.warning(
+                "global_stop_loss_exceeded",
+                symbol=symbol,
+                exposure=float(exposure),
+                exposure_pct=float(exposure_pct),
+                limit_pct=float(self.global_stop_loss_pct),
+            )
+            return True
+        return False
+
+    def force_close_all(self, symbol: str) -> None:
+        """
+        Trigger a global stop-loss for *symbol*.
+
+        Actions:
+        1. Mark symbol as cooling-down (blocks new entries for
+           ``force_close_cooldown_seconds``).
+        2. Invoke the registered ``on_force_close`` callback so the
+           orchestrator can cancel open orders and close all positions
+           with ``reduceOnly=True`` market orders.
+        3. Log the event with structured fields.
+
+        Args:
+            symbol: Trading pair to force-close (e.g. 'BTC/USDT').
+        """
+        now = time.monotonic()
+        state = self._symbol_risk.setdefault(symbol, SymbolRiskState(symbol=symbol))
+        state.force_closed_at = now
+        state.is_cooling_down = True
+
+        exposure = self._get_total_exposure(symbol)
+        reason = (
+            f"Global stop-loss triggered for {symbol}: "
+            f"aggregate exposure {float(exposure):.2f} "
+            f">= {float(self.global_stop_loss_pct or 0) * 100:.1f}% "
+            f"of total capital {float(self.total_capital):.2f}"
+        )
+
+        logger.critical(
+            "force_close_all_triggered",
+            symbol=symbol,
+            exposure=float(exposure),
+            total_capital=float(self.total_capital),
+            cooldown_seconds=self.force_close_cooldown_seconds,
+        )
+
+        if self._on_force_close is not None:
+            try:
+                self._on_force_close(symbol, reason)
+            except Exception as exc:  # pragma: no cover
+                logger.error(
+                    "force_close_callback_failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+    def _is_symbol_cooling_down(self, symbol: str) -> bool:
+        """Return True if *symbol* is within its post-force-close cooldown."""
+        state = self._symbol_risk.get(symbol)
+        if state is None or not state.is_cooling_down:
+            return False
+        elapsed = time.monotonic() - state.force_closed_at
+        if elapsed >= self.force_close_cooldown_seconds:
+            state.is_cooling_down = False
+            logger.info("symbol_cooldown_expired", symbol=symbol)
+            return False
+        return True
+
+    def tick_global_stop_loss(self, symbols: list[str] | None = None) -> list[str]:
+        """
+        Check all registered symbols (or *symbols* if given) for a global
+        stop-loss breach and trigger ``force_close_all`` where needed.
+
+        Intended to be called every tick from the main orchestrator loop.
+
+        Returns:
+            List of symbols for which ``force_close_all`` was triggered.
+        """
+        if self.global_stop_loss_pct is None:
+            return []
+
+        targets = symbols if symbols is not None else list(self._symbol_providers.keys())
+        triggered: list[str] = []
+
+        for symbol in targets:
+            if self._is_symbol_cooling_down(symbol):
+                continue
+            if self.check_global_stop_loss(symbol):
+                self.force_close_all(symbol)
+                triggered.append(symbol)
+
+        return triggered
+
+    def get_risk_report(self) -> dict[str, Any]:
+        """
+        Return a per-symbol risk summary for monitoring.
+
+        Includes:
+        - current aggregate exposure per symbol
+        - whether a symbol is in cooldown
+        - global stop-loss configuration
+        """
+        report: dict[str, Any] = {
+            "global_stop_loss_pct": (
+                float(self.global_stop_loss_pct) if self.global_stop_loss_pct is not None else None
+            ),
+            "force_close_cooldown_seconds": self.force_close_cooldown_seconds,
+            "symbols": {},
+        }
+        for symbol, providers in self._symbol_providers.items():
+            exposure = self._get_total_exposure(symbol)
+            exposure_pct = float(exposure / self.total_capital) if self.total_capital > 0 else 0.0
+            state = self._symbol_risk.get(symbol)
+            report["symbols"][symbol] = {
+                "strategies": [name for name, _ in providers],
+                "aggregate_exposure": float(exposure),
+                "exposure_pct": round(exposure_pct * 100, 2),
+                "is_cooling_down": self._is_symbol_cooling_down(symbol),
+                "force_closed_at": state.force_closed_at if state else None,
+            }
+        return report
 
     # ------------------------------------------------------------------
     # Balance / drawdown tracking

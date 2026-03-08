@@ -305,6 +305,35 @@ class SMCStrategyAdapter(BaseStrategy):
             )
         return result
 
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open positions in the format expected by PortfolioRiskManager
+        for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (position size in quote currency)
+          - 'atr_stop_distance': Decimal  (fractional stop distance)
+        """
+        result = []
+        symbol = self._config.symbol if hasattr(self._config, "symbol") else "UNKNOWN"
+        for pos in self._positions.values():
+            entry = pos["entry_price"]
+            sl = pos["stop_loss"]
+            size = pos["size"]
+            if entry > 0 and sl > 0:
+                stop_distance = abs(entry - sl) / entry
+            else:
+                stop_distance = Decimal("0")
+            result.append(
+                {
+                    "symbol": symbol,
+                    "size": size,
+                    "atr_stop_distance": stop_distance,
+                }
+            )
+        return result
+
     def get_performance(self) -> StrategyPerformance:
         """Get performance based on closed trades."""
         total = len(self._closed_trades)

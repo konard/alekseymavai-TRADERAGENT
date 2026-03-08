@@ -283,6 +283,34 @@ class GridAdapter(BaseStrategy):
             )
         return result
 
+    def get_open_positions(self) -> list[dict]:
+        """
+        Return open positions in the format expected by PortfolioRiskManager
+        for per-symbol exposure aggregation.
+
+        Each dict contains:
+          - 'symbol': str
+          - 'size': Decimal  (amount_per_grid in quote currency)
+          - 'atr_stop_distance': Decimal  (grid_range_pct as fractional stop)
+        """
+        result = []
+        for pos in self._positions.values():
+            entry = pos["entry_price"]
+            sl = pos["stop_loss"]
+            size = pos["size"] * entry if entry > 0 else pos["size"]
+            if entry > 0 and sl > 0:
+                stop_distance = abs(entry - sl) / entry
+            else:
+                stop_distance = self._grid_range_pct
+            result.append(
+                {
+                    "symbol": self._symbol,
+                    "size": size,
+                    "atr_stop_distance": stop_distance,
+                }
+            )
+        return result
+
     def get_performance(self) -> StrategyPerformance:
         total = len(self._closed_trades)
         if total == 0:
