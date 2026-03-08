@@ -67,7 +67,9 @@ class CorePosition:
             amount: Filled amount in base currency.
         """
         if price <= 0 or amount <= 0:
-            raise ValueError(f"price and amount must be positive, got price={price} amount={amount}")
+            raise ValueError(
+                f"price and amount must be positive, got price={price} amount={amount}"
+            )
 
         old_cost = self.avg_entry_price * self.total_amount
         new_cost = price * amount
