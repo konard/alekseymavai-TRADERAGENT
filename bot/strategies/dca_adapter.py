@@ -20,6 +20,7 @@ from bot.strategies.base import (
     ExitReason,
     PositionInfo,
     SignalDirection,
+    StrategyDirective,
     StrategyPerformance,
 )
 from bot.utils.logger import get_logger
@@ -64,6 +65,8 @@ class DCAAdapter(BaseStrategy):
         )
 
         self._last_analysis: BaseMarketAnalysis | None = None
+        # Directive received from StrategyConductor (None = no conductor active)
+        self._directive: StrategyDirective | None = None
 
         # DCA deal tracking
         self._positions: dict[str, dict[str, Any]] = {}
@@ -304,9 +307,21 @@ class DCAAdapter(BaseStrategy):
             },
         )
 
+    def set_directive(self, directive: StrategyDirective) -> None:
+        """Store conductor directive for use in signal generation."""
+        self._directive = directive
+        logger.debug(
+            "dca_directive_applied",
+            mode=directive.mode.value,
+            price_range=directive.price_range,
+            key_levels_count=len(directive.key_levels),
+            capital_allocation=directive.capital_allocation,
+        )
+
     def reset(self) -> None:
         self._positions.clear()
         self._closed_trades.clear()
         self._last_analysis = None
+        self._directive = None
         self._recent_high = Decimal("0")
         self._current_price = Decimal("0")

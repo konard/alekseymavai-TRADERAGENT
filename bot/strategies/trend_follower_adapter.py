@@ -17,6 +17,7 @@ from bot.strategies.base import (
     BaseStrategy,
     PositionInfo,
     SignalDirection,
+    StrategyDirective,
     StrategyPerformance,
 )
 from bot.strategies.base import (
@@ -81,6 +82,8 @@ class TrendFollowerAdapter(BaseStrategy):
         # Cache the most recent entry signal for open_position
         self._pending_signal: Any = None
         self._pending_metrics: Any = None
+        # Directive received from StrategyConductor (None = no conductor active)
+        self._directive: StrategyDirective | None = None
 
     def get_strategy_name(self) -> str:
         return self._name
@@ -302,12 +305,24 @@ class TrendFollowerAdapter(BaseStrategy):
             metadata={"full_stats": stats},
         )
 
+    def set_directive(self, directive: StrategyDirective) -> None:
+        """Store conductor directive; TF uses key_levels for SL/TP anchoring."""
+        self._directive = directive
+        logger.debug(
+            "trend_follower_directive_applied",
+            mode=directive.mode.value,
+            price_range=directive.price_range,
+            key_levels_count=len(directive.key_levels),
+            capital_allocation=directive.capital_allocation,
+        )
+
     def reset(self) -> None:
         """Reset underlying strategy state by recreating TrendFollowerStrategy."""
         self._pending_signal = None
         self._pending_metrics = None
         self._last_analysis = None
         self._last_df = None
+        self._directive = None
         self._strategy = TrendFollowerStrategy(
             config=self._config,
             initial_capital=self._initial_capital,

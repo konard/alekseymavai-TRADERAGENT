@@ -19,6 +19,7 @@ from bot.strategies.base import (
     ExitReason,
     PositionInfo,
     SignalDirection,
+    StrategyDirective,
     StrategyPerformance,
 )
 from bot.strategies.smc.config import SMCConfig
@@ -69,6 +70,8 @@ class SMCStrategyAdapter(BaseStrategy):
 
         # Cache dataframes for multi-timeframe
         self._cached_dfs: dict[str, pd.DataFrame] = {}
+        # Directive received from StrategyConductor (None = no conductor active)
+        self._directive: StrategyDirective | None = None
 
     def get_strategy_name(self) -> str:
         return self._name
@@ -324,6 +327,17 @@ class SMCStrategyAdapter(BaseStrategy):
             avg_trade_pnl=total_pnl / total if total > 0 else Decimal("0"),
         )
 
+    def set_directive(self, directive: StrategyDirective) -> None:
+        """Store conductor directive; SMC uses key_levels for SL/TP alignment."""
+        self._directive = directive
+        logger.debug(
+            "smc_directive_applied",
+            mode=directive.mode.value,
+            price_range=directive.price_range,
+            key_levels_count=len(directive.key_levels),
+            capital_allocation=directive.capital_allocation,
+        )
+
     def reset(self) -> None:
         """Reset adapter and underlying strategy."""
         self._strategy.reset()
@@ -331,3 +345,4 @@ class SMCStrategyAdapter(BaseStrategy):
         self._closed_trades.clear()
         self._cached_dfs.clear()
         self._last_analysis = None
+        self._directive = None

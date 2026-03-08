@@ -21,6 +21,7 @@ from bot.strategies.base import (
     ExitReason,
     PositionInfo,
     SignalDirection,
+    StrategyDirective,
     StrategyPerformance,
 )
 from bot.utils.logger import get_logger
@@ -67,6 +68,8 @@ class GridAdapter(BaseStrategy):
         self._grid_levels: list[Decimal] = []
         self._grid_lower_price: Decimal = Decimal("0")  # lower boundary of the entire grid
         self._last_analysis: BaseMarketAnalysis | None = None
+        # Directive received from StrategyConductor (None = no conductor active)
+        self._directive: StrategyDirective | None = None
 
         # Position tracking
         self._positions: dict[str, dict[str, Any]] = {}
@@ -296,6 +299,17 @@ class GridAdapter(BaseStrategy):
             avg_trade_pnl=total_pnl / total if total > 0 else Decimal("0"),
         )
 
+    def set_directive(self, directive: StrategyDirective) -> None:
+        """Store conductor directive; grid bounds may be refined by price_range."""
+        self._directive = directive
+        logger.debug(
+            "grid_directive_applied",
+            mode=directive.mode.value,
+            price_range=directive.price_range,
+            key_levels_count=len(directive.key_levels),
+            capital_allocation=directive.capital_allocation,
+        )
+
     def reset(self) -> None:
         self._grid_engine = None
         self._grid_levels = []
@@ -303,4 +317,5 @@ class GridAdapter(BaseStrategy):
         self._positions.clear()
         self._closed_trades.clear()
         self._last_analysis = None
+        self._directive = None
         self._current_price = Decimal("0")
