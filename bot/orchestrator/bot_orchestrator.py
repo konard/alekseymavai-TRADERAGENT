@@ -949,9 +949,7 @@ class BotOrchestrator:
                     "dca", _arb_regime.regime, _arb_balance
                 ) > Decimal("0")
                 grid_active = (
-                    self.grid_engine
-                    and self._is_strategy_active("grid")
-                    and _grid_capital_ok
+                    self.grid_engine and self._is_strategy_active("grid") and _grid_capital_ok
                 )
                 dca_active = (
                     self.dca_engine
