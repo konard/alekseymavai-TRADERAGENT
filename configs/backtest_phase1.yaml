@@ -66,10 +66,12 @@ risk:
 
 grid:
   enabled: true
-  num_levels: 6                  # 6 уровней сетки
-  profit_per_grid: 0.012         # 1.2% прибыль на уровень
+  num_levels: 10                 # 10 уровней сетки (было 6) — больше тригеров
+  profit_per_grid: 0.008         # 0.8% прибыль на уровень (было 1.2%) — чаще срабатывает
+  grid_range_pct: 0.12           # 12% диапазон сетки (было 5%) — меньше рецентров
+  recenter_cooldown_bars: 24     # кулдаун рецентра: 24 × 5m = 2 часа
   # amount_per_grid рассчитывается автоматически:
-  # initial_balance × max_position_pct / num_levels = $1000 × 0.25 / 6 = ~$42
+  # initial_balance × max_position_pct / num_levels = $1000 × 0.25 / 10 = ~$25
 
 # ---------------------------------------------------------------------------
 # Стратегия: DCA
@@ -78,11 +80,15 @@ grid:
 
 dca:
   enabled: true
-  trigger_pct: 0.04              # покупать при падении на 4%
-  max_steps: 4                   # максимум 4 уровня DCA
-  take_profit_pct: 0.08          # тейк-профит 8%
+  trigger_pct: 0.03              # покупать при падении на 3% (было 4%)
+  max_steps: 3                   # максимум 3 уровня DCA (было 4-5) — ограничение мартингейла
+  take_profit_pct: 0.06          # тейк-профит 6% (было 8-10%) — чаще фиксирует прибыль
   safety_order_size: 50          # $50 на каждый шаг DCA
   catch_up_enabled: true         # Pre-open catch-up ордера на старте
+  martingale_multiplier: 1.3     # мультипликатор объёма DCA (ограничивает рост позиции)
+  hard_stop_loss_pct: 15         # принудительный выход при убытке -15% на всю DCA-позицию
+  max_holding_bars: 288          # принудительный выход через 24ч (288 × M5)
+  trend_filter_adx: 30           # не входить если ADX > 30 и тренд медвежий
 
 # ---------------------------------------------------------------------------
 # Стратегия: TrendFollower
@@ -96,9 +102,10 @@ trend_follower:
   atr_period: 14
   rsi_period: 14
   risk_per_trade_pct: 0.01       # 1% риска на сделку ($10 из $1000)
-  tp_atr_multiplier_sideways: 1.2
+  require_volume_confirmation: false  # снят блокирующий фильтр (было true)
+  tp_atr_multiplier_sideways: 1.5    # было 1.2 — шире цель при боковике
   tp_atr_multiplier_weak: 1.8
-  tp_atr_multiplier_strong: 2.5
+  tp_atr_multiplier_strong: 4.0      # было 2.5 — шире цель при сильном тренде
   sl_atr_multiplier_sideways: 0.7
   sl_atr_multiplier_trend: 1.0
   max_positions: 2

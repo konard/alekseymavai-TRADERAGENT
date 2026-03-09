@@ -43,13 +43,18 @@ class DCAAdapter(BaseStrategy):
         symbol: str = "BTC/USDT",
         base_order_size: Decimal = Decimal("100"),
         safety_order_size: Decimal = Decimal("200"),
-        max_safety_orders: int = 4,
-        price_deviation_pct: Decimal = Decimal("0.04"),
+        max_safety_orders: int = 3,
+        price_deviation_pct: Decimal = Decimal("0.03"),
         safety_step_pct: Decimal = Decimal("0.02"),
-        take_profit_pct: Decimal = Decimal("0.08"),
+        take_profit_pct: Decimal = Decimal("0.06"),
         name: str = "dca-default",
         # Level 1 — Universal parameter (P1.1 unification)
         risk_per_trade_pct: Optional[Decimal] = None,
+        # P0 parametric fixes (issue #377)
+        martingale_multiplier: Decimal = Decimal("1.3"),
+        hard_stop_loss_pct: Optional[Decimal] = Decimal("0.15"),
+        max_holding_bars: Optional[int] = 288,
+        trend_filter_adx: Optional[float] = 30.0,
     ) -> None:
         self._symbol = symbol
         self._name = name
@@ -59,6 +64,10 @@ class DCAAdapter(BaseStrategy):
         self._price_deviation_pct = price_deviation_pct
         self._safety_step_pct = safety_step_pct
         self._take_profit_pct = take_profit_pct
+        self._martingale_multiplier = martingale_multiplier
+        self._hard_stop_loss_pct = hard_stop_loss_pct
+        self._max_holding_bars = max_holding_bars
+        self._trend_filter_adx = trend_filter_adx
         # risk_per_trade_pct is stored for reference / future position-sizing use.
         self._risk_per_trade_pct: Optional[Decimal] = (
             Decimal(str(risk_per_trade_pct)) if risk_per_trade_pct is not None else None
@@ -190,6 +199,7 @@ class DCAAdapter(BaseStrategy):
             "size": position_size,
             "total_invested": position_size * signal.entry_price,
             "safety_orders_filled": 0,
+            "bars_held": 0,
             "entry_time": datetime.now(timezone.utc),
             "current_price": signal.entry_price,
         }
@@ -203,6 +213,7 @@ class DCAAdapter(BaseStrategy):
 
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
+            pos["bars_held"] = pos.get("bars_held", 0) + 1
 
             # Check take profit (uses stored TP; updated when safety orders average down)
             if current_price >= pos["take_profit"]:
@@ -214,18 +225,33 @@ class DCAAdapter(BaseStrategy):
                 exits.append((pos_id, ExitReason.STOP_LOSS))
                 continue
 
+            # Hard stop loss on full DCA position (issue #377 P0)
+            if self._hard_stop_loss_pct is not None:
+                loss_pct = (pos["avg_price"] - current_price) / pos["avg_price"]
+                if loss_pct >= self._hard_stop_loss_pct:
+                    exits.append((pos_id, ExitReason.STOP_LOSS))
+                    continue
+
+            # Max holding bars — force exit after N bars (issue #377 P0)
+            if self._max_holding_bars is not None and pos["bars_held"] >= self._max_holding_bars:
+                exits.append((pos_id, ExitReason.MANUAL))
+                continue
+
             # Check safety order triggers (DCA averaging down)
             safety_filled = pos["safety_orders_filled"]
             if safety_filled < self._max_safety_orders:
                 next_level_drop = self._safety_step_pct * (safety_filled + 1)
                 trigger_price = pos["entry_price"] * (Decimal("1") - next_level_drop)
                 if current_price <= trigger_price:
-                    # Fill safety order: average down
+                    # Fill safety order: size grows by martingale_multiplier
+                    safety_size = self._safety_order_size * (
+                        self._martingale_multiplier ** safety_filled
+                    )
                     old_total = pos["total_invested"]
-                    safety_invest = self._safety_order_size * current_price
+                    safety_invest = safety_size * current_price
                     new_total = old_total + safety_invest
                     old_qty = pos["size"]
-                    new_qty = old_qty + self._safety_order_size
+                    new_qty = old_qty + safety_size
                     pos["size"] = new_qty
                     pos["total_invested"] = new_total
                     pos["avg_price"] = new_total / new_qty if new_qty > 0 else pos["avg_price"]

@@ -611,20 +611,33 @@ def _cfg_from_backtest_yaml(
     max_daily_loss_pct = float(risk.get("max_daily_loss_pct", 0.06))
     min_order_size = Decimal(str(risk.get("min_order_size", 5)))
 
-    num_levels = int(grid_cfg.get("num_levels", 6))
+    num_levels = int(grid_cfg.get("num_levels", 10))
     amount_per_grid = (_ib * Decimal(str(max_pos_pct)) / Decimal(str(num_levels))).quantize(Decimal("0.01"))
-    grid_params = {
+    _grid_params: dict = {
         "num_levels": num_levels,
-        "profit_per_grid": Decimal(str(grid_cfg.get("profit_per_grid", 0.012))),
+        "profit_per_grid": Decimal(str(grid_cfg.get("profit_per_grid", 0.008))),
         "amount_per_grid": amount_per_grid,
-    } if grid_cfg.get("enabled", True) else {}
+    }
+    if "grid_range_pct" in grid_cfg:
+        _grid_params["grid_range_pct"] = Decimal(str(grid_cfg["grid_range_pct"]))
+    if "recenter_cooldown_bars" in grid_cfg:
+        _grid_params["recenter_cooldown_bars"] = int(grid_cfg["recenter_cooldown_bars"])
+    grid_params = _grid_params if grid_cfg.get("enabled", True) else {}
 
-    dca_params = {
-        "price_deviation_pct": Decimal(str(dca_cfg.get("trigger_pct", 0.04))),
-        "max_safety_orders": int(dca_cfg.get("max_steps", 4)),
-        "take_profit_pct": Decimal(str(dca_cfg.get("take_profit_pct", 0.08))),
+    _dca_params: dict = {
+        "price_deviation_pct": Decimal(str(dca_cfg.get("trigger_pct", 0.03))),
+        "max_safety_orders": int(dca_cfg.get("max_steps", 3)),
+        "take_profit_pct": Decimal(str(dca_cfg.get("take_profit_pct", 0.06))),
         "safety_order_size": Decimal(str(dca_cfg.get("safety_order_size", 50))),
-    } if dca_cfg.get("enabled", True) else {}
+        "martingale_multiplier": Decimal(str(dca_cfg.get("martingale_multiplier", 1.3))),
+    }
+    if "hard_stop_loss_pct" in dca_cfg:
+        _dca_params["hard_stop_loss_pct"] = Decimal(str(dca_cfg["hard_stop_loss_pct"])) / 100
+    if "max_holding_bars" in dca_cfg:
+        _dca_params["max_holding_bars"] = int(dca_cfg["max_holding_bars"])
+    if "trend_filter_adx" in dca_cfg:
+        _dca_params["trend_filter_adx"] = float(dca_cfg["trend_filter_adx"])
+    dca_params = _dca_params if dca_cfg.get("enabled", True) else {}
 
     tf_params = {
         "ema_fast_period": int(tf_cfg.get("ema_fast_period", 20)),
@@ -633,6 +646,9 @@ def _cfg_from_backtest_yaml(
         "rsi_period": int(tf_cfg.get("rsi_period", 14)),
         "risk_per_trade_pct": float(tf_cfg.get("risk_per_trade_pct", 0.01)),
         "max_positions": int(tf_cfg.get("max_positions", 2)),
+        "require_volume_confirmation": bool(tf_cfg.get("require_volume_confirmation", False)),
+        "tp_multiplier_sideways": float(tf_cfg.get("tp_atr_multiplier_sideways", 1.5)),
+        "tp_multiplier_strong": float(tf_cfg.get("tp_atr_multiplier_strong", 4.0)),
     } if tf_cfg.get("enabled", True) else {}
 
     smc_params = {

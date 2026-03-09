@@ -607,3 +607,206 @@ class TestCrossAdapterConsistency:
             assert (
                 adapter.get_performance().total_trades == 1
             ), f"{adapter.get_strategy_name()} failed performance tracking"
+
+
+# ===========================================================================
+# P0.1 — force_close_all() unit tests (issue #377)
+# ===========================================================================
+
+
+class TestForceCloseAllSMC:
+    """force_close_all() on SMCStrategyAdapter closes all positions and clears state."""
+
+    def _make_signal(self, direction: SignalDirection = SignalDirection.LONG) -> BaseSignal:
+        return BaseSignal(
+            direction=direction,
+            entry_price=Decimal("45000"),
+            stop_loss=Decimal("44500"),
+            take_profit=Decimal("46000"),
+            confidence=0.8,
+            timestamp=datetime.now(timezone.utc),
+            strategy_type="smc",
+        )
+
+    def test_force_close_all_returns_all_positions(self):
+        """force_close_all() must return one tuple per open position."""
+        adapter = SMCStrategyAdapter()
+        adapter.open_position(self._make_signal(), Decimal("100"))
+        adapter.open_position(self._make_signal(), Decimal("50"))
+
+        result = adapter.force_close_all()
+
+        assert len(result) == 2
+        for pos_id, reason in result:
+            assert isinstance(pos_id, str)
+            assert reason == ExitReason.MANUAL
+
+    def test_force_close_all_clears_active_positions(self):
+        """After force_close_all(), get_active_positions() returns empty list."""
+        adapter = SMCStrategyAdapter()
+        adapter.open_position(self._make_signal(), Decimal("100"))
+        adapter.open_position(self._make_signal(SignalDirection.SHORT), Decimal("80"))
+
+        adapter.force_close_all()
+
+        assert adapter.get_active_positions() == []
+
+    def test_force_close_all_records_closed_trades(self):
+        """Positions closed by force_close_all() appear in performance stats."""
+        adapter = SMCStrategyAdapter()
+        adapter.open_position(self._make_signal(), Decimal("100"))
+
+        adapter.force_close_all()
+
+        perf = adapter.get_performance()
+        assert perf.total_trades == 1
+
+    def test_force_close_all_empty_adapter_is_noop(self):
+        """force_close_all() on adapter with no positions returns empty list."""
+        adapter = SMCStrategyAdapter()
+        result = adapter.force_close_all()
+        assert result == []
+
+    def test_force_close_all_idempotent(self):
+        """Calling force_close_all() twice must not raise and second call returns []."""
+        adapter = SMCStrategyAdapter()
+        adapter.open_position(self._make_signal(), Decimal("100"))
+
+        first = adapter.force_close_all()
+        second = adapter.force_close_all()
+
+        assert len(first) == 1
+        assert second == []
+
+
+class TestForceCloseAllTrendFollower:
+    """force_close_all() on TrendFollowerAdapter closes positions and clears state."""
+
+    def test_force_close_all_empty_returns_empty(self):
+        """No positions → force_close_all() returns []."""
+        adapter = TrendFollowerAdapter()
+        assert adapter.force_close_all() == []
+
+    def test_force_close_all_clears_active_positions(self):
+        """After force_close_all(), get_active_positions() is empty."""
+        from datetime import datetime as _dt
+
+        import pandas as pd
+
+        from bot.strategies.trend_follower.entry_logic import EntryReason, EntrySignal, SignalType
+        from bot.strategies.trend_follower.market_analyzer import (
+            MarketConditions,
+            MarketPhase,
+            TrendStrength,
+        )
+        from bot.strategies.trend_follower.position_manager import (
+            Position,
+            PositionLevels,
+            PositionStatus,
+        )
+
+        adapter = TrendFollowerAdapter()
+        # Directly inject a position via the underlying strategy's position_manager
+        # to avoid the full signal-generation machinery
+        cond = MarketConditions(
+            phase=MarketPhase.BULLISH_TREND,
+            trend_strength=TrendStrength.STRONG,
+            ema_fast=Decimal("45100"),
+            ema_slow=Decimal("44900"),
+            ema_divergence_pct=Decimal("0.004"),
+            atr=Decimal("500"),
+            atr_pct=Decimal("0.011"),
+            rsi=Decimal("60"),
+            current_price=Decimal("45000"),
+            is_in_range=False,
+            range_high=None,
+            range_low=None,
+            timestamp=pd.Timestamp("2024-01-01"),
+        )
+        entry_signal = EntrySignal(
+            signal_type=SignalType.LONG,
+            entry_price=Decimal("45000"),
+            confidence=Decimal("0.8"),
+            entry_reason=EntryReason.TREND_PULLBACK_TO_EMA,
+            market_conditions=cond,
+            volume_confirmed=True,
+            timestamp=pd.Timestamp("2024-01-01"),
+        )
+        levels = PositionLevels(
+            entry_price=Decimal("45000"),
+            stop_loss=Decimal("44500"),
+            take_profit=Decimal("46000"),
+        )
+        pos = Position(
+            signal_type=SignalType.LONG,
+            entry_price=Decimal("45000"),
+            entry_time=_dt.now(),
+            size=Decimal("0.1"),
+            levels=levels,
+            status=PositionStatus.OPEN,
+            market_conditions=cond,
+            entry_signal=entry_signal,
+        )
+        adapter._strategy.position_manager.active_positions["test-pos-1"] = pos
+
+        assert len(adapter.get_active_positions()) == 1
+
+        result = adapter.force_close_all()
+
+        assert len(result) == 1
+        assert result[0][0] == "test-pos-1"
+        assert result[0][1].value == "manual"
+        assert adapter.get_active_positions() == []
+
+
+class TestRouterDeactivationTriggersClosure:
+    """Integration: router deactivation event triggers force_close_all() on the strategy."""
+
+    def test_deactivated_strategy_positions_closed(self):
+        """When router signals deactivation, force_close_all() empties the position list."""
+        adapter = SMCStrategyAdapter()
+
+        # Open two positions
+        signal = BaseSignal(
+            direction=SignalDirection.LONG,
+            entry_price=Decimal("30000"),
+            stop_loss=Decimal("29500"),
+            take_profit=Decimal("31000"),
+            confidence=0.75,
+            timestamp=datetime.now(timezone.utc),
+            strategy_type="smc",
+        )
+        adapter.open_position(signal, Decimal("100"))
+        adapter.open_position(signal, Decimal("50"))
+        assert len(adapter.get_active_positions()) == 2
+
+        # Simulate router deactivation: caller calls force_close_all()
+        closed = adapter.force_close_all()
+
+        # Verify: all positions returned and internal state is clear
+        assert len(closed) == 2
+        assert all(reason == ExitReason.MANUAL for _, reason in closed)
+        assert adapter.get_active_positions() == []
+
+    def test_force_close_all_prevents_daily_loss_limit_accumulation(self):
+        """Closed positions don't accumulate as unrealized losses."""
+        adapter = SMCStrategyAdapter()
+
+        # Open a losing position (current_price will be below entry when checked)
+        signal = BaseSignal(
+            direction=SignalDirection.LONG,
+            entry_price=Decimal("50000"),
+            stop_loss=Decimal("49000"),
+            take_profit=Decimal("51000"),
+            confidence=0.7,
+            timestamp=datetime.now(timezone.utc),
+            strategy_type="smc",
+        )
+        adapter.open_position(signal, Decimal("200"))
+
+        # Force close before TP/SL triggers
+        closed = adapter.force_close_all()
+        assert len(closed) == 1
+
+        # No active positions means no ongoing unrealized loss accumulation
+        assert adapter.get_active_positions() == []

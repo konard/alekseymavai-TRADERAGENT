@@ -241,9 +241,22 @@ class TrendFollowerAdapter(BaseStrategy):
         return exits
 
     def force_close_all(self) -> list[tuple[str, BaseExitReason]]:
-        """Force-close all open positions (called when router deactivates this strategy)."""
+        """Force-close all open positions (called when router deactivates this strategy).
+
+        Closes each position in the underlying strategy and returns the list of
+        (position_id, ExitReason.MANUAL) tuples so callers can settle P&L.
+        After this call, get_active_positions() returns an empty list.
+        """
         position_ids = list(self._strategy.position_manager.active_positions.keys())
-        return [(pos_id, BaseExitReason.MANUAL) for pos_id in position_ids]
+        closed: list[tuple[str, BaseExitReason]] = []
+        for pos_id in position_ids:
+            pos = self._strategy.position_manager.active_positions.get(pos_id)
+            exit_price = pos.entry_price if pos is not None else Decimal("0")
+            self._strategy.close_position(pos_id, TFExitReason.MANUAL, exit_price)
+            closed.append((pos_id, BaseExitReason.MANUAL))
+        if closed:
+            logger.info("tf_force_close_all", count=len(closed))
+        return closed
 
     def close_position(
         self, position_id: str, exit_reason: BaseExitReason, exit_price: Decimal

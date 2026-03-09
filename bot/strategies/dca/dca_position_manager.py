@@ -188,8 +188,8 @@ class DCAOrderConfig:
     base_order_volume: Decimal = Decimal("100")  # Quote currency (e.g., USDT)
 
     # Safety orders
-    max_safety_orders: int = 5
-    volume_multiplier: Decimal = Decimal("1.5")  # Each SO is 1.5x the previous
+    max_safety_orders: int = 3  # 3 safety orders (reduced from 5 to limit martingale exposure)
+    volume_multiplier: Decimal = Decimal("1.3")  # Each SO is 1.3x the previous (was 1.5)
     price_step_pct: Decimal = Decimal("2.0")  # % drop between safety orders
 
     # Take profit
