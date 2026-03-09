@@ -182,17 +182,25 @@ class TestStrategySelectorSync:
         result = _new_selector().select(analysis)
         assert result.strategies_to_start == []
 
-    def test_hybrid_recommendation_uses_hybrid_weights(self) -> None:
-        """HYBRID recommendation → hybrid_weights from YAML (dca + grid + tf)."""
+    def test_hybrid_recommendation_low_adx(self) -> None:
+        """HYBRID + ADX ≤ 25 → Grid primary (bull_trend_hybrid_grid rule)."""
         analysis = _make_analysis(
             MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID, confluence_score=0.9
         )
-        old_result = _old_selector().select(analysis)
+        # adx=20 (default) → adx_high=False → grid-primary rule
         new_result = _new_selector().select(analysis)
-
-        old_types = {w.strategy_type for w in old_result.strategies_to_start}
         new_types = {w.strategy_type for w in new_result.strategies_to_start}
-        assert old_types == new_types
+        assert new_types == {"grid", "trend_follower", "smc"}
+
+    def test_hybrid_recommendation_high_adx(self) -> None:
+        """HYBRID + ADX > 25 → DCA primary (bull_trend_hybrid_dca rule)."""
+        analysis = _make_analysis(
+            MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID, confluence_score=0.9
+        )
+        analysis.adx = 30.0  # triggers adx_high=True
+        new_result = _new_selector().select(analysis)
+        new_types = {w.strategy_type for w in new_result.strategies_to_start}
+        assert new_types == {"dca", "trend_follower", "smc"}
 
     def test_new_selector_uses_routing_config(self) -> None:
         """StrategySelector created with routing_config stores the RoutingConfig."""
@@ -260,10 +268,18 @@ class TestWeightsPreserved:
         dca = next(c for c in configs if c.name == "dca")
         assert dca.params.get("weight") == pytest.approx(1.0)
 
-    def test_hybrid_weights_match_hardcoded(self) -> None:
+    def test_hybrid_grid_weights(self) -> None:
+        """bull_trend + confluence_high (no adx_high) → Grid-primary rule."""
         cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
-        # Hybrid rule is the bull_trend rule with confluence_high=True
         yaml_configs = cfg.get_strategies({"market_regime": "bull_trend", "confluence_high": True})
         yaml_weights = {sc.name: sc.params.get("weight") for sc in yaml_configs}
-        hardcoded = {w.strategy_type: w.weight for w in HYBRID_STRATEGY_WEIGHTS}
-        assert yaml_weights == pytest.approx(hardcoded)
+        assert yaml_weights == pytest.approx({"grid": 0.5, "trend_follower": 0.3, "smc": 0.2})
+
+    def test_hybrid_dca_weights(self) -> None:
+        """bull_trend + confluence_high + adx_high → DCA-primary rule."""
+        cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
+        yaml_configs = cfg.get_strategies(
+            {"market_regime": "bull_trend", "confluence_high": True, "adx_high": True}
+        )
+        yaml_weights = {sc.name: sc.params.get("weight") for sc in yaml_configs}
+        assert yaml_weights == pytest.approx({"dca": 0.5, "trend_follower": 0.3, "smc": 0.2})

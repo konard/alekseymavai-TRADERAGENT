@@ -10,6 +10,7 @@
 #   market_regime: MarketRegime enum value (e.g. "bull_trend", "bear_trend")
 #   volatility_regime: "low" | "high"  (based on atr_pct threshold of 1%)
 #   confluence_high: true | false       (confluence_score >= 0.7)
+#   adx_high: true | false             (adx > 25.0, mirrors HybridCoordinator)
 #
 # Supported strategy names: grid, dca, trend_follower, smc
 #
@@ -18,21 +19,41 @@
 rules:
   # ── Trend regimes ─────────────────────────────────────────────────────────
 
-  # BULL_TREND with high confluence → hybrid (grid + dca + trend_follower)
-  - name: bull_trend_hybrid
+  # BULL_TREND + high confluence + ADX > 25 → DCA primary (mirrors HybridCoordinator)
+  - name: bull_trend_hybrid_dca
     conditions:
       market_regime: bull_trend
       confluence_high: true
+      adx_high: true
     strategies:
       - name: dca
         params:
           weight: 0.5
           priority: 1
-      - name: grid
+      - name: trend_follower
         params:
           weight: 0.3
           priority: 2
+      - name: smc
+        params:
+          weight: 0.2
+          priority: 3
+
+  # BULL_TREND + high confluence + ADX ≤ 25 → Grid primary (mirrors HybridCoordinator)
+  - name: bull_trend_hybrid_grid
+    conditions:
+      market_regime: bull_trend
+      confluence_high: true
+    strategies:
+      - name: grid
+        params:
+          weight: 0.5
+          priority: 1
       - name: trend_follower
+        params:
+          weight: 0.3
+          priority: 2
+      - name: smc
         params:
           weight: 0.2
           priority: 3

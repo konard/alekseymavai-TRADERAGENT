@@ -861,12 +861,16 @@ class StrategySelector:
         Keys produced:
         - ``market_regime``: regime value string (e.g. ``"bull_trend"``)
         - ``confluence_high``: ``True`` when ``confluence_score >= 0.7`` (HYBRID signal)
+        - ``adx_high``: ``True`` when ``adx > 25.0`` (mirrors HybridCoordinator)
         """
         conditions: dict[str, Any] = {"market_regime": regime.value}
         if recommended == RecommendedStrategy.HYBRID or (
             analysis is not None and analysis.confluence_score >= 0.7
         ):
             conditions["confluence_high"] = True
+        # ADX-based Grid/DCA coordination — mirrors HybridCoordinator.evaluate()
+        if analysis is not None and analysis.adx is not None and analysis.adx > 25.0:
+            conditions["adx_high"] = True
         return conditions
 
     def _get_current_weights(self) -> list[StrategyWeight]:

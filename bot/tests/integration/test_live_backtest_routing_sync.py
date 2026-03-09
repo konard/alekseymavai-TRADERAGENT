@@ -267,14 +267,43 @@ class TestCriticalRegimeSync:
             frozenset({"trend_follower", "dca"}),
         )
 
-    def test_bull_trend_hybrid_recommendation(self, routing_cfg: RoutingConfig) -> None:
-        """BULL_TREND + HYBRID → dca + grid + trend_follower (hybrid weights)."""
+    def test_bull_trend_hybrid_low_adx(self, routing_cfg: RoutingConfig) -> None:
+        """BULL_TREND + HYBRID + ADX ≤ 25 → Grid primary (mirrors HybridCoordinator)."""
+        # ADX=20 (default in _make_analysis) → adx_high=False → bull_trend_hybrid_grid rule
         self._check_sync(
             routing_cfg,
             MarketRegime.BULL_TREND,
             RecommendedStrategy.HYBRID,
-            frozenset({"dca", "grid", "trend_follower"}),
+            frozenset({"grid", "trend_follower", "smc"}),
         )
+
+    def test_bull_trend_hybrid_high_adx(self, routing_cfg: RoutingConfig) -> None:
+        """BULL_TREND + HYBRID + ADX > 25 → DCA primary (mirrors HybridCoordinator)."""
+        analysis = _make_analysis(
+            MarketRegime.BULL_TREND,
+            RecommendedStrategy.HYBRID,
+            confluence_score=0.8,
+        )
+        # Override ADX to trigger adx_high condition
+        analysis.adx = 30.0
+
+        selector = StrategySelector(
+            registry=_make_registry(),
+            require_smc_confirmation=False,
+            transition_cooldown_seconds=0.0,
+            min_regime_duration_seconds=0.0,
+            routing_config=routing_cfg,
+        )
+        router = StrategyRouter(routing_config=routing_cfg, cooldown_bars=0)
+
+        live_types = _live_target_types(selector, analysis)
+        backtest_types = _backtest_target_types(router, analysis)
+
+        assert live_types == backtest_types
+        expected = frozenset({"dca", "trend_follower", "smc"})
+        assert (
+            live_types == expected
+        ), f"Expected {sorted(expected)}, got live={sorted(live_types)}"
 
     def test_bear_trend_dca(self, routing_cfg: RoutingConfig) -> None:
         self._check_sync(

@@ -241,10 +241,15 @@ class StrategyRouter:
         - ``market_regime``:   regime value string (e.g. ``"bull_trend"``)
         - ``confluence_high``: ``True`` when ``confluence_score >= 0.7`` or
                                ``recommended == HYBRID``
+        - ``adx_high``:        ``True`` when ``adx > 25.0`` (mirrors
+                               HybridCoordinator.adx_dca_threshold)
         """
         conditions: dict[str, Any] = {"market_regime": regime.regime.value}
         if regime.recommended_strategy == RecommendedStrategy.HYBRID or (
             regime.confluence_score >= 0.7
         ):
             conditions["confluence_high"] = True
+        # ADX-based Grid/DCA coordination — mirrors HybridCoordinator.evaluate()
+        if regime.adx is not None and regime.adx > 25.0:
+            conditions["adx_high"] = True
         return conditions

@@ -36,6 +36,7 @@ from bot.orchestrator.market_regime import (
     RegimeAnalysis,
 )
 from bot.orchestrator.routing_config import RoutingConfig
+from bot.orchestrator.strategy_conductor import StrategyConductor
 from bot.strategies.base import BaseStrategy, ExitReason, SignalDirection
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.market_simulator import MarketSimulator
@@ -105,6 +106,11 @@ class OrchestratorBacktestConfig:
     # truth), mirroring the live StrategySelector.  When None, a default RoutingConfig is
     # loaded from "configs/strategy_routing.yaml" at engine startup.
     routing_config: RoutingConfig | None = None
+
+    # StrategyConductor: when enabled, pushes StrategyDirective (capital allocation,
+    # price range, key levels, restrictions) to active strategies on regime change,
+    # mirroring the live bot's BotOrchestrator → StrategyConductor integration.
+    enable_strategy_conductor: bool = True
 
     # Force-close behaviour on strategy deactivation.
     # Live bot default: close_positions_on_switch=False (keep positions, only cancel orders).
@@ -502,6 +508,18 @@ class BacktestOrchestratorEngine:
             cooldown_bars=config.router_cooldown_bars,
         )
 
+        # Strategy conductor — pushes directives (capital allocation, price range,
+        # restrictions) to strategies on regime change, mirroring live bot behaviour.
+        conductor: StrategyConductor | None = None
+        if config.enable_strategy_conductor:
+            # StrategyConductor needs a StrategyRegistry but we bypass it by
+            # passing strategy_instances directly to on_regime_change().
+            # Create a minimal registry that won't be used.
+            from bot.orchestrator.strategy_registry import StrategyRegistry
+
+            _registry = StrategyRegistry(max_strategies=len(strategies))
+            conductor = StrategyConductor(registry=_registry)
+
         # Risk manager
         risk_manager: RiskManager | None = None
         if config.enable_risk_manager:
@@ -572,6 +590,13 @@ class BacktestOrchestratorEngine:
                 current_regime = regime_detector.analyze(df_h1)
                 regime_key = current_regime.regime.value
                 regime_routing_stats[regime_key] = regime_routing_stats.get(regime_key, 0) + 1
+
+                # 1b. Push StrategyConductor directives on regime change
+                # Mirrors live: BotOrchestrator → StrategyConductor.on_regime_change()
+                if conductor is not None:
+                    conductor.on_regime_change(
+                        current_regime, strategy_instances=strategies
+                    )
 
             # 2. Strategy routing — mirrors live HybridCoordinator behaviour:
             # active strategies → weight 1.0 (trade normally)
