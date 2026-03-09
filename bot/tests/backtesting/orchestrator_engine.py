@@ -128,13 +128,16 @@ class OrchestratorBacktestConfig:
     # RiskManager.update_balance(), so set generously to avoid false halts
     # from normal intraday price oscillations.
     enable_risk_manager: bool = True
-    max_position_size_pct: float = 0.25  # 25% per trade (TradingCoreConfig default)
+    # max_position_size_pct: per-strategy cumulative cap (RiskManager receives per-strategy
+    # position totals, so this is the max exposure ONE strategy can hold at once).
+    max_position_size_pct: float = 0.25  # 25% of portfolio per strategy
     max_daily_loss_pct: float = 0.25  # 25% — generous to avoid false halts in backtest
     portfolio_stop_loss_pct: float = 0.15
 
-    # Position sizing (fraction of balance per signal)
+    # Position sizing (fraction of balance per INDIVIDUAL signal).
+    # Must be smaller than max_position_size_pct to allow multiple concurrent positions.
     risk_per_trade: Decimal = Decimal("0.02")
-    max_position_pct: Decimal = Decimal("0.25")
+    max_position_pct: Decimal = Decimal("0.05")  # 5% per trade → up to 5 positions per strategy
 
     # Exchange fee simulation — aligned with TradingCoreConfig defaults (Bybit VIP0)
     maker_fee: Decimal = Decimal("0.0002")  # 0.02 % (was 0.1 % in old MarketSimulator default)
@@ -388,8 +391,10 @@ class OrchestratorBacktestConfig:
             smc_params=smc_params,
             risk_per_trade=risk_per_trade,
             max_position_pct=max_position_pct,
-            # P0.2: sync RiskManager limit to match actual position sizing fraction
-            max_position_size_pct=float(max_position_pct),
+            # P0.2: RiskManager per-strategy cap should allow multiple concurrent
+            # positions.  Default 0.25 (25%) allows 5 × 5% trades per strategy.
+            # Only override if the YAML explicitly sets max_position_size.
+            max_position_size_pct=min(float(max_position_pct) * 5, 0.80),
             max_daily_loss_pct=max_daily_loss_pct,
         )
 
