@@ -35,6 +35,7 @@ from bot.orchestrator.market_regime import (
     MarketRegimeDetector,
     RegimeAnalysis,
 )
+from bot.orchestrator.routing_config import RoutingConfig
 from bot.strategies.base import BaseStrategy, ExitReason, SignalDirection
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.market_simulator import MarketSimulator
@@ -100,6 +101,10 @@ class OrchestratorBacktestConfig:
         2  # 600 sec cooldown / 300 sec per M5 bar = 2 bars (matches live bot)
     )
     regime_check_every_n: int = 12  # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
+    # RoutingConfig: when set, the router uses the YAML-based routing rules (single source of
+    # truth), mirroring the live StrategySelector.  When None, a default RoutingConfig is
+    # loaded from "configs/strategy_routing.yaml" at engine startup.
+    routing_config: RoutingConfig | None = None
 
     # Per-strategy parameters (passed to strategy factories)
     grid_params: dict[str, Any] = field(default_factory=dict)
@@ -470,8 +475,25 @@ class BacktestOrchestratorEngine:
         # Regime detector
         regime_detector = MarketRegimeDetector()
 
-        # Strategy router
+        # Strategy router — uses RoutingConfig as single source of truth to mirror
+        # the live StrategySelector.  Fall back to loading the default YAML when
+        # no explicit routing_config was supplied.
+        _routing_config = config.routing_config
+        if _routing_config is None:
+            import os
+
+            _default_yaml = os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "configs",
+                "strategy_routing.yaml",
+            )
+            _routing_config = RoutingConfig(_default_yaml)
+
         router = StrategyRouter(
+            routing_config=_routing_config,
             cooldown_bars=config.router_cooldown_bars,
         )
 

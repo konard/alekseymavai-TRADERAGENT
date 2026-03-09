@@ -2,382 +2,352 @@
 Unit tests for bot/orchestrator/routing_config.py
 
 Covers:
-- Loading the default YAML config
-- get_strategies() returns correct strategy lists for each regime
-- get_hybrid_weights() returns hybrid weights from config
-- FileNotFoundError when config file is missing
-- ValueError when YAML is malformed
-- Regime conditions matching (exact string and enum values)
-- Fallback when no rule matches
+- StrategyConfig dataclass creation
+- RoutingConfig loading from a valid YAML
+- get_strategies() first-match semantics
+- Condition matching logic (market_regime, volatility_regime, confluence_high)
+- Fallback (empty-conditions) rule
+- Error handling: file not found, invalid YAML, structural errors
 """
 
-from __future__ import annotations
-
+import os
 import textwrap
-from pathlib import Path
 
 import pytest
 
-from bot.orchestrator.market_regime import MarketRegime
 from bot.orchestrator.routing_config import RoutingConfig, StrategyConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+_MINIMAL_YAML = textwrap.dedent(
+    """\
+    rules:
+      - name: bull_trend
+        conditions:
+          market_regime: bull_trend
+        strategies:
+          - name: trend_follower
+            params:
+              weight: 0.7
+              priority: 1
+          - name: dca
+            params:
+              weight: 0.3
+              priority: 2
 
-def _make_config(tmp_path: Path, content: str) -> RoutingConfig:
-    """Write *content* to a temp YAML and return a RoutingConfig for it."""
-    p = tmp_path / "routing.yaml"
-    p.write_text(textwrap.dedent(content))
-    return RoutingConfig(p)
+      - name: fallback
+        conditions: {}
+        strategies:
+          - name: grid
+            params:
+              weight: 1.0
+              priority: 1
+    """
+)
+
+_MULTI_CONDITION_YAML = textwrap.dedent(
+    """\
+    rules:
+      - name: bull_trend_hybrid
+        conditions:
+          market_regime: bull_trend
+          confluence_high: true
+        strategies:
+          - name: dca
+            params:
+              weight: 0.5
+              priority: 1
+          - name: trend_follower
+            params:
+              weight: 0.5
+              priority: 2
+
+      - name: bull_trend_default
+        conditions:
+          market_regime: bull_trend
+        strategies:
+          - name: trend_follower
+            params:
+              weight: 0.7
+              priority: 1
+
+      - name: fallback
+        conditions: {}
+        strategies:
+          - name: grid
+            params:
+              weight: 1.0
+              priority: 1
+    """
+)
+
+
+def _write_tmp_yaml(
+    tmp_path: "os.PathLike[str]", content: str, filename: str = "routing.yaml"
+) -> str:
+    path = os.path.join(str(tmp_path), filename)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    return path
 
 
 # ---------------------------------------------------------------------------
-# StrategyConfig dataclass
+# StrategyConfig tests
 # ---------------------------------------------------------------------------
 
 
 class TestStrategyConfig:
-    def test_frozen(self) -> None:
-        sc = StrategyConfig(type="grid", weight=1.0, priority=1)
-        with pytest.raises((AttributeError, TypeError)):
-            sc.type = "dca"  # type: ignore[misc]
+    def test_creation_with_params(self) -> None:
+        sc = StrategyConfig(name="grid", params={"weight": 1.0, "priority": 1})
+        assert sc.name == "grid"
+        assert sc.params["weight"] == 1.0
+        assert sc.params["priority"] == 1
 
-    def test_fields(self) -> None:
-        sc = StrategyConfig(type="trend_follower", weight=0.7, priority=1)
-        assert sc.type == "trend_follower"
-        assert sc.weight == 0.7
-        assert sc.priority == 1
+    def test_creation_default_params(self) -> None:
+        sc = StrategyConfig(name="dca")
+        assert sc.name == "dca"
+        assert sc.params == {}
 
 
 # ---------------------------------------------------------------------------
-# Loading — default config file
+# RoutingConfig loading tests
 # ---------------------------------------------------------------------------
 
 
-class TestRoutingConfigLoad:
-    def test_loads_default_config(self) -> None:
-        """RoutingConfig() with no args should load the shipping YAML."""
-        cfg = RoutingConfig()
-        assert len(cfg.rules) >= 4  # at least the basic rules must be present
+class TestRoutingConfigLoading:
+    def test_load_valid_config(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        assert len(cfg.rules) == 2
 
-    def test_config_path_stored(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
-            rules: []
-            """,
-        )
-        assert cfg.config_path == tmp_path / "routing.yaml"
+    def test_rules_property_returns_copy(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        rules_a = cfg.rules
+        rules_b = cfg.rules
+        # Should be independent lists (mutations don't propagate)
+        assert rules_a is not rules_b
 
-    def test_file_not_found(self, tmp_path: Path) -> None:
-        with pytest.raises(FileNotFoundError, match="Strategy routing config not found"):
-            RoutingConfig(tmp_path / "nonexistent.yaml")
+    def test_file_not_found_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        missing = os.path.join(str(tmp_path), "nonexistent.yaml")
+        with pytest.raises(FileNotFoundError, match="nonexistent.yaml"):
+            RoutingConfig(missing)
 
-    def test_invalid_yaml(self, tmp_path: Path) -> None:
-        p = tmp_path / "bad.yaml"
-        p.write_text("key: [unclosed")
+    def test_invalid_yaml_raises_value_error(self, tmp_path: "os.PathLike[str]") -> None:
+        bad_yaml = "rules: [\n  - unclosed"
+        path = _write_tmp_yaml(tmp_path, bad_yaml)
         with pytest.raises(ValueError, match="Invalid YAML"):
-            RoutingConfig(p)
+            RoutingConfig(path)
 
-    def test_non_mapping_yaml(self, tmp_path: Path) -> None:
-        p = tmp_path / "list.yaml"
-        p.write_text("- item1\n- item2\n")
+    def test_non_mapping_root_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, "- just\n- a\n- list\n")
         with pytest.raises(ValueError, match="must be a YAML mapping"):
-            RoutingConfig(p)
+            RoutingConfig(path)
 
-    def test_missing_strategy_type_raises(self, tmp_path: Path) -> None:
-        cfg_text = """
-        version: "1.0"
-        rules:
-          - name: bad_rule
-            conditions:
-              market_regime: tight_range
-            strategies:
-              - weight: 1.0
-                priority: 1
-        """
-        with pytest.raises(ValueError, match="missing required key"):
-            _make_config(tmp_path, cfg_text)
+    def test_missing_rules_key_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, "something_else: []\n")
+        with pytest.raises(ValueError, match="'rules' list"):
+            RoutingConfig(path)
 
+    def test_rules_not_a_list_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, "rules: not_a_list\n")
+        with pytest.raises(ValueError, match="'rules' list"):
+            RoutingConfig(path)
 
-# ---------------------------------------------------------------------------
-# get_strategies — default config
-# ---------------------------------------------------------------------------
+    def test_rule_not_a_mapping_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, "rules:\n  - just_a_string\n")
+        with pytest.raises(ValueError, match="must be a mapping"):
+            RoutingConfig(path)
 
-
-class TestGetStrategiesDefaultConfig:
-    """Verify that the shipping strategy_routing.yaml yields correct results."""
-
-    def setup_method(self) -> None:
-        self.cfg = RoutingConfig()
-
-    def test_tight_range_returns_grid(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "tight_range"})
-        types = [s.type for s in result]
-        assert types == ["grid"]
-
-    def test_wide_range_returns_grid(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "wide_range"})
-        types = [s.type for s in result]
-        assert types == ["grid"]
-
-    def test_quiet_transition_returns_grid_weighted(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "quiet_transition"})
-        assert len(result) == 1
-        assert result[0].type == "grid"
-        assert result[0].weight == 0.7
-
-    def test_volatile_transition_returns_smc(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "volatile_transition"})
-        types = [s.type for s in result]
-        assert "smc" in types
-
-    def test_bull_trend_returns_tf_and_dca(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "bull_trend"})
-        types = [s.type for s in result]
-        assert "trend_follower" in types
-        assert "dca" in types
-
-    def test_bull_trend_tf_has_higher_priority_than_dca(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "bull_trend"})
-        pmap = {s.type: s.priority for s in result}
-        assert pmap["trend_follower"] < pmap["dca"]
-
-    def test_bear_trend_returns_dca_only(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "bear_trend"})
-        types = [s.type for s in result]
-        assert types == ["dca"]
-        assert result[0].weight == 1.0
-
-    def test_accumulation_returns_smc(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "accumulation"})
-        types = [s.type for s in result]
-        assert types == ["smc"]
-
-    def test_distribution_returns_smc(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "distribution"})
-        types = [s.type for s in result]
-        assert types == ["smc"]
-
-    def test_unknown_returns_empty(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "unknown"})
-        assert result == []
-
-    def test_no_match_returns_fallback_empty(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": "non_existent_regime"})
-        assert result == []
-
-
-# ---------------------------------------------------------------------------
-# get_strategies — enum values as conditions
-# ---------------------------------------------------------------------------
-
-
-class TestGetStrategiesEnumConditions:
-    """Passing MarketRegime enum values should work the same as strings."""
-
-    def setup_method(self) -> None:
-        self.cfg = RoutingConfig()
-
-    def test_bull_trend_enum(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": MarketRegime.BULL_TREND})
-        types = {s.type for s in result}
-        assert "trend_follower" in types
-        assert "dca" in types
-
-    def test_bear_trend_enum(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": MarketRegime.BEAR_TREND})
-        types = {s.type for s in result}
-        assert types == {"dca"}
-
-    def test_tight_range_enum(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": MarketRegime.TIGHT_RANGE})
-        assert result[0].type == "grid"
-
-    def test_accumulation_enum(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": MarketRegime.ACCUMULATION})
-        assert result[0].type == "smc"
-
-    def test_distribution_enum(self) -> None:
-        result = self.cfg.get_strategies({"market_regime": MarketRegime.DISTRIBUTION})
-        assert result[0].type == "smc"
-
-
-# ---------------------------------------------------------------------------
-# get_hybrid_weights
-# ---------------------------------------------------------------------------
-
-
-class TestGetHybridWeights:
-    def test_hybrid_weights_returned(self) -> None:
-        cfg = RoutingConfig()
-        weights = cfg.get_hybrid_weights()
-        assert len(weights) >= 1
-
-    def test_hybrid_contains_expected_types(self) -> None:
-        cfg = RoutingConfig()
-        weights = cfg.get_hybrid_weights()
-        types = {w.type for w in weights}
-        # Shipping config has dca, grid, trend_follower in hybrid mode
-        assert "dca" in types
-        assert "grid" in types
-        assert "trend_follower" in types
-
-    def test_hybrid_weights_sum_to_one(self) -> None:
-        cfg = RoutingConfig()
-        weights = cfg.get_hybrid_weights()
-        total = sum(w.weight for w in weights)
-        assert abs(total - 1.0) < 1e-9
-
-    def test_hybrid_returns_copy(self) -> None:
-        cfg = RoutingConfig()
-        w1 = cfg.get_hybrid_weights()
-        w2 = cfg.get_hybrid_weights()
-        assert w1 is not w2
-
-
-# ---------------------------------------------------------------------------
-# Custom YAML — rule ordering and fallback
-# ---------------------------------------------------------------------------
-
-
-class TestCustomConfig:
-    def test_first_rule_wins(self, tmp_path: Path) -> None:
-        """When multiple rules could match, the first one wins."""
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
+    def test_strategy_missing_name_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        bad = textwrap.dedent(
+            """\
             rules:
-              - name: rule_a
-                conditions:
-                  market_regime: test_regime
+              - name: bad_rule
+                conditions: {}
                 strategies:
-                  - type: grid
-                    weight: 1.0
-                    priority: 1
-              - name: rule_b
-                conditions:
-                  market_regime: test_regime
-                strategies:
-                  - type: dca
-                    weight: 1.0
-                    priority: 1
-            """,
+                  - weight: 1.0
+            """
         )
-        result = cfg.get_strategies({"market_regime": "test_regime"})
-        assert result[0].type == "grid"  # first rule
+        path = _write_tmp_yaml(tmp_path, bad)
+        with pytest.raises(ValueError, match="'name' must be a non-empty string"):
+            RoutingConfig(path)
 
-    def test_fallback_used_when_no_match(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
+    def test_strategy_params_not_mapping_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        bad = textwrap.dedent(
+            """\
             rules:
-              - name: grid_rule
-                conditions:
-                  market_regime: tight_range
+              - name: bad_rule
+                conditions: {}
                 strategies:
-                  - type: grid
-                    weight: 1.0
-                    priority: 1
-            fallback:
-              strategies:
-                - type: dca
-                  weight: 1.0
-                  priority: 1
-            """,
-        )
-        result = cfg.get_strategies({"market_regime": "bear_trend"})
-        assert result[0].type == "dca"
-
-    def test_empty_strategy_list_valid(self, tmp_path: Path) -> None:
-        cfg = _make_config(
-            tmp_path,
+                  - name: grid
+                    params: not_a_dict
             """
-            version: "1.0"
+        )
+        path = _write_tmp_yaml(tmp_path, bad)
+        with pytest.raises(ValueError, match="'params' must be a mapping"):
+            RoutingConfig(path)
+
+    def test_conditions_not_mapping_raises(self, tmp_path: "os.PathLike[str]") -> None:
+        bad = textwrap.dedent(
+            """\
             rules:
-              - name: empty
-                conditions:
-                  market_regime: unknown
+              - name: bad_rule
+                conditions: [list, not, dict]
                 strategies: []
-            """,
+            """
         )
+        path = _write_tmp_yaml(tmp_path, bad)
+        with pytest.raises(ValueError, match="'conditions' must be a mapping"):
+            RoutingConfig(path)
+
+
+# ---------------------------------------------------------------------------
+# get_strategies() — first-match semantics
+# ---------------------------------------------------------------------------
+
+
+class TestGetStrategies:
+    def test_bull_trend_returns_trend_follower_and_dca(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({"market_regime": "bull_trend"})
+        names = [s.name for s in result]
+        assert names == ["trend_follower", "dca"]
+
+    def test_params_are_passed_through(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({"market_regime": "bull_trend"})
+        tf = next(s for s in result if s.name == "trend_follower")
+        assert tf.params["weight"] == pytest.approx(0.7)
+        assert tf.params["priority"] == 1
+
+    def test_fallback_rule_when_no_match(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        # UNKNOWN regime doesn't match "bull_trend" rule → fallback
         result = cfg.get_strategies({"market_regime": "unknown"})
+        assert len(result) == 1
+        assert result[0].name == "grid"
+
+    def test_empty_context_hits_fallback(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MINIMAL_YAML)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({})
+        assert result[0].name == "grid"
+
+    def test_no_match_returns_empty_when_no_fallback(self, tmp_path: "os.PathLike[str]") -> None:
+        no_fallback = textwrap.dedent(
+            """\
+            rules:
+              - name: bull_trend
+                conditions:
+                  market_regime: bull_trend
+                strategies:
+                  - name: trend_follower
+                    params: {}
+            """
+        )
+        path = _write_tmp_yaml(tmp_path, no_fallback)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({"market_regime": "bear_trend"})
         assert result == []
 
-    def test_multi_condition_matching(self, tmp_path: Path) -> None:
-        """Rules with multiple conditions must ALL match."""
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
-            rules:
-              - name: specific
-                conditions:
-                  market_regime: bull_trend
-                  recommended_strategy: hybrid
-                strategies:
-                  - type: smc
-                    weight: 1.0
-                    priority: 1
-              - name: generic
-                conditions:
-                  market_regime: bull_trend
-                strategies:
-                  - type: dca
-                    weight: 1.0
-                    priority: 1
-            """,
-        )
-        # Both conditions present — specific rule matches
-        result_specific = cfg.get_strategies(
-            {"market_regime": "bull_trend", "recommended_strategy": "hybrid"}
-        )
-        assert result_specific[0].type == "smc"
 
-        # Only market_regime — specific rule does NOT match (missing recommended_strategy)
-        result_generic = cfg.get_strategies({"market_regime": "bull_trend"})
-        assert result_generic[0].type == "dca"
+# ---------------------------------------------------------------------------
+# Multi-condition (AND) matching
+# ---------------------------------------------------------------------------
 
-    def test_weight_and_priority_defaults(self, tmp_path: Path) -> None:
-        """weight and priority should default to 1.0 and 1 respectively."""
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
-            rules:
-              - name: minimal
-                conditions:
-                  market_regime: tight_range
-                strategies:
-                  - type: grid
-            """,
-        )
+
+class TestMultiConditionMatching:
+    def test_high_confluence_bull_trend_picks_hybrid_rule(
+        self, tmp_path: "os.PathLike[str]"
+    ) -> None:
+        path = _write_tmp_yaml(tmp_path, _MULTI_CONDITION_YAML)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({"market_regime": "bull_trend", "confluence_high": True})
+        names = [s.name for s in result]
+        assert "dca" in names
+        assert "trend_follower" in names
+        # hybrid rule has 2 strategies
+        assert len(result) == 2
+
+    def test_low_confluence_bull_trend_picks_default_rule(
+        self, tmp_path: "os.PathLike[str]"
+    ) -> None:
+        path = _write_tmp_yaml(tmp_path, _MULTI_CONDITION_YAML)
+        cfg = RoutingConfig(path)
+        result = cfg.get_strategies({"market_regime": "bull_trend", "confluence_high": False})
+        # only trend_follower in the default bull_trend rule
+        assert len(result) == 1
+        assert result[0].name == "trend_follower"
+
+    def test_condition_value_false_does_not_match_true(self, tmp_path: "os.PathLike[str]") -> None:
+        path = _write_tmp_yaml(tmp_path, _MULTI_CONDITION_YAML)
+        cfg = RoutingConfig(path)
+        # Missing confluence_high → doesn't satisfy the hybrid rule
+        result = cfg.get_strategies({"market_regime": "bull_trend"})
+        # Falls to bull_trend_default (no confluence_high condition)
+        assert len(result) == 1
+        assert result[0].name == "trend_follower"
+
+
+# ---------------------------------------------------------------------------
+# Production config smoke test
+# ---------------------------------------------------------------------------
+
+
+class TestProductionConfig:
+    """Verify that the shipped configs/strategy_routing.yaml is valid."""
+
+    _PROD_PATH = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "configs",
+        "strategy_routing.yaml",
+    )
+
+    def test_production_config_loads(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        # Issue DoD: at least 4 rules including BULL_TREND
+        assert len(cfg.rules) >= 4
+
+    def test_production_config_has_bull_trend_rule(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        result = cfg.get_strategies({"market_regime": "bull_trend"})
+        assert len(result) >= 1
+
+    def test_production_config_bull_trend_includes_trend_follower(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        result = cfg.get_strategies({"market_regime": "bull_trend"})
+        names = [s.name for s in result]
+        assert "trend_follower" in names
+
+    def test_production_config_bear_trend_returns_dca(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        result = cfg.get_strategies({"market_regime": "bear_trend"})
+        names = [s.name for s in result]
+        assert "dca" in names
+
+    def test_production_config_tight_range_returns_grid(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
         result = cfg.get_strategies({"market_regime": "tight_range"})
-        assert result[0].weight == 1.0
-        assert result[0].priority == 1
+        names = [s.name for s in result]
+        assert "grid" in names
 
-    def test_get_strategies_returns_copy(self, tmp_path: Path) -> None:
-        """Mutating the returned list should not affect internal state."""
-        cfg = _make_config(
-            tmp_path,
-            """
-            version: "1.0"
-            rules:
-              - name: r
-                conditions:
-                  market_regime: tight_range
-                strategies:
-                  - type: grid
-                    weight: 1.0
-                    priority: 1
-            """,
-        )
-        r1 = cfg.get_strategies({"market_regime": "tight_range"})
-        r1.clear()
-        r2 = cfg.get_strategies({"market_regime": "tight_range"})
-        assert len(r2) == 1
+    def test_production_config_fallback_returns_strategies(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        result = cfg.get_strategies({"market_regime": "unknown"})
+        assert len(result) >= 1
+
+    def test_production_config_hybrid_bull_trend_high_confluence(self) -> None:
+        cfg = RoutingConfig(self._PROD_PATH)
+        result = cfg.get_strategies({"market_regime": "bull_trend", "confluence_high": True})
+        names = [s.name for s in result]
+        # Hybrid rule should activate multiple strategies
+        assert len(names) >= 2

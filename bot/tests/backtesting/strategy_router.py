@@ -1,25 +1,21 @@
 """
-StrategyRouter — unified strategy routing for backtests (issue #368 / #371).
+StrategyRouter — mirrors StrategySelector routing logic for backtests.
 
-Uses the same ``RoutingConfig`` (``configs/strategy_routing.yaml``) as the
-live ``StrategySelector``, so Live and Backtest routing decisions are always
-derived from the same single source of truth.
+Uses RoutingConfig as the single source of truth for strategy selection rules,
+replacing the hard-coded _REGIME_TO_STRATEGIES dict that previously diverged from
+the live-bot's StrategySelector.
 
-Key behaviour:
-- ``on_bar()`` maps ``RegimeAnalysis.regime`` → active strategy set via
-  ``RoutingConfig.get_strategies()``.
-- HYBRID recommendation is handled via ``RoutingConfig.get_hybrid_weights()``.
-- REDUCE_EXPOSURE / HOLD are honoured the same way as the live selector.
-- A bar-based cooldown prevents rapid strategy oscillation (mirrors the
-  live bot's ``transition_cooldown_seconds`` gate).
+The router produces a set of active strategy *names* (str) per bar, with a
+cooldown guard to prevent rapid oscillation — exactly as the live bot does.
 
 Usage::
 
-    router = StrategyRouter()                        # default routing YAML
-    router = StrategyRouter(routing_config=my_cfg)   # custom config
+    from bot.orchestrator.routing_config import RoutingConfig
 
+    cfg = RoutingConfig("configs/strategy_routing.yaml")
+    router = StrategyRouter(routing_config=cfg, cooldown_bars=2)
     event = router.on_bar(regime_analysis, current_bar=i)
-    active = event.active_strategies   # set[str]
+    active_strategies = event.active_strategies
 """
 
 from __future__ import annotations
@@ -32,7 +28,7 @@ from bot.orchestrator.market_regime import (
     RecommendedStrategy,
     RegimeAnalysis,
 )
-from bot.orchestrator.routing_config import RoutingConfig
+from bot.orchestrator.routing_config import RoutingConfig, StrategyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -53,27 +49,37 @@ class StrategyRouter:
     """
     Stateful strategy router for backtesting.
 
-    Uses ``RoutingConfig`` (loaded from ``configs/strategy_routing.yaml``) so
-    that routing decisions are identical to those made by the live
-    ``StrategySelector``.
+    Uses :class:`~bot.orchestrator.routing_config.RoutingConfig` as the single
+    source of truth for strategy selection rules, mirroring the production
+    ``StrategySelector`` (issue #371).
+
+    The same ``_build_routing_conditions`` logic is used as in
+    ``StrategySelector._build_routing_conditions()`` so both live and backtest
+    produce identical strategy sets for any given ``RegimeAnalysis``.
 
     Args:
-        cooldown_bars:    Minimum bars between two strategy switches.
-        routing_config:   Explicit RoutingConfig instance.  When *None* the
-                          default ``configs/strategy_routing.yaml`` is loaded.
+        routing_config:        RoutingConfig instance loaded from
+                               ``configs/strategy_routing.yaml``.
+        cooldown_bars:         Minimum number of bars that must pass between two
+                               strategy switches (equivalent to cooldown_seconds=600
+                               at 10 bars/minute → 2 bars for M5 data).
+        initial_strategies:    Override the bootstrap set (used before the first
+                               regime analysis arrives). Defaults to ``{"grid", "dca"}``.
     """
 
     def __init__(
         self,
-        cooldown_bars: int = 60,
-        routing_config: RoutingConfig | None = None,
+        routing_config: RoutingConfig,
+        cooldown_bars: int = 2,
+        initial_strategies: set[str] | None = None,
     ) -> None:
+        self._routing_config = routing_config
         self.cooldown_bars = cooldown_bars
-        self._routing_config: RoutingConfig = (
-            routing_config if routing_config is not None else RoutingConfig()
-        )
 
-        self._active_strategies: set[str] = set()  # empty until first regime is known
+        self._initial_strategies: set[str] = (
+            initial_strategies.copy() if initial_strategies is not None else {"grid", "dca"}
+        )
+        self._active_strategies: set[str] = self._initial_strategies.copy()
         self._last_switch_bar: int = -cooldown_bars  # allow switch on bar 0
         self._switch_history: list[dict[str, Any]] = []
 
@@ -97,6 +103,7 @@ class StrategyRouter:
             StrategyRouterEvent with full routing state.
         """
         if regime is None:
+            # No regime data yet — keep everything active (bootstrap)
             return StrategyRouterEvent(
                 active_strategies=self._active_strategies.copy(),
                 activated=set(),
@@ -120,9 +127,11 @@ class StrategyRouter:
                 cooldown_remaining = self.cooldown_bars - bars_since_switch
                 logger.debug(
                     "strategy_switch_blocked_by_cooldown",
-                    cooldown_remaining=cooldown_remaining,
-                    current=sorted(prev),
-                    wanted=sorted(target),
+                    extra={
+                        "cooldown_remaining": cooldown_remaining,
+                        "current": sorted(prev),
+                        "wanted": sorted(target),
+                    },
                 )
                 return StrategyRouterEvent(
                     active_strategies=prev.copy(),
@@ -153,10 +162,12 @@ class StrategyRouter:
 
             logger.debug(
                 "strategy_switch_executed",
-                bar=current_bar,
-                activated=sorted(activated),
-                deactivated=sorted(deactivated),
-                regime=regime.regime.value,
+                extra={
+                    "bar": current_bar,
+                    "activated": sorted(activated),
+                    "deactivated": sorted(deactivated),
+                    "regime": regime.regime.value,
+                },
             )
 
         return StrategyRouterEvent(
@@ -178,7 +189,7 @@ class StrategyRouter:
 
     def reset(self) -> None:
         """Reset router state (use between independent backtest runs)."""
-        self._active_strategies = set()
+        self._active_strategies = self._initial_strategies.copy()
         self._last_switch_bar = -self.cooldown_bars
         self._switch_history.clear()
 
@@ -195,24 +206,45 @@ class StrategyRouter:
         """
         Compute the desired strategy set for a given regime.
 
-        Delegates to ``RoutingConfig.get_strategies()`` with special handling
-        for HYBRID, REDUCE_EXPOSURE, and HOLD recommendations — matching the
-        live ``StrategySelector._get_target_strategies()`` logic exactly.
+        Delegates to :meth:`RoutingConfig.get_strategies` using the same
+        condition-building logic as ``StrategySelector._build_routing_conditions``
+        so that live and backtest routing always produce identical results.
+
+        Special cases (mirrors StrategySelector._get_target_strategies):
+        - REDUCE_EXPOSURE → empty set (no strategies active)
+        - HOLD            → keep current active strategies unchanged
         """
         recommended = regime.recommended_strategy
 
-        # HYBRID: use hybrid_weights from RoutingConfig
-        if recommended == RecommendedStrategy.HYBRID:
-            return {sc.type for sc in self._routing_config.get_hybrid_weights()}
-
-        # REDUCE_EXPOSURE: no active strategies
+        # REDUCE_EXPOSURE: no strategies active — always takes precedence
         if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
             return set()
 
-        # HOLD: keep current strategies unchanged
+        # HOLD: keep whatever is currently active
         if recommended == RecommendedStrategy.HOLD:
             return self._active_strategies.copy()
 
-        # Standard regime lookup
-        configs = self._routing_config.get_strategies({"market_regime": regime.regime})
-        return {sc.type for sc in configs}
+        # Build conditions dict the same way as StrategySelector
+        conditions = self._build_routing_conditions(regime)
+        strategy_configs: list[StrategyConfig] = self._routing_config.get_strategies(conditions)
+        return {sc.name for sc in strategy_configs}
+
+    @staticmethod
+    def _build_routing_conditions(regime: RegimeAnalysis) -> dict[str, Any]:
+        """
+        Build the conditions dict passed to :meth:`RoutingConfig.get_strategies`.
+
+        Exactly mirrors ``StrategySelector._build_routing_conditions`` so that
+        live and backtest routing share the same matching logic.
+
+        Keys produced:
+        - ``market_regime``:   regime value string (e.g. ``"bull_trend"``)
+        - ``confluence_high``: ``True`` when ``confluence_score >= 0.7`` or
+                               ``recommended == HYBRID``
+        """
+        conditions: dict[str, Any] = {"market_regime": regime.regime.value}
+        if regime.recommended_strategy == RecommendedStrategy.HYBRID or (
+            regime.confluence_score >= 0.7
+        ):
+            conditions["confluence_high"] = True
+        return conditions

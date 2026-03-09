@@ -11,6 +11,7 @@ Purpose (issue #368 / #370):
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 import pytest
@@ -26,6 +27,19 @@ from bot.orchestrator.strategy_selector import (
     DEFAULT_REGIME_STRATEGIES,
     HYBRID_STRATEGY_WEIGHTS,
     StrategySelector,
+)
+
+# ---------------------------------------------------------------------------
+# Path to the production routing config
+# ---------------------------------------------------------------------------
+
+_PROD_ROUTING_CONFIG = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "..",
+    "configs",
+    "strategy_routing.yaml",
 )
 
 # ---------------------------------------------------------------------------
@@ -82,13 +96,13 @@ def _old_selector() -> StrategySelector:
 
 
 def _new_selector() -> StrategySelector:
-    """StrategySelector backed by RoutingConfig (default YAML)."""
+    """StrategySelector backed by RoutingConfig (production YAML)."""
     return StrategySelector(
         registry=_make_registry(),
         require_smc_confirmation=False,
         transition_cooldown_seconds=0.0,
         min_regime_duration_seconds=0.0,
-        routing_config=RoutingConfig(),
+        routing_config=RoutingConfig(_PROD_ROUTING_CONFIG),
     )
 
 
@@ -181,15 +195,14 @@ class TestStrategySelectorSync:
         assert old_types == new_types
 
     def test_new_selector_uses_routing_config(self) -> None:
-        """StrategySelector created without regime_strategies uses RoutingConfig."""
+        """StrategySelector created with routing_config stores the RoutingConfig."""
         selector = _new_selector()
         assert selector._routing_config is not None
-        assert selector._regime_strategies is None
 
-    def test_old_selector_uses_explicit_regime_strategies(self) -> None:
-        """StrategySelector with explicit regime_strategies ignores RoutingConfig."""
+    def test_old_selector_has_no_routing_config(self) -> None:
+        """StrategySelector created with explicit regime_strategies has no RoutingConfig."""
         selector = _old_selector()
-        assert selector._regime_strategies is not None
+        assert selector._routing_config is None
 
 
 # ---------------------------------------------------------------------------
@@ -230,25 +243,27 @@ class TestWeightsPreserved:
     """Weights and priorities from the YAML must match the hardcoded values."""
 
     def test_bull_trend_tf_weight(self) -> None:
-        cfg = RoutingConfig()
+        cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
         configs = cfg.get_strategies({"market_regime": "bull_trend"})
-        tf = next(c for c in configs if c.type == "trend_follower")
-        assert tf.weight == pytest.approx(0.7)
+        tf = next(c for c in configs if c.name == "trend_follower")
+        assert tf.params.get("weight") == pytest.approx(0.7)
 
     def test_bull_trend_dca_weight(self) -> None:
-        cfg = RoutingConfig()
+        cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
         configs = cfg.get_strategies({"market_regime": "bull_trend"})
-        dca = next(c for c in configs if c.type == "dca")
-        assert dca.weight == pytest.approx(0.3)
+        dca = next(c for c in configs if c.name == "dca")
+        assert dca.params.get("weight") == pytest.approx(0.3)
 
     def test_bear_trend_dca_weight(self) -> None:
-        cfg = RoutingConfig()
+        cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
         configs = cfg.get_strategies({"market_regime": "bear_trend"})
-        dca = next(c for c in configs if c.type == "dca")
-        assert dca.weight == pytest.approx(1.0)
+        dca = next(c for c in configs if c.name == "dca")
+        assert dca.params.get("weight") == pytest.approx(1.0)
 
     def test_hybrid_weights_match_hardcoded(self) -> None:
-        cfg = RoutingConfig()
-        yaml_weights = {sc.type: sc.weight for sc in cfg.get_hybrid_weights()}
+        cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
+        # Hybrid rule is the bull_trend rule with confluence_high=True
+        yaml_configs = cfg.get_strategies({"market_regime": "bull_trend", "confluence_high": True})
+        yaml_weights = {sc.name: sc.params.get("weight") for sc in yaml_configs}
         hardcoded = {w.strategy_type: w.weight for w in HYBRID_STRATEGY_WEIGHTS}
         assert yaml_weights == pytest.approx(hardcoded)
