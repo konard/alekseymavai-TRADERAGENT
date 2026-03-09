@@ -196,8 +196,49 @@ def _make_strategy_factories(
 
         def _tf_factory(params: dict):
             merged = {**(tf_params or {}), **params}
-            ema_fast = merged.pop("ema_fast", 20)
-            cfg = TrendFollowerConfig(ema_fast_period=ema_fast)
+            # Map YAML keys to TrendFollowerConfig field names
+            _key_map = {
+                "ema_fast": "ema_fast_period",
+                "ema_slow": "ema_slow_period",
+                "ema_fast_period": "ema_fast_period",
+                "ema_slow_period": "ema_slow_period",
+                "atr_period": "atr_period",
+                "rsi_period": "rsi_period",
+                "risk_per_trade_pct": "risk_per_trade_pct",
+                "max_positions": "max_positions",
+                "tp_atr_multiplier_sideways": "tp_multipliers",
+                "tp_atr_multiplier_weak": "tp_multipliers",
+                "tp_atr_multiplier_strong": "tp_multipliers",
+                "sl_atr_multiplier_sideways": "sl_multipliers",
+                "sl_atr_multiplier_trend": "sl_multipliers",
+            }
+            # Extract known TrendFollowerConfig fields
+            _tf_fields = {f.name for f in TrendFollowerConfig.__dataclass_fields__.values()}
+            cfg_kwargs: dict = {}
+            for k, v in merged.items():
+                mapped = _key_map.get(k, k)
+                if mapped in _tf_fields and mapped not in ("tp_multipliers", "sl_multipliers"):
+                    cfg_kwargs[mapped] = v
+            # Build TP/SL multiplier tuples from individual YAML keys
+            tp_s = merged.get("tp_atr_multiplier_sideways")
+            tp_w = merged.get("tp_atr_multiplier_weak")
+            tp_st = merged.get("tp_atr_multiplier_strong")
+            if tp_s is not None and tp_w is not None and tp_st is not None:
+                cfg_kwargs["tp_multipliers"] = (
+                    Decimal(str(tp_s)), Decimal(str(tp_w)), Decimal(str(tp_st)),
+                )
+            sl_s = merged.get("sl_atr_multiplier_sideways")
+            sl_t = merged.get("sl_atr_multiplier_trend")
+            if sl_s is not None and sl_t is not None:
+                cfg_kwargs["sl_multipliers"] = (
+                    Decimal(str(sl_s)), Decimal(str(sl_t)), Decimal(str(sl_t)),
+                )
+            # Backtest overrides: relax filters that block signals on historical data
+            cfg_kwargs.setdefault("require_volume_confirmation", False)
+            cfg_kwargs.setdefault("max_atr_filter_pct", Decimal("0.15"))
+            cfg_kwargs.setdefault("log_all_signals", False)
+            cfg_kwargs.setdefault("debug_mode", False)
+            cfg = TrendFollowerConfig(**cfg_kwargs)
             return TrendFollowerAdapter(config=cfg)
 
         factories["trend_follower"] = _tf_factory
@@ -701,6 +742,7 @@ def _cfg_from_backtest_yaml(
         initial_balance=_ib,
         warmup_bars=int(bt.get("warmup_bars", 500)),
         default_analyze_every_n=int(orch.get("analyze_every_n", 1)),
+        smc_generate_signal_every_n=int(orch.get("smc_generate_signal_every_n", 1)),
         router_cooldown_bars=int(orch.get("router_cooldown_bars", 120)),
         regime_check_every_n=int(orch.get("regime_check_every_n", 12)),
         enable_strategy_router=bool(orch.get("enable_strategy_router", True)),

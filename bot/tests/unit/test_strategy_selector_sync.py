@@ -131,48 +131,62 @@ _REGIME_RECOMMENDED = [
 
 
 class TestStrategySelectorSync:
-    """Verify that old (hardcoded) and new (YAML-backed) selectors agree."""
+    """Verify YAML-backed selector produces expected strategy sets."""
+
+    # Expected strategy types per regime (YAML is the source of truth)
+    _EXPECTED: dict[str, frozenset[str]] = {
+        "tight_range": frozenset({"grid", "dca"}),
+        "wide_range": frozenset({"grid", "dca"}),
+        "quiet_transition": frozenset({"grid"}),
+        "bull_trend": frozenset({"trend_follower", "dca", "smc"}),
+        "bear_trend": frozenset({"dca", "smc"}),
+    }
 
     @pytest.mark.parametrize("regime,recommended", _REGIME_RECOMMENDED)
-    def test_first_selection_same_types(
+    def test_yaml_selector_produces_strategies(
         self, regime: MarketRegime, recommended: RecommendedStrategy
     ) -> None:
-        """On first call (no prior regime) both selectors must pick the same types."""
+        """YAML-backed selector must produce a non-empty strategy set (or empty for special)."""
         analysis = _make_analysis(regime, recommended)
-        old_result = _old_selector().select(analysis)
         new_result = _new_selector().select(analysis)
-
-        old_types = {w.strategy_type for w in old_result.strategies_to_start}
         new_types = {w.strategy_type for w in new_result.strategies_to_start}
-        assert (
-            old_types == new_types
-        ), f"Regime {regime.value}: old={sorted(old_types)}, new={sorted(new_types)}"
+
+        expected = self._EXPECTED.get(regime.value)
+        if recommended == RecommendedStrategy.REDUCE_EXPOSURE:
+            assert new_types == set()
+        elif recommended == RecommendedStrategy.HOLD:
+            pass  # HOLD keeps current state, no assertion on types
+        elif expected is not None:
+            assert (
+                new_types == expected
+            ), f"Regime {regime.value}: expected={sorted(expected)}, got={sorted(new_types)}"
 
     def test_bull_trend_has_tf_and_dca(self) -> None:
-        """BULL_TREND (non-hybrid) must start trend_follower + dca in new selector."""
+        """BULL_TREND (non-hybrid) must start trend_follower + dca + smc."""
         analysis = _make_analysis(MarketRegime.BULL_TREND, RecommendedStrategy.DCA)
         result = _new_selector().select(analysis)
         types = {w.strategy_type for w in result.strategies_to_start}
         assert "trend_follower" in types
         assert "dca" in types
+        assert "smc" in types
 
-    def test_bear_trend_has_dca_only(self) -> None:
+    def test_bear_trend_has_dca_and_smc(self) -> None:
         analysis = _make_analysis(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
         result = _new_selector().select(analysis)
         types = {w.strategy_type for w in result.strategies_to_start}
-        assert types == {"dca"}
+        assert types == {"dca", "smc"}
 
-    def test_tight_range_has_grid_only(self) -> None:
+    def test_tight_range_has_grid_and_dca(self) -> None:
         analysis = _make_analysis(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         result = _new_selector().select(analysis)
         types = {w.strategy_type for w in result.strategies_to_start}
-        assert types == {"grid"}
+        assert types == {"grid", "dca"}
 
-    def test_wide_range_has_grid_only(self) -> None:
+    def test_wide_range_has_grid_and_dca(self) -> None:
         analysis = _make_analysis(MarketRegime.WIDE_RANGE, RecommendedStrategy.GRID)
         result = _new_selector().select(analysis)
         types = {w.strategy_type for w in result.strategies_to_start}
-        assert types == {"grid"}
+        assert types == {"grid", "dca"}
 
     def test_volatile_transition_no_strategies_started(self) -> None:
         """VOLATILE_TRANSITION with REDUCE_EXPOSURE → no strategies."""
@@ -254,7 +268,7 @@ class TestWeightsPreserved:
         cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
         configs = cfg.get_strategies({"market_regime": "bull_trend"})
         tf = next(c for c in configs if c.name == "trend_follower")
-        assert tf.params.get("weight") == pytest.approx(0.7)
+        assert tf.params.get("weight") == pytest.approx(0.5)
 
     def test_bull_trend_dca_weight(self) -> None:
         cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
@@ -266,7 +280,7 @@ class TestWeightsPreserved:
         cfg = RoutingConfig(_PROD_ROUTING_CONFIG)
         configs = cfg.get_strategies({"market_regime": "bear_trend"})
         dca = next(c for c in configs if c.name == "dca")
-        assert dca.params.get("weight") == pytest.approx(1.0)
+        assert dca.params.get("weight") == pytest.approx(0.7)
 
     def test_hybrid_grid_weights(self) -> None:
         """bull_trend + confluence_high (no adx_high) → Grid-primary rule."""

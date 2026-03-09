@@ -576,6 +576,9 @@ class BacktestOrchestratorEngine:
                 position_entry_prices=position_entry_prices["dca"],
             )
 
+        tradeable_bars = total_bars - config.warmup_bars
+        _progress_interval = max(tradeable_bars // 20, 1000)  # log every 5%
+
         for i in range(config.warmup_bars, total_bars):
             df_d1, df_h4, df_h1, df_m15, df_m5 = self.data_loader.get_context_at(
                 data, base_index=i, lookback=config.lookback
@@ -584,6 +587,15 @@ class BacktestOrchestratorEngine:
             await simulator.set_price(current_price)
 
             bars_since_warmup = i - config.warmup_bars
+
+            # Progress logging
+            if bars_since_warmup > 0 and bars_since_warmup % _progress_interval == 0:
+                pct = bars_since_warmup / tradeable_bars * 100
+                pv = float(simulator.get_portfolio_value())
+                logger.info(
+                    "progress: %.0f%% (%d/%d bars) | price=%.2f | portfolio=$%.2f",
+                    pct, bars_since_warmup, tradeable_bars, float(current_price), pv,
+                )
 
             # 1. Regime detection
             if bars_since_warmup % config.regime_check_every_n == 0 and len(df_h1) >= 60:

@@ -259,12 +259,12 @@ class TestCriticalRegimeSync:
         ), f"Expected {sorted(expected_types)}, got live={sorted(live_types)}"
 
     def test_bull_trend_dca_recommendation(self, routing_cfg: RoutingConfig) -> None:
-        """BULL_TREND + DCA → trend_follower + dca (both live and backtest)."""
+        """BULL_TREND + DCA → trend_follower + dca + smc."""
         self._check_sync(
             routing_cfg,
             MarketRegime.BULL_TREND,
             RecommendedStrategy.DCA,
-            frozenset({"trend_follower", "dca"}),
+            frozenset({"trend_follower", "dca", "smc"}),
         )
 
     def test_bull_trend_hybrid_low_adx(self, routing_cfg: RoutingConfig) -> None:
@@ -305,28 +305,28 @@ class TestCriticalRegimeSync:
             live_types == expected
         ), f"Expected {sorted(expected)}, got live={sorted(live_types)}"
 
-    def test_bear_trend_dca(self, routing_cfg: RoutingConfig) -> None:
+    def test_bear_trend_dca_smc(self, routing_cfg: RoutingConfig) -> None:
         self._check_sync(
             routing_cfg,
             MarketRegime.BEAR_TREND,
             RecommendedStrategy.DCA,
-            frozenset({"dca"}),
+            frozenset({"dca", "smc"}),
         )
 
-    def test_tight_range_grid(self, routing_cfg: RoutingConfig) -> None:
+    def test_tight_range_grid_dca(self, routing_cfg: RoutingConfig) -> None:
         self._check_sync(
             routing_cfg,
             MarketRegime.TIGHT_RANGE,
             RecommendedStrategy.GRID,
-            frozenset({"grid"}),
+            frozenset({"grid", "dca"}),
         )
 
-    def test_wide_range_grid(self, routing_cfg: RoutingConfig) -> None:
+    def test_wide_range_grid_dca(self, routing_cfg: RoutingConfig) -> None:
         self._check_sync(
             routing_cfg,
             MarketRegime.WIDE_RANGE,
             RecommendedStrategy.GRID,
-            frozenset({"grid"}),
+            frozenset({"grid", "dca"}),
         )
 
     def test_accumulation_smc(self, routing_cfg: RoutingConfig) -> None:

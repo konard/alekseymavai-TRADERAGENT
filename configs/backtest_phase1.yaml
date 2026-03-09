@@ -48,6 +48,7 @@ orchestrator:
   router_cooldown_bars: 2        # 600 сек cooldown / 300 сек на бар M5 = 2 бара (как в live-боте)
   regime_check_every_n: 12       # каждые 12 × 5m = 1 час (как в live)
   analyze_every_n: 1             # анализировать каждый бар (SMC: каждый M5)
+  smc_generate_signal_every_n: 12  # SMC signal every 12 bars = 1h (performance vs accuracy trade-off)
 
 # ---------------------------------------------------------------------------
 # Risk management (единый для всех стратегий и пар)

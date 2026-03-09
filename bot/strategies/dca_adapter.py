@@ -105,8 +105,10 @@ class DCAAdapter(BaseStrategy):
         close = df["close"].values
         self._current_price = Decimal(str(close[-1]))
 
-        # Track recent high for DCA entry
-        recent_high = float(max(close[-20:]))
+        # Track recent high for DCA entry — use wider window (100 bars)
+        # to avoid resetting the reference too quickly in sideways markets.
+        _lookback = min(100, len(close))
+        recent_high = float(max(close[-_lookback:]))
         self._recent_high = Decimal(str(recent_high))
 
         # Volatility
