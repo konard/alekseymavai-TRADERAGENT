@@ -49,6 +49,7 @@ class GridAdapter(BaseStrategy):
         name: str = "grid-default",
         # Level 1 — Universal parameter (P1.1 unification)
         risk_per_trade_pct: Optional[Decimal] = None,
+        recenter_cooldown_bars: int = 24,
     ) -> None:
 
         self._symbol = symbol
@@ -56,6 +57,8 @@ class GridAdapter(BaseStrategy):
         self._num_levels = num_levels
         self._profit_per_grid = profit_per_grid
         self._grid_range_pct = grid_range_pct
+        self._recenter_cooldown_bars = recenter_cooldown_bars
+        self._recenter_countdown: int = 0
         # risk_per_trade_pct is stored for reference / future position-sizing use.
         self._risk_per_trade_pct: Optional[Decimal] = (
             Decimal(str(risk_per_trade_pct)) if risk_per_trade_pct is not None else None
@@ -118,10 +121,18 @@ class GridAdapter(BaseStrategy):
         if not _needs_init:
             # Recenter when price is outside grid bounds (with 1% buffer)
             _buf = self._grid_engine.upper_price * Decimal("0.01")
-            _needs_init = (
+            _outside = (
                 current > self._grid_engine.upper_price + _buf
                 or current < self._grid_engine.lower_price - _buf
             )
+            if _outside:
+                if self._recenter_countdown > 0:
+                    self._recenter_countdown -= 1
+                    _needs_init = False  # cooldown active — skip recenter
+                else:
+                    _needs_init = True
+            else:
+                _needs_init = False
         if _needs_init:
             self._grid_engine = GridEngine(
                 symbol=self._symbol,
@@ -133,6 +144,7 @@ class GridAdapter(BaseStrategy):
             )
             self._grid_levels = self._grid_engine.calculate_grid_levels()
             self._grid_lower_price = self._grid_engine.lower_price
+            self._recenter_countdown = self._recenter_cooldown_bars
 
         # Trend: grid works best in sideways
         price_change = (close[-1] - close[0]) / close[0] if close[0] > 0 else 0.0
