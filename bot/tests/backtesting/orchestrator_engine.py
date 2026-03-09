@@ -413,6 +413,9 @@ class OrchestratorBacktestResult(BacktestResult):
     # Per-strategy detailed metrics (only during active/routed bars)
     per_strategy_metrics: dict[str, StrategyPeriodMetrics] = field(default_factory=dict)
 
+    # Signal blocking diagnostics
+    signal_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         base = super().to_dict()
         base["orchestrator"] = {
@@ -421,6 +424,7 @@ class OrchestratorBacktestResult(BacktestResult):
             "regime_routing_stats": self.regime_routing_stats,
             "cooldown_events": self.cooldown_events,
             "per_strategy_metrics": {k: v.to_dict() for k, v in self.per_strategy_metrics.items()},
+            "signal_stats": self.signal_stats,
         }
         return base
 
@@ -550,6 +554,19 @@ class BacktestOrchestratorEngine:
         strat_trade_pnls: dict[str, list[float]] = {name: [] for name in strategies}
         # Per-strategy equity snapshots (only when active) for Sharpe + drawdown
         strat_equity: dict[str, list[float]] = {name: [] for name in strategies}
+
+        # Signal blocking diagnostics — count signals blocked at each gate
+        signal_stats: dict[str, dict[str, int]] = {
+            name: {
+                "signals_generated": 0,
+                "blocked_by_router": 0,  # weight=0.0
+                "blocked_by_balance": 0,  # insufficient quote balance
+                "blocked_by_risk_mgr": 0,  # RiskManager.check_trade() rejected
+                "blocked_by_error": 0,  # open_position/create_order exception
+                "executed": 0,  # successfully opened
+            }
+            for name in strategies
+        }
 
         # Execution loop
         equity_curve: list[dict[str, Any]] = []
@@ -695,6 +712,7 @@ class BacktestOrchestratorEngine:
                         signal = None
 
                 if signal is not None:
+                    signal_stats[strat_name]["signals_generated"] += 1
                     await self._handle_signal(
                         strat_name=strat_name,
                         strategy=strategy,
@@ -707,6 +725,7 @@ class BacktestOrchestratorEngine:
                         risk_manager=risk_manager,
                         config=config,
                         position_weight=weight,
+                        signal_stats=signal_stats[strat_name],
                     )
 
                 # 4. update_positions — always (each strategy manages its own positions)
@@ -792,6 +811,7 @@ class BacktestOrchestratorEngine:
             strat_trades=strat_trades,
             strat_equity=strat_equity,
             strat_trade_pnls=strat_trade_pnls,
+            signal_stats=signal_stats,
         )
         return result
 
@@ -812,6 +832,7 @@ class BacktestOrchestratorEngine:
         risk_manager: RiskManager | None,
         config: OrchestratorBacktestConfig,
         position_weight: float = 1.0,
+        signal_stats: dict[str, int] | None = None,
     ) -> None:
         """Open a position if signal passes risk checks."""
         balance = simulator.get_portfolio_value()
@@ -822,6 +843,8 @@ class BacktestOrchestratorEngine:
         # Check if we can afford it
         cost = position_size * current_price
         if cost > simulator.balance.quote or position_size <= 0:
+            if signal_stats is not None:
+                signal_stats["blocked_by_balance"] += 1
             return
 
         # Risk manager gate
@@ -832,6 +855,8 @@ class BacktestOrchestratorEngine:
                 current_position=current_pos_val,
                 available_balance=simulator.balance.quote,
             ):
+                if signal_stats is not None:
+                    signal_stats["blocked_by_risk_mgr"] += 1
                 return
 
         try:
@@ -846,8 +871,12 @@ class BacktestOrchestratorEngine:
             position_amounts[pos_id] = position_size
             position_directions[pos_id] = signal.direction
             position_entry_prices[pos_id] = current_price  # for real PnL calculation
+            if signal_stats is not None:
+                signal_stats["executed"] += 1
         except Exception as e:
             logger.debug("Signal execution failed for %s: %s", strat_name, e)
+            if signal_stats is not None:
+                signal_stats["blocked_by_error"] += 1
 
     async def _handle_exits(
         self,
@@ -1076,6 +1105,7 @@ class BacktestOrchestratorEngine:
         strat_trades: dict[str, int] | None = None,
         strat_equity: dict[str, list[float]] | None = None,
         strat_trade_pnls: dict[str, list[float]] | None = None,
+        signal_stats: dict[str, dict[str, int]] | None = None,
     ) -> OrchestratorBacktestResult:
         """Assemble OrchestratorBacktestResult from simulation state."""
         from datetime import timedelta
@@ -1171,6 +1201,7 @@ class BacktestOrchestratorEngine:
             regime_routing_stats=regime_routing_stats,
             cooldown_events=cooldown_events,
             per_strategy_metrics=per_strategy_metrics,
+            signal_stats=signal_stats or {},
         )
 
         if risk_manager:
