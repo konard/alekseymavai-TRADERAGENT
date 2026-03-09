@@ -201,9 +201,7 @@ class VirtualPositionManager:
     # Check exits
     # ------------------------------------------------------------------
 
-    async def check_exits(
-        self, price: Decimal
-    ) -> list[tuple[VirtualPosition, str]]:
+    async def check_exits(self, price: Decimal) -> list[tuple[VirtualPosition, str]]:
         """
         Scan all open positions and return those whose SL or TP is hit.
 
@@ -254,9 +252,7 @@ class VirtualPositionManager:
                     )
 
             # ---- Aggregate SL for Grid ----
-            grid_positions = [
-                p for p in self._positions.values() if p.strategy == "grid"
-            ]
+            grid_positions = [p for p in self._positions.values() if p.strategy == "grid"]
             if grid_positions:
                 total_invested = sum(p.entry_price * p.qty for p in grid_positions)
                 total_unrealized = sum(p.unrealized_pnl(price) for p in grid_positions)
@@ -368,11 +364,7 @@ class VirtualPositionManager:
         """
         async with self._lock:
             return sum(
-                (
-                    p.qty
-                    for p in self._positions.values()
-                    if p.symbol == symbol and p.side == side
-                ),
+                (p.qty for p in self._positions.values() if p.symbol == symbol and p.side == side),
                 Decimal("0"),
             )
 
