@@ -113,11 +113,13 @@ def tg_send(text: str) -> None:
         return
     try:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = urllib.parse.urlencode({
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-        }).encode()
+        payload = urllib.parse.urlencode(
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+            }
+        ).encode()
         req = urllib.request.Request(url, data=payload)
         urllib.request.urlopen(req, timeout=8)
         logger.debug("Telegram notification sent (%d chars)", len(text))
@@ -147,6 +149,7 @@ ORCHESTRATOR_PARAM_GRID: dict[str, list[Any]] = {
 # ---------------------------------------------------------------------------
 # Strategy factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_strategy_factories(
     symbol: str,
@@ -240,6 +243,7 @@ def _make_strategy_factories(
 # Data loading
 # ---------------------------------------------------------------------------
 
+
 def _load_data(
     symbol: str,
     data_dir: Path | None,
@@ -251,10 +255,7 @@ def _load_data(
     loader = MultiTimeframeDataLoader()
 
     if data_dir and data_dir.exists():
-        csv_files = [
-            f for f in data_dir.glob(f"*{symbol}*.csv")
-            if f.stem.endswith("_5m")
-        ]
+        csv_files = [f for f in data_dir.glob(f"*{symbol}*.csv") if f.stem.endswith("_5m")]
         if csv_files:
             try:
                 csv_path = csv_files[0]
@@ -263,6 +264,7 @@ def _load_data(
                 # which causes OOM in multi-pair sequential workers.
                 if max_bars:
                     import pandas as _pd
+
                     with open(csv_path, "rb") as _fh:
                         total_lines = _fh.read().count(b"\n")
                     skip = max(0, total_lines - max_bars)  # header is row 0, data starts row 1
@@ -277,15 +279,26 @@ def _load_data(
                     except (ValueError, TypeError):
                         _df_m5["_ts"] = _pd.to_datetime(_df_m5[ts_col], utc=True)
                     _df_m5 = _df_m5.set_index("_ts").sort_index()
-                    _df_m5 = _df_m5[["open", "high", "low", "close", "volume"]].apply(
-                        _pd.to_numeric, errors="coerce"
-                    ).dropna()
+                    _df_m5 = (
+                        _df_m5[["open", "high", "low", "close", "volume"]]
+                        .apply(_pd.to_numeric, errors="coerce")
+                        .dropna()
+                    )
 
                     def _resample(df: "_pd.DataFrame", rule: str) -> "_pd.DataFrame":
-                        return df.resample(rule).agg(
-                            {"open": "first", "high": "max", "low": "min",
-                             "close": "last", "volume": "sum"}
-                        ).dropna()
+                        return (
+                            df.resample(rule)
+                            .agg(
+                                {
+                                    "open": "first",
+                                    "high": "max",
+                                    "low": "min",
+                                    "close": "last",
+                                    "volume": "sum",
+                                }
+                            )
+                            .dropna()
+                        )
 
                     data = MultiTimeframeData(
                         m5=_df_m5,
@@ -332,6 +345,7 @@ def _trim_data(data: MultiTimeframeData, max_bars: int) -> MultiTimeframeData:
 # ---------------------------------------------------------------------------
 # Phase runners
 # ---------------------------------------------------------------------------
+
 
 async def phase1_baseline(
     symbol: str,
@@ -454,9 +468,7 @@ async def phase4_robustness(
 
         mc_config = MonteCarloConfig(n_simulations=500)
         mc = MonteCarloSimulation(config=mc_config)
-        trade_returns = [
-            float(t.get("profit", 0)) for t in best_result.trade_history
-        ]
+        trade_returns = [float(t.get("profit", 0)) for t in best_result.trade_history]
         if trade_returns:
             mc_result = mc.run(trade_returns, initial_balance=float(best_result.initial_balance))
             robustness["monte_carlo"] = {
@@ -483,6 +495,7 @@ async def phase4_robustness(
 # ---------------------------------------------------------------------------
 # Result serialisation
 # ---------------------------------------------------------------------------
+
 
 def _save_results(output_dir: Path, name: str, data: Any) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -522,7 +535,14 @@ def _save_score_matrix(
 
     # CSV: one row per (symbol, strategy)
     csv_path = output_dir / "strategy_score_matrix.csv"
-    metric_keys = ["bars_active", "trades", "realized_pnl", "sharpe", "max_drawdown_pct", "win_rate"]
+    metric_keys = [
+        "bars_active",
+        "trades",
+        "realized_pnl",
+        "sharpe",
+        "max_drawdown_pct",
+        "win_rate",
+    ]
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["symbol", "strategy"] + metric_keys)
@@ -591,6 +611,7 @@ def _cfg_from_backtest_yaml(
         return None
     try:
         import yaml
+
         with open(path) as f:
             data = yaml.safe_load(f)
     except Exception as exc:
@@ -605,14 +626,20 @@ def _cfg_from_backtest_yaml(
     tf_cfg = data.get("trend_follower", {})
     smc_cfg = data.get("smc", {})
 
-    _ib = initial_balance if initial_balance is not None else Decimal(str(bt.get("initial_balance", 1000)))
+    _ib = (
+        initial_balance
+        if initial_balance is not None
+        else Decimal(str(bt.get("initial_balance", 1000)))
+    )
 
     max_pos_pct = float(risk.get("max_position_pct", 0.25))
     max_daily_loss_pct = float(risk.get("max_daily_loss_pct", 0.06))
     min_order_size = Decimal(str(risk.get("min_order_size", 5)))
 
     num_levels = int(grid_cfg.get("num_levels", 10))
-    amount_per_grid = (_ib * Decimal(str(max_pos_pct)) / Decimal(str(num_levels))).quantize(Decimal("0.01"))
+    amount_per_grid = (_ib * Decimal(str(max_pos_pct)) / Decimal(str(num_levels))).quantize(
+        Decimal("0.01")
+    )
     _grid_params: dict = {
         "num_levels": num_levels,
         "profit_per_grid": Decimal(str(grid_cfg.get("profit_per_grid", 0.008))),
@@ -639,27 +666,35 @@ def _cfg_from_backtest_yaml(
         _dca_params["trend_filter_adx"] = float(dca_cfg["trend_filter_adx"])
     dca_params = _dca_params if dca_cfg.get("enabled", True) else {}
 
-    tf_params = {
-        "ema_fast_period": int(tf_cfg.get("ema_fast_period", 20)),
-        "ema_slow_period": int(tf_cfg.get("ema_slow_period", 50)),
-        "atr_period": int(tf_cfg.get("atr_period", 14)),
-        "rsi_period": int(tf_cfg.get("rsi_period", 14)),
-        "risk_per_trade_pct": float(tf_cfg.get("risk_per_trade_pct", 0.01)),
-        "max_positions": int(tf_cfg.get("max_positions", 2)),
-        "require_volume_confirmation": bool(tf_cfg.get("require_volume_confirmation", False)),
-        "tp_multiplier_sideways": float(tf_cfg.get("tp_atr_multiplier_sideways", 1.5)),
-        "tp_multiplier_strong": float(tf_cfg.get("tp_atr_multiplier_strong", 4.0)),
-    } if tf_cfg.get("enabled", True) else {}
+    tf_params = (
+        {
+            "ema_fast_period": int(tf_cfg.get("ema_fast_period", 20)),
+            "ema_slow_period": int(tf_cfg.get("ema_slow_period", 50)),
+            "atr_period": int(tf_cfg.get("atr_period", 14)),
+            "rsi_period": int(tf_cfg.get("rsi_period", 14)),
+            "risk_per_trade_pct": float(tf_cfg.get("risk_per_trade_pct", 0.01)),
+            "max_positions": int(tf_cfg.get("max_positions", 2)),
+            "require_volume_confirmation": bool(tf_cfg.get("require_volume_confirmation", False)),
+            "tp_multiplier_sideways": float(tf_cfg.get("tp_atr_multiplier_sideways", 1.5)),
+            "tp_multiplier_strong": float(tf_cfg.get("tp_atr_multiplier_strong", 4.0)),
+        }
+        if tf_cfg.get("enabled", True)
+        else {}
+    )
 
-    smc_params = {
-        "swing_length": int(smc_cfg.get("swing_length", 10)),
-        "risk_per_trade": Decimal(str(smc_cfg.get("risk_per_trade", 0.01))),
-        "min_risk_reward": float(smc_cfg.get("min_risk_reward", 2.0)),
-        "max_positions": int(smc_cfg.get("max_positions", 2)),
-        "require_volume_confirmation": bool(smc_cfg.get("require_volume_confirmation", False)),
-        "debug_mode": bool(smc_cfg.get("debug_mode", False)),
-        "log_all_signals": bool(smc_cfg.get("log_all_signals", False)),
-    } if smc_cfg.get("enabled", True) else {}
+    smc_params = (
+        {
+            "swing_length": int(smc_cfg.get("swing_length", 10)),
+            "risk_per_trade": Decimal(str(smc_cfg.get("risk_per_trade", 0.01))),
+            "min_risk_reward": float(smc_cfg.get("min_risk_reward", 2.0)),
+            "max_positions": int(smc_cfg.get("max_positions", 2)),
+            "require_volume_confirmation": bool(smc_cfg.get("require_volume_confirmation", False)),
+            "debug_mode": bool(smc_cfg.get("debug_mode", False)),
+            "log_all_signals": bool(smc_cfg.get("log_all_signals", False)),
+        }
+        if smc_cfg.get("enabled", True)
+        else {}
+    )
 
     return OrchestratorBacktestConfig(
         symbol=symbol,
@@ -690,6 +725,7 @@ def _load_exclude_symbols(config_path: str) -> set[str]:
         return set()
     try:
         import yaml
+
         with open(path) as f:
             data = yaml.safe_load(f)
         raw = data.get("backtest", {}).get("exclude_symbols", [])
@@ -741,13 +777,22 @@ def _cfg_from_yaml(
 # ProcessPoolExecutor worker for Phase 1 (module-level for pickling)
 # ---------------------------------------------------------------------------
 
+
 def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, float]:
     """
     Sync worker for ProcessPoolExecutor.
     Runs Phase 1 for a single pair in a subprocess worker.
     Returns (symbol, result_dict | None, error_msg | None, elapsed_sec).
     """
-    sym, data_dir_str, max_bars, warmup_bars, initial_balance, live_config_str, backtest_config_str = args_tuple
+    (
+        sym,
+        data_dir_str,
+        max_bars,
+        warmup_bars,
+        initial_balance,
+        live_config_str,
+        backtest_config_str,
+    ) = args_tuple
     t0 = time.perf_counter()
 
     # Suppress verbose debug/info logging in worker processes
@@ -756,6 +801,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     # Silence structlog (it bypasses Python logging level)
     try:
         import structlog as _sl
+
         _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(logging.WARNING))
     except Exception:
         pass
@@ -768,6 +814,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
         sys.path.insert(0, str(_root))
 
     try:
+
         async def _inner() -> dict:
             data = _load_data(sym, Path(data_dir_str), max_bars)
             _ib = Decimal(str(initial_balance))
@@ -804,6 +851,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
 # ---------------------------------------------------------------------------
 # Mode runners
 # ---------------------------------------------------------------------------
+
 
 async def run_single(args: argparse.Namespace) -> None:
     """Single-pair mode: all 4 phases."""
@@ -854,10 +902,14 @@ async def run_single(args: argparse.Namespace) -> None:
     p2_result, optimized_config = await phase2_optimize(
         symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers, factories=factories
     )
-    _save_results(output_dir, "phase2_optimization", {
-        "best_params": p2_result.best_params,
-        "best_objective": p2_result.best_objective,
-    })
+    _save_results(
+        output_dir,
+        "phase2_optimization",
+        {
+            "best_params": p2_result.best_params,
+            "best_objective": p2_result.best_objective,
+        },
+    )
 
     if phases_set and "3" not in phases_set and "4" not in phases_set:
         return
@@ -871,11 +923,7 @@ async def run_single(args: argparse.Namespace) -> None:
     )
     _save_results(output_dir, "phase3_portfolio", p3_result.to_dict())
 
-    best_result = (
-        p2_result.all_trials[0].result
-        if p2_result.all_trials
-        else p1_result
-    )
+    best_result = p2_result.all_trials[0].result if p2_result.all_trials else p1_result
     if not isinstance(best_result, OrchestratorBacktestResult):
         best_result = p1_result
     p4_result = await phase4_robustness(symbol, data, best_result)
@@ -891,7 +939,8 @@ async def run_multi(args: argparse.Namespace) -> None:
     if args.symbols:
         raw_symbols = args.symbols.split(",")
         symbols = [
-            s.strip() for s in raw_symbols
+            s.strip()
+            for s in raw_symbols
             if s.strip() and s.strip().upper().replace("/", "") not in exclude
         ]
     else:
@@ -920,7 +969,15 @@ async def run_multi(args: argparse.Namespace) -> None:
 
     # Build args for each worker
     worker_args = [
-        (sym, data_dir, args.max_bars, args.warmup_bars, args.initial_balance, args.live_config, args.config)
+        (
+            sym,
+            data_dir,
+            args.max_bars,
+            args.warmup_bars,
+            args.initial_balance,
+            args.live_config,
+            args.config,
+        )
         for sym in symbols
     ]
 
@@ -934,8 +991,7 @@ async def run_multi(args: argparse.Namespace) -> None:
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Submit all pairs; as_completed yields results as they finish
         future_to_sym = {
-            loop.run_in_executor(executor, _phase1_worker, wa): wa[0]
-            for wa in worker_args
+            loop.run_in_executor(executor, _phase1_worker, wa): wa[0] for wa in worker_args
         }
 
         for future in asyncio.as_completed(list(future_to_sym.keys())):
@@ -979,8 +1035,7 @@ async def run_multi(args: argparse.Namespace) -> None:
             top5_lines.append(f"{i}. {sym}: {sign}{ret:.2f}% (Sharpe {sharpe:.2f})")
 
         profitable = sum(
-            1 for r in phase1_results.values()
-            if float(r.get("total_return_pct", 0) or 0) > 0
+            1 for r in phase1_results.values() if float(r.get("total_return_pct", 0) or 0) > 0
         )
         avg_ret = sum(
             float(r.get("total_return_pct", 0) or 0) for r in phase1_results.values()
@@ -998,9 +1053,7 @@ async def run_multi(args: argparse.Namespace) -> None:
         score_matrix = _save_score_matrix(output_dir, phase1_results)
         if score_matrix:
             top3_text = _top3_strategies_per_pair(score_matrix)
-            tg_send(
-                f"🏆 <b>Топ-3 стратегии по паре (Phase 1):</b>\n\n{top3_text}"
-            )
+            tg_send(f"🏆 <b>Топ-3 стратегии по паре (Phase 1):</b>\n\n{top3_text}")
 
     # Phase 3 only if requested
     phases_set = set(args.phases.split(",")) if args.phases else set()
@@ -1149,6 +1202,7 @@ async def run_auto(args: argparse.Namespace) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Backtest V2.0 — multi-strategy orchestrator pipeline",
@@ -1211,7 +1265,7 @@ def parse_args() -> argparse.Namespace:
         "--config",
         default=_BACKTEST_CONFIG_DEFAULT,
         help="Path to backtest-specific YAML config (default: configs/backtest_phase1.yaml). "
-             "Takes priority over --live-config when the file exists.",
+        "Takes priority over --live-config when the file exists.",
     )
     return parser.parse_args()
 
@@ -1221,6 +1275,7 @@ def _suppress_strategy_logging() -> None:
     # Suppress structlog debug output from strategies (pattern detection etc.)
     try:
         import structlog as _sl
+
         _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(logging.WARNING))
     except Exception:
         pass

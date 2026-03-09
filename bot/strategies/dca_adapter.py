@@ -245,7 +245,7 @@ class DCAAdapter(BaseStrategy):
                 if current_price <= trigger_price:
                     # Fill safety order: size grows by martingale_multiplier
                     safety_size = self._safety_order_size * (
-                        self._martingale_multiplier ** safety_filled
+                        self._martingale_multiplier**safety_filled
                     )
                     old_total = pos["total_invested"]
                     safety_invest = safety_size * current_price
