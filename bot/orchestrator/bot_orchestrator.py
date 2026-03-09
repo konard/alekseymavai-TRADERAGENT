@@ -16,12 +16,15 @@ import pandas as pd
 import redis.asyncio as redis
 
 from bot.config.schemas import BotConfig, StrategyType
+from bot.core.capital_arbiter import CapitalArbiter
 from bot.core.dca_engine import DCAEngine
 from bot.core.grid_engine import GridEngine, GridType
 from bot.core.portfolio_risk_manager import PortfolioRiskManager
+from bot.core.price_zone_allocator import PriceZoneAllocator
 from bot.core.risk_manager import RiskManager
 from bot.core.smc.structure_analyzer import SMCStructureAnalyzer
 from bot.core.trading_core import TradingCore, TradingCoreConfig
+from bot.core.virtual_position_manager import VirtualPositionManager
 from bot.data.candle_ws_feed import CandleWSFeed
 from bot.data.history_manager import HistoryManager
 from bot.database.manager import DatabaseManager
@@ -199,6 +202,16 @@ class BotOrchestrator:
         # operate with a unified market picture instead of independently
         # recomputing their own levels.
         self.strategy_conductor = StrategyConductor(registry=self.strategy_registry)
+
+        # Phase 4 — Capital Arbiter & Price Zone Allocator (issue #381).
+        # VirtualPositionManager: single source of truth for all open positions.
+        # CapitalArbiter: enforces per-regime capital allocation limits.
+        # PriceZoneAllocator: vertical price zones separating each strategy.
+        self.virtual_position_manager = VirtualPositionManager()
+        self.capital_arbiter = CapitalArbiter(self.virtual_position_manager)
+        self.price_zone_allocator = PriceZoneAllocator()
+        # Track ATR bar count for zone recalculation (every 14 bars)
+        self._atr_bar_count: int = 0
 
         # Manual strategy lock (prevents auto-switching when locked)
         self._strategy_locked: bool = False
@@ -910,10 +923,41 @@ class BotOrchestrator:
                     await self._update_active_strategies()
                     self._last_active_strategies_update_at = _now
 
+                # Capital Arbiter — check regime-based capital allowance before each
+                # strategy.  "Resting" strategies (zero allocation) are skipped.
+                _arb_regime = self._current_regime
+                _arb_balance = self._cached_balance or Decimal("0")
+
+                # Recalculate price zones every 14 ATR bars (≈ every regime update)
+                if self.current_price is not None:
+                    self._atr_bar_count += 1
+                    if self._atr_bar_count >= 14:
+                        self._atr_bar_count = 0
+                        # atr_pct from last analysis → approx ATR in price units
+                        _atr_abs = (
+                            Decimal(str(_arb_regime.atr_pct / 100)) * self.current_price
+                            if _arb_regime is not None
+                            else Decimal("0")
+                        )
+                        self.price_zone_allocator.get_zones(self.current_price, _atr_abs)
+
                 # Process Grid + DCA (hybrid coordination or independent)
-                grid_active = self.grid_engine and self._is_strategy_active("grid")
+                _grid_capital_ok = _arb_regime is None or self.capital_arbiter.get_allowed_capital(
+                    "grid", _arb_regime.regime, _arb_balance
+                ) > Decimal("0")
+                _dca_capital_ok = _arb_regime is None or self.capital_arbiter.get_allowed_capital(
+                    "dca", _arb_regime.regime, _arb_balance
+                ) > Decimal("0")
+                grid_active = (
+                    self.grid_engine
+                    and self._is_strategy_active("grid")
+                    and _grid_capital_ok
+                )
                 dca_active = (
-                    self.dca_engine and self.current_price and self._is_strategy_active("dca")
+                    self.dca_engine
+                    and self.current_price
+                    and self._is_strategy_active("dca")
+                    and _dca_capital_ok
                 )
 
                 if grid_active and dca_active and self.hybrid_strategy:
@@ -925,15 +969,27 @@ class BotOrchestrator:
                         await self._process_dca_logic()
 
                 # Process Trend-Follower logic
+                _tf_capital_ok = _arb_regime is None or self.capital_arbiter.get_allowed_capital(
+                    "tf", _arb_regime.regime, _arb_balance
+                ) > Decimal("0")
                 if (
                     self.trend_follower_strategy
                     and self.current_price
                     and self._is_strategy_active("trend_follower")
+                    and _tf_capital_ok
                 ):
                     await self._process_trend_follower_logic()
 
                 # Process SMC logic
-                if self.smc_strategy and self.current_price and self._is_strategy_active("smc"):
+                _smc_capital_ok = _arb_regime is None or self.capital_arbiter.get_allowed_capital(
+                    "smc", _arb_regime.regime, _arb_balance
+                ) > Decimal("0")
+                if (
+                    self.smc_strategy
+                    and self.current_price
+                    and self._is_strategy_active("smc")
+                    and _smc_capital_ok
+                ):
                     await self._process_smc_logic()
 
                 # Update risk manager
