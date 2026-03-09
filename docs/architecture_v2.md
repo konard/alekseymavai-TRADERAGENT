@@ -1,6 +1,6 @@
 # TRADERAGENT — Сравнение архитектур Live Bot и Backtest Engine
 
-> Дата: 2026-03-08 · Версия: v2.1.0 · Коммит: `6a4081e`
+> Дата: 2026-03-09 · Версия: v2.2.0 · Коммит: `af9e61d`
 >
 > Предыдущая версия: [architecture.md](architecture.md) (v2.0.1)
 
@@ -35,26 +35,28 @@ graph TD
     APP --> |"создаёт N ботов"| ORCH[BotOrchestrator × N]
 
     ORCH --> EX[ByBitDirectClient\nBybit V5 REST API\nHMAC-SHA256]
-    ORCH --> MRD[MarketRegimeDetector\n8 режимов\nADX гистерезис]
-    ORCH --> SS[StrategySelector\nрежим → стратегии\ncooldown gates]
+    ORCH --> MRD[MarketRegimeDetector\n8 режимов\nADX + SMC-first]
+    ORCH --> SS[StrategySelector\nRoutingConfig YAML\ncooldown gates]
+    ORCH --> SC[StrategyConductor\nTradingMode\nStrategyDirective]
     ORCH --> SR[StrategyRegistry\n7 состояний\nstate machine]
     ORCH --> RM[RiskManager\nper-bot]
     ORCH --> HM[HealthMonitor\n30с цикл]
     ORCH --> TC[TradingCore\nshared config]
 
-    ORCH --> GRID[GridEngine]
-    ORCH --> DCA[DCAEngine]
+    ORCH --> GRID[GridEngine\n+ CorePosition]
+    ORCH --> DCA[DCAEngine\n+ CorePosition]
     ORCH --> TF[TrendFollowerStrategy]
     ORCH --> SMC_S[SMCStrategyAdapter]
     ORCH --> HYB[HybridStrategy]
 
-    PRM[PortfolioRiskManager\noptional] -.-> ORCH
+    PRM[PortfolioRiskManager\nglobal stop-loss 2.5%] -.-> ORCH
     DB[(PostgreSQL)] --> |restore| ORCH
     ORCH --> |save 30с| DB
     TG[Telegram] --> APP
 
-    SMC_CORE[bot/core/smc/\nSMCAnalyzer] --> MRD
-    SMC_CORE --> SMC_S
+    SSA[SMCStructureAnalyzer\nкеш 5-мин TTL] --> MRD
+    SSA --> SMC_S
+    SMC_CORE[bot/core/smc/\nSMCAnalyzer] --> SSA
 ```
 
 ### Жизненный цикл тика (1 секунда)
@@ -141,7 +143,7 @@ flowchart LR
     subgraph LIVE [Live Bot — 1с тик]
         direction TB
         L1[Кеш баланса] --> L2[Режим каждые 60с]
-        L2 --> L3["StrategySelector\n+ transition gates\n+ graceful transition"]
+        L2 --> L3["StrategySelector\n+ RoutingConfig YAML\n+ transition gates\n+ graceful transition"]
         L3 --> L4["Стратегии последовательно:\nGrid → DCA → TF → SMC"]
         L4 --> L5[Risk Manager]
         L5 --> L6["State save 30с\n→ PostgreSQL"]
@@ -233,11 +235,17 @@ flowchart TD
         DUR --> CONF{Confidence\n≥ 0.30?}
     end
 
-    PASS --> MAP
-    GATES --> |всё OK| MAP
+    PASS --> COND_L
+    GATES --> |всё OK| COND_L
     GATES --> |blocked| KEEP[Оставить текущие]
 
-    MAP[DEFAULT_REGIME_STRATEGIES] --> RESULT[SelectionResult:\nto_start / to_stop / to_keep]
+    COND_L["_build_routing_conditions\n(regime, confluence, volatility)"] --> RC_L
+
+    subgraph RC_L [RoutingConfig — strategy_routing.yaml]
+        R_L["Правила: bull_trend → {tf, dca}\nbear_trend → {dca}\nvolatile → {smc}\n..."]
+    end
+
+    RC_L --> RESULT[SelectionResult:\nto_start / to_stop / to_keep]
     RESULT --> GRACE[graceful_transition\n→ cancel + close]
 ```
 
@@ -442,7 +450,7 @@ flowchart TD
 | **Volume filter** | `require_volume_confirmation=True` | `=False` |
 | **Throttle** | 5 мин wall-clock | Настраиваемый (smc_analyze_every_n) |
 | **Stale signal check** | 2% deviation от current_price | Нет (backtest = current bar price) |
-| **ACCUMULATION/DISTRIBUTION** | Активирует SMC стратегию | **Не маппится** в StrategyRouter |
+| **ACCUMULATION/DISTRIBUTION** | Активирует SMC стратегию | ✅ Маппится через RoutingConfig → SMC |
 
 ---
 
@@ -464,23 +472,24 @@ flowchart TD
     BOTH --> EXEC
 ```
 
-### Backtest — нет Hybrid
+### Backtest — Hybrid через RoutingConfig
 
 ```
-В BacktestOrchestratorEngine нет HybridCoordinator.
-Grid и DCA никогда не работают одновременно.
-StrategyRouter: {grid} XOR {dca}, но не {grid, dca}.
+В BacktestOrchestratorEngine нет объекта HybridCoordinator.
+Однако Grid + DCA могут работать одновременно через RoutingConfig:
+  bull_trend + confluence ≥ 0.7 → {dca:0.5, grid:0.3, tf:0.2}
+Координация Grid↔DCA происходит через веса, а не через ADX-переключатель.
 ```
 
 ### Сравнение Hybrid
 
 | Аспект | Live Bot | Backtest |
 |--------|----------|---------|
-| **Coordinator** | HybridCoordinator (TradingCore) | **Отсутствует** |
-| **Grid + DCA одновременно** | Да (HYBRID mode) | **Нет** |
-| **Capital split** | 60% Grid / 30% DCA | N/A |
-| **ADX transition** | 25 ± 3 tolerance | N/A |
-| **HybridStrategy** | Transition tracking | **Нет** |
+| **Механизм** | HybridCoordinator (ADX-based) | RoutingConfig YAML (confluence-based) |
+| **Grid + DCA одновременно** | Да (HYBRID mode, ADX 22-28) | Да (bull_trend + confluence ≥ 0.7) |
+| **Capital split** | 60% Grid / 30% DCA | Через weights: grid 0.3 / dca 0.5 |
+| **ADX transition** | 25 ± 3 tolerance | Нет (по confluence, не ADX) |
+| **HybridStrategy** | Transition tracking | Нет (stateless per-bar) |
 
 ---
 
@@ -683,12 +692,12 @@ ETHUSDT, +30, 8, 0.5, -150, 3, ..., 0, 0
 | Аспект | Live Bot | Backtest V3.0 | Статус синхронизации |
 |--------|----------|---------------|---------------------|
 | **Тик** | 1с async | M5 бар (300с) | ✅ Ожидаемо |
-| **Routing** | StrategySelector (weighted) | StrategyRouter (RoutingConfig) | ✅ **Синхронизировано** (#371) |
+| **Routing** | StrategySelector (RoutingConfig) | StrategyRouter (RoutingConfig) | ✅ **Синхронизировано** (#371) |
 | **Cooldown** | 300с wall-clock | 2 бара M5 (600с) | ✅ Согласовано |
 | **Regime check** | 60с (override) | 12 баров (1ч) | 🟡 Разная частота |
 | **Transition** | graceful (cancel+close) | force_close_all | ✅ Функционально |
 | **ACCUMULATION** | → SMC (StrategySelector) | → SMC (RoutingConfig) | ✅ **Синхронизировано** (#371) |
-| **Hybrid** | HybridCoordinator | **Нет** | 🔴 **Расхождение** |
+| **Hybrid** | HybridCoordinator (ADX) | RoutingConfig (confluence) | 🟡 Разный механизм |
 | **SMC volume** | require=True | require=False | ✅ Ожидаемо |
 | **SMC throttle** | 5 мин | Настраиваемый | ✅ Согласовано |
 | **SMC stale check** | 2% deviation | Нет | ✅ Ожидаемо |
@@ -731,15 +740,15 @@ YAML-файл** (`configs/strategy_routing.yaml`) и **тот же метод `_
 **Решение:** Через YAML-правила `accumulation → {smc}`, `distribution → {smc}` (уже в
 `configs/strategy_routing.yaml`).
 
-### 🔴 Оставшиеся критические расхождения
+### 🟡 Hybrid: разные механизмы координации
 
-#### 3. Hybrid mode не в backtest
+#### 3. Hybrid mode — ADX (live) vs confluence (backtest)
 
-**Live:** Grid + DCA координируются через HybridCoordinator
-**Backtest:** Нет координации, только routing без HybridCoordinator
+**Live:** Grid + DCA координируются через HybridCoordinator (ADX 25 ± 3)
+**Backtest:** Grid + DCA координируются через RoutingConfig (`bull_trend + confluence ≥ 0.7`)
 
-**Влияние:** Hybrid-режим не тестируется полностью в backtest.
-**Fix:** Интегрировать TradingCore.HybridCoordinator в BacktestOrchestratorEngine (Этап 2).
+**Влияние:** Оба поддерживают одновременную работу Grid+DCA, но триггеры разные.
+**Fix (optional):** Унифицировать триггер (ADX или confluence, не оба).
 
 ### 🟡 Некритические расхождения
 
@@ -754,11 +763,12 @@ YAML-файл** (`configs/strategy_routing.yaml`) и **тот же метод `_
 ### Приоритеты синхронизации
 
 ```
-P0: StrategySelector в backtest (routing parity)
-P0: ACCUMULATION/DISTRIBUTION маппинг
-P1: HybridCoordinator интеграция
+✅ DONE: StrategySelector в backtest (routing parity) — #371
+✅ DONE: ACCUMULATION/DISTRIBUTION маппинг — #371
+✅ DONE: Hybrid Grid+DCA в backtest (через RoutingConfig) — #371
 P1: Daily loss alignment ($1k → $10k или % нормализация)
-P2: v2.1 компоненты в backtest
+P1: Унификация Hybrid-триггера (ADX vs confluence)
+P2: v2.1 компоненты в backtest (StrategyConductor, CorePosition)
 P2: win_rate: per-trade вместо sum>0
 ```
 
