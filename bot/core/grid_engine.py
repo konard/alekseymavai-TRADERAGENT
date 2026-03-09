@@ -409,6 +409,48 @@ class GridEngine:
     # CorePosition coordination (Hybrid mode)
     # ------------------------------------------------------------------
 
+    def reconcile_grid_orders(self, vpm_positions: list) -> list[str]:
+        """
+        Find SELL (TP) orders in the active grid that have no paired VPM position.
+
+        Called on bot start and after each recenter to clean up orphaned SELL
+        orders whose corresponding BUY fill was never registered in VPM.
+
+        Args:
+            vpm_positions: List of VirtualPosition objects currently open
+                           for the grid strategy on this symbol.
+
+        Returns:
+            List of order_ids for SELL orders that have no matching VPM position
+            and should be cancelled on the exchange.
+        """
+        # Collect grid levels that have a VPM position (entry_price as proxy)
+        vpm_entry_prices = {pos.entry_price for pos in vpm_positions}
+
+        orphan_order_ids: list[str] = []
+        for order_id, order in list(self.active_orders.items()):
+            if order.side != "sell":
+                continue
+            # A SELL order is "paired" if there is a VPM position whose entry
+            # is within one profit_per_grid step of the SELL order price
+            # (buy price ≈ sell_price / (1 + profit_per_grid)).
+            implied_buy_price = order.price / (Decimal("1") + self.profit_per_grid)
+            has_pair = any(
+                abs(entry - implied_buy_price) / implied_buy_price <= self.profit_per_grid
+                for entry in vpm_entry_prices
+            )
+            if not has_pair:
+                orphan_order_ids.append(order_id)
+                logger.info(
+                    "grid_orphan_sell_order",
+                    symbol=self.symbol,
+                    order_id=order_id,
+                    sell_price=float(order.price),
+                    implied_buy_price=float(implied_buy_price),
+                )
+
+        return orphan_order_ids
+
     def apply_position_constraints(
         self,
         core_position: Optional[CorePosition],
