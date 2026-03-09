@@ -100,11 +100,16 @@ class OrchestratorBacktestConfig:
     router_cooldown_bars: int = (
         2  # 600 sec cooldown / 300 sec per M5 bar = 2 bars (matches live bot)
     )
-    regime_check_every_n: int = 12  # 12 M5 bars = 1 hour ≈ live bot 60-sec regime check
+    regime_check_every_n: int = 1  # every M5 bar — mirrors live bot 60-sec continuous check
     # RoutingConfig: when set, the router uses the YAML-based routing rules (single source of
     # truth), mirroring the live StrategySelector.  When None, a default RoutingConfig is
     # loaded from "configs/strategy_routing.yaml" at engine startup.
     routing_config: RoutingConfig | None = None
+
+    # Force-close behaviour on strategy deactivation.
+    # Live bot default: close_positions_on_switch=False (keep positions, only cancel orders).
+    # Set to True to force-close all positions when a strategy is deactivated by the router.
+    force_close_on_deactivation: bool = False
 
     # Per-strategy parameters (passed to strategy factories)
     grid_params: dict[str, Any] = field(default_factory=dict)
@@ -523,6 +528,8 @@ class BacktestOrchestratorEngine:
         # Per-strategy period metrics accumulators
         strat_bars_active: dict[str, int] = dict.fromkeys(strategies, 0)
         strat_trades: dict[str, int] = dict.fromkeys(strategies, 0)
+        # Per-strategy individual trade PnLs for accurate win_rate calculation
+        strat_trade_pnls: dict[str, list[float]] = {name: [] for name in strategies}
         # Per-strategy equity snapshots (only when active) for Sharpe + drawdown
         strat_equity: dict[str, list[float]] = {name: [] for name in strategies}
 
@@ -579,25 +586,33 @@ class BacktestOrchestratorEngine:
                     name: (1.0 if name in router_event.active_strategies else 0.0)
                     for name in strategies
                 }
-                # Force-close open positions of newly-deactivated strategies
-                for deact_name in router_event.deactivated:
-                    deact_strat = strategies.get(deact_name)
-                    if deact_strat is not None and hasattr(deact_strat, "force_close_all"):
-                        forced = deact_strat.force_close_all()
-                        if forced:
-                            pnl_delta = await self._handle_exits(
-                                strat_name=deact_name,
-                                strategy=deact_strat,
-                                exits=forced,
-                                current_price=current_price,
-                                simulator=simulator,
-                                position_amounts=position_amounts[deact_name],
-                                position_directions=position_directions[deact_name],
-                                position_entry_prices=position_entry_prices[deact_name],
-                            )
-                            per_strategy_pnl[deact_name] += pnl_delta
-                            # Count force-closed positions as completed trades
-                            strat_trades[deact_name] += len(forced)
+                # Handle deactivated strategies — mirrors live bot graceful_transition:
+                # close_positions_on_switch=False (default) → keep positions open
+                # close_positions_on_switch=True → force_close_all positions
+                if config.force_close_on_deactivation:
+                    for deact_name in router_event.deactivated:
+                        deact_strat = strategies.get(deact_name)
+                        if deact_strat is not None and hasattr(deact_strat, "force_close_all"):
+                            forced = deact_strat.force_close_all()
+                            if forced:
+                                pnl_delta = await self._handle_exits(
+                                    strat_name=deact_name,
+                                    strategy=deact_strat,
+                                    exits=forced,
+                                    current_price=current_price,
+                                    simulator=simulator,
+                                    position_amounts=position_amounts[deact_name],
+                                    position_directions=position_directions[deact_name],
+                                    position_entry_prices=position_entry_prices[deact_name],
+                                )
+                                per_strategy_pnl[deact_name] += pnl_delta
+                                strat_trades[deact_name] += len(forced)
+                                # Record individual trade PnLs for win_rate
+                                if len(forced) > 0:
+                                    per_trade = pnl_delta / len(forced)
+                                    strat_trade_pnls[deact_name].extend(
+                                        [float(per_trade)] * len(forced)
+                                    )
 
             # 3. Per-strategy signal generation and execution (ALL strategies, always)
             # Mirrors live BotOrchestrator: every strategy runs every bar,
@@ -678,6 +693,12 @@ class BacktestOrchestratorEngine:
                     per_strategy_pnl[strat_name] += pnl_delta
                     # Count closed round-trips (not signals) as completed trades
                     strat_trades[strat_name] += len(exits)
+                    # Record individual trade PnLs for win_rate
+                    if len(exits) > 0:
+                        per_trade = pnl_delta / len(exits)
+                        strat_trade_pnls[strat_name].extend(
+                            [float(per_trade)] * len(exits)
+                        )
 
             # 5. Record equity
             # simulator.get_portfolio_value() = quote + base * current_price
@@ -735,6 +756,7 @@ class BacktestOrchestratorEngine:
             strat_bars_active=strat_bars_active,
             strat_trades=strat_trades,
             strat_equity=strat_equity,
+            strat_trade_pnls=strat_trade_pnls,
         )
         return result
 
@@ -1018,6 +1040,7 @@ class BacktestOrchestratorEngine:
         strat_bars_active: dict[str, int] | None = None,
         strat_trades: dict[str, int] | None = None,
         strat_equity: dict[str, list[float]] | None = None,
+        strat_trade_pnls: dict[str, list[float]] | None = None,
     ) -> OrchestratorBacktestResult:
         """Assemble OrchestratorBacktestResult from simulation state."""
         from datetime import timedelta
@@ -1073,7 +1096,8 @@ class BacktestOrchestratorEngine:
             eq_series = (strat_equity or {}).get(name, [])
             strat_sharpe = self._calculate_sharpe_from_values(eq_series)
             strat_dd_pct = self._calculate_max_drawdown_pct(eq_series)
-            strat_win_rate = self._calculate_win_rate_from_pnl(pnl, trades)
+            trade_pnls = (strat_trade_pnls or {}).get(name, [])
+            strat_win_rate = self._calculate_win_rate_from_trades(trade_pnls, trades)
             per_strategy_metrics[name] = StrategyPeriodMetrics(
                 bars_active=bars,
                 trades=trades,
@@ -1178,12 +1202,13 @@ class BacktestOrchestratorEngine:
         return max_dd
 
     @staticmethod
-    def _calculate_win_rate_from_pnl(realized_pnl: float, trades: int) -> float:
-        """Approximate win rate: 100% if profitable, 0% if not, 0% if no trades.
+    def _calculate_win_rate_from_trades(trade_pnls: list[float], trades: int) -> float:
+        """Per-trade win rate: percentage of trades with positive PnL.
 
-        A more accurate per-trade win rate requires individual trade records attributed
-        per strategy. This simple heuristic gives a meaningful top-level signal.
+        Uses individual trade PnL records for accurate calculation instead of
+        the previous binary heuristic (0% or 100% based on aggregate PnL).
         """
-        if trades == 0:
+        if trades == 0 or not trade_pnls:
             return 0.0
-        return 100.0 if realized_pnl > 0 else 0.0
+        winning = sum(1 for pnl in trade_pnls if pnl > 0)
+        return (winning / len(trade_pnls)) * 100.0
