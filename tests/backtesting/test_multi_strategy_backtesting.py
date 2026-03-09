@@ -133,8 +133,10 @@ class TestGridAdapterUnit:
         assert exits[0][1] == ExitReason.TAKE_PROFIT
 
     def test_update_positions_stop_loss(self):
-        # Grid SL is grid-boundary based: all positions close when price < _grid_lower_price.
-        adapter = GridAdapter()
+        # Phase 2: Grid SL is aggregate-loss-based via VPM (not raw boundary check).
+        # 1 position at entry=100, max_grid_loss_pct=0.05 (5%).
+        # At price=94 → loss = (100-94)/100 * qty/entry * entry = 6% > 5% → fires.
+        adapter = GridAdapter(max_grid_loss_pct=Decimal("0.05"))
         signal = BaseSignal(
             direction=SignalDirection.LONG,
             entry_price=Decimal("100"),
@@ -145,7 +147,6 @@ class TestGridAdapterUnit:
             strategy_type="grid",
         )
         adapter.open_position(signal, Decimal("10"))
-        adapter._grid_lower_price = Decimal("95")  # simulate initialized grid boundary
         df = _make_ohlcv([100])
 
         exits = adapter.update_positions(Decimal("94"), df)
