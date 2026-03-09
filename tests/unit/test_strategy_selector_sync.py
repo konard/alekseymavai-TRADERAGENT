@@ -130,10 +130,7 @@ class TestRegimeStrategySynchronisation:
     @pytest.mark.parametrize(
         "regime,recommended,confluence",
         _REGIME_SCENARIOS,
-        ids=[
-            f"{r.value}/{rec.value}/conf={c}"
-            for r, rec, c in _REGIME_SCENARIOS
-        ],
+        ids=[f"{r.value}/{rec.value}/conf={c}" for r, rec, c in _REGIME_SCENARIOS],
     )
     def test_strategy_types_match(
         self,
@@ -163,10 +160,7 @@ class TestRegimeStrategySynchronisation:
     @pytest.mark.parametrize(
         "regime,recommended,confluence",
         _REGIME_SCENARIOS,
-        ids=[
-            f"{r.value}/{rec.value}/conf={c}"
-            for r, rec, c in _REGIME_SCENARIOS
-        ],
+        ids=[f"{r.value}/{rec.value}/conf={c}" for r, rec, c in _REGIME_SCENARIOS],
     )
     def test_weights_and_priorities_match(
         self,
@@ -189,12 +183,10 @@ class TestRegimeStrategySynchronisation:
 
         # Compare weight/priority per strategy type
         legacy_map = {
-            w.strategy_type: (w.weight, w.priority)
-            for w in legacy_result.strategies_to_start
+            w.strategy_type: (w.weight, w.priority) for w in legacy_result.strategies_to_start
         }
         routing_map = {
-            w.strategy_type: (w.weight, w.priority)
-            for w in routing_result.strategies_to_start
+            w.strategy_type: (w.weight, w.priority) for w in routing_result.strategies_to_start
         }
 
         assert legacy_map == routing_map, (
@@ -241,9 +233,9 @@ class TestDefaultRegimeStrategiesVsYaml:
         yaml_types = {sc.name for sc in yaml_configs}
         hybrid_types = {w.strategy_type for w in HYBRID_STRATEGY_WEIGHTS}
 
-        assert yaml_types == hybrid_types, (
-            f"Hybrid: legacy={sorted(hybrid_types)} vs YAML={sorted(yaml_types)}"
-        )
+        assert (
+            yaml_types == hybrid_types
+        ), f"Hybrid: legacy={sorted(hybrid_types)} vs YAML={sorted(yaml_types)}"
 
 
 # ---------------------------------------------------------------------------
