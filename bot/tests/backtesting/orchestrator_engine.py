@@ -696,9 +696,7 @@ class BacktestOrchestratorEngine:
                     # Record individual trade PnLs for win_rate
                     if len(exits) > 0:
                         per_trade = pnl_delta / len(exits)
-                        strat_trade_pnls[strat_name].extend(
-                            [float(per_trade)] * len(exits)
-                        )
+                        strat_trade_pnls[strat_name].extend([float(per_trade)] * len(exits))
 
             # 5. Record equity
             # simulator.get_portfolio_value() = quote + base * current_price
