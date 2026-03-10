@@ -95,9 +95,10 @@ class TrendFollowerAdapter(BaseStrategy):
         """
         Analyze market using Trend-Follower strategy.
 
-        Uses the first DataFrame provided.
+        Uses the last (M5) DataFrame provided — consistent with other adapters
+        and the backtest engine's call convention: (df_d1, df_h4, df_h1, df_m15, df_m5).
         """
-        df = dfs[0] if dfs else pd.DataFrame()
+        df = dfs[-1] if dfs else pd.DataFrame()
         self._last_df = df
 
         conditions = self._strategy.analyze_market(df)

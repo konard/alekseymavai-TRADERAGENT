@@ -744,6 +744,14 @@ def _cfg_from_backtest_yaml(
         else {}
     )
 
+    # Grid per-level sizing: total_cap / num_levels so all 20 levels fit in the cap.
+    # This fixes RiskManager over-blocking (was using max_position_pct=5% → only 5 levels).
+    _grid_position_pct = Decimal(str(max_pos_pct)) / Decimal(str(num_levels))
+
+    # VPM aggregate Grid SL — read from YAML or use backtest-friendly default (25%).
+    # Live default is 10% (too aggressive for a single-pair backtest).
+    _vpm_max_grid_loss_pct = float(bt.get("vpm_max_grid_loss_pct", 0.25))
+
     return OrchestratorBacktestConfig(
         symbol=symbol,
         initial_balance=_ib,
@@ -760,11 +768,32 @@ def _cfg_from_backtest_yaml(
         max_position_size_pct=max_pos_pct,
         max_position_pct=Decimal(str(max_per_trade_pct)),
         max_daily_loss_pct=max_daily_loss_pct,
+        grid_position_pct=_grid_position_pct,
+        vpm_max_grid_loss_pct=_vpm_max_grid_loss_pct,
         grid_params=grid_params,
         dca_params=dca_params,
         tf_params=tf_params,
         smc_params=smc_params,
     )
+
+
+def _resolve_initial_balance(args_value: float | None, config_path: str) -> Decimal:
+    """Return initial balance: CLI arg > YAML backtest.initial_balance > 1000 fallback."""
+    if args_value is not None:
+        return Decimal(str(args_value))
+    path = Path(config_path)
+    if path.exists():
+        try:
+            import yaml
+
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            val = data.get("backtest", {}).get("initial_balance")
+            if val is not None:
+                return Decimal(str(val))
+        except Exception:
+            pass
+    return Decimal("1000")
 
 
 def _load_exclude_symbols(config_path: str) -> set[str]:
@@ -912,7 +941,7 @@ async def run_single(args: argparse.Namespace) -> None:
     )
 
     warmup = min(args.warmup_bars, len(data.m5) // 2)
-    _ib = Decimal(str(args.initial_balance))
+    _ib = _resolve_initial_balance(args.initial_balance, args.config)
     cfg_base = (
         _cfg_from_backtest_yaml(args.config, symbol, initial_balance=_ib)
         or _cfg_from_yaml(args.live_config, symbol, initial_balance=_ib)
@@ -1122,7 +1151,7 @@ async def run_multi(args: argparse.Namespace) -> None:
 
     if data_map:
         _p3_sym = list(data_map.keys())[0]
-        _p3_ib = Decimal(str(args.initial_balance)) / max(len(data_map), 1)
+        _p3_ib = _resolve_initial_balance(args.initial_balance, args.config) / max(len(data_map), 1)
         live_cfg = _cfg_from_yaml(args.live_config, _p3_sym, initial_balance=_p3_ib)
         config = dataclasses.replace(
             live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_p3_sym),
@@ -1190,7 +1219,7 @@ async def run_auto(args: argparse.Namespace) -> None:
         try:
             data = _load_data(sym, data_dir, args.max_bars)
             data_map[sym] = data
-            _sym_ib = Decimal(str(args.initial_balance))
+            _sym_ib = _resolve_initial_balance(args.initial_balance, args.config)
             cfg_base = (
                 _cfg_from_backtest_yaml(args.config, sym, initial_balance=_sym_ib)
                 or _cfg_from_yaml(args.live_config, sym, initial_balance=_sym_ib)
@@ -1219,7 +1248,7 @@ async def run_auto(args: argparse.Namespace) -> None:
 
     top_data_map = {s: data_map[s] for s in top_symbols if s in data_map}
     _auto_sym = top_symbols[0] if top_symbols else "BTC"
-    _auto_ib = Decimal(str(args.initial_balance)) / max(len(top_symbols), 1)
+    _auto_ib = _resolve_initial_balance(args.initial_balance, args.config) / max(len(top_symbols), 1)
     live_cfg = _cfg_from_yaml(args.live_config, _auto_sym, initial_balance=_auto_ib)
     config = dataclasses.replace(
         live_cfg if live_cfg is not None else OrchestratorBacktestConfig(symbol=_auto_sym),
@@ -1288,8 +1317,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--initial-balance",
         type=float,
-        default=10000.0,
-        help="Initial balance in USD (default: 10000)",
+        default=None,
+        help="Initial balance in USD (default: read from config backtest.initial_balance, fallback 1000)",
     )
     parser.add_argument(
         "--workers",

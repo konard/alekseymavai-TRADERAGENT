@@ -143,6 +143,18 @@ class OrchestratorBacktestConfig:
     risk_per_trade: Decimal = Decimal("0.02")
     max_position_pct: Decimal = Decimal("0.05")  # 5% per trade → up to 5 positions per strategy
 
+    # Grid-specific per-position fraction.  Grid manages many levels simultaneously
+    # (num_levels=20), so each individual order must be much smaller than max_position_pct.
+    # When set, _handle_signal uses this value for the "grid" strategy instead of
+    # max_position_pct.  Computed in run_backtest_v2 as max_position_size_pct / num_levels.
+    # None = fall back to max_position_pct (backward-compatible).
+    grid_position_pct: Decimal | None = None
+
+    # VPM aggregate Grid SL threshold.  Live default is 10% (conservative for real trading).
+    # In backtest with a single pair a 10% aggregate loss closes all Grid positions too
+    # quickly — set to 0.25 (25%) to allow the grid to breathe within its ±12% range.
+    vpm_max_grid_loss_pct: float = 0.25
+
     # Exchange fee simulation — aligned with TradingCoreConfig defaults (Bybit VIP0)
     maker_fee: Decimal = Decimal("0.0002")  # 0.02 % (was 0.1 % in old MarketSimulator default)
     taker_fee: Decimal = Decimal("0.00055")  # 0.055 %
@@ -549,7 +561,7 @@ class BacktestOrchestratorEngine:
         vpm: VirtualPositionManager | None = None
         capital_arbiter: CapitalArbiter | None = None
         if config.enable_vpm:
-            vpm = VirtualPositionManager()
+            vpm = VirtualPositionManager(max_grid_loss_pct=config.vpm_max_grid_loss_pct)
         if config.enable_capital_arbiter and vpm is not None:
             capital_arbiter = CapitalArbiter(vpm)
 
@@ -911,8 +923,15 @@ class BacktestOrchestratorEngine:
     ) -> None:
         """Open a position if signal passes risk checks."""
         balance = simulator.get_portfolio_value()
+        # Grid uses its own per-level sizing (max_position_size_pct / num_levels) to allow
+        # all 20 levels to fit within the aggregate cap.  Other strategies use max_position_pct.
+        _per_pos_pct = (
+            config.grid_position_pct
+            if strat_name == "grid" and config.grid_position_pct is not None
+            else config.max_position_pct
+        )
         # position_weight: 1.0 = full size (router-preferred), 0.5 = reduced (advisory)
-        position_value = balance * config.max_position_pct * Decimal(str(position_weight))
+        position_value = balance * _per_pos_pct * Decimal(str(position_weight))
         position_size = position_value / current_price if current_price > 0 else Decimal("0")
 
         # Check if we can afford it

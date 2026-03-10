@@ -33,6 +33,7 @@ backtest:
   warmup_bars: 500               # 500 × 5m = ~42 часа прогрева
   max_bars: 50000                # ~173 дня (~6 месяцев) торговли
   workers: 14                    # параллельных процессов (по числу CPU)
+  vpm_max_grid_loss_pct: 0.25   # VPM агрегированный SL для Grid — 25% (live=10%, в backtest мягче)
 
   # Пары исключённые из Phase 1 (аномальные данные — делистинг/крах)
   exclude_symbols:

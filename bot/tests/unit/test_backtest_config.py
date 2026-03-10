@@ -82,8 +82,10 @@ class TestFromYamlConfigBTC:
         assert abs(float(self.cfg.max_position_pct) - 0.30) < 0.01
 
     def test_max_position_size_pct_synced(self):
-        # max_position_size_pct must equal max_position_pct (P0.2 unification)
-        assert abs(self.cfg.max_position_size_pct - float(self.cfg.max_position_pct)) < 0.001
+        # max_position_size_pct (total aggregate cap) must be >= max_position_pct (per-trade).
+        # They were equal under the old P0.2 unification; now they are separate by design
+        # (total cap = max_position_pct × 5, capped at 80%).
+        assert self.cfg.max_position_size_pct >= float(self.cfg.max_position_pct)
 
     def test_max_position_pct_from_strategy_params_takes_priority(self):
         # P1.1: strategy_params.max_position_pct="0.30" is a fixed fraction (30%)
@@ -191,9 +193,11 @@ class TestAdapterDefaults:
         from bot.strategies.dca_adapter import DCAAdapter
 
         a = DCAAdapter()
-        assert a._max_safety_orders == 4
-        assert a._price_deviation_pct == Decimal("0.04")
-        assert a._take_profit_pct == Decimal("0.08")
+        # Current DCAAdapter defaults (aligned with backtest_phase1.yaml):
+        # max_steps: 3, trigger_pct: 3%, take_profit_pct: 6%
+        assert a._max_safety_orders == 3
+        assert a._price_deviation_pct == Decimal("0.03")
+        assert a._take_profit_pct == Decimal("0.06")
 
 
 # ---------------------------------------------------------------------------
