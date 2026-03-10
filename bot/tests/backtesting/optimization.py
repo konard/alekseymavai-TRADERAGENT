@@ -32,19 +32,22 @@ _ORCH_WORKER_DATA: Any = None
 _ORCH_WORKER_CONFIG: Any = None
 _ORCH_WORKER_OBJECTIVE: str = "sharpe_ratio"
 _ORCH_WORKER_SYMBOL: str = ""
+_ORCH_WORKER_TIMEOUT: float = 120.0  # seconds per trial before asyncio.TimeoutError
 
 
 def _init_orchestrator_worker(
-    data: Any, config_template: Any, objective: str, symbol: str
+    data: Any, config_template: Any, objective: str, symbol: str, timeout: float = 120.0
 ) -> None:
     """Initializer called once per worker process — loads shared read-only state."""
     import logging as _logging
 
-    global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE, _ORCH_WORKER_SYMBOL
+    global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE
+    global _ORCH_WORKER_SYMBOL, _ORCH_WORKER_TIMEOUT
     _ORCH_WORKER_DATA = data
     _ORCH_WORKER_CONFIG = config_template
     _ORCH_WORKER_OBJECTIVE = objective
     _ORCH_WORKER_SYMBOL = symbol
+    _ORCH_WORKER_TIMEOUT = timeout
 
     # Suppress WARNING-level noise (SMC "insufficient data", TF "insufficient_data")
     _logging.root.setLevel(_logging.ERROR)
@@ -173,6 +176,7 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
         _ORCH_WORKER_DATA,
         _ORCH_WORKER_OBJECTIVE,
         _ORCH_WORKER_SYMBOL,
+        _ORCH_WORKER_TIMEOUT,
         _build_worker_factories,
     )
     from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
@@ -180,7 +184,11 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     cfg = ParameterOptimizer._apply_orchestrator_params(_ORCH_WORKER_CONFIG, params)
     engine = BacktestOrchestratorEngine()
     _build_worker_factories(engine, _ORCH_WORKER_SYMBOL, cfg)
-    result = _asyncio.run(engine.run(_ORCH_WORKER_DATA, cfg))
+
+    async def _run_with_timeout() -> Any:
+        return await _asyncio.wait_for(engine.run(_ORCH_WORKER_DATA, cfg), timeout=_ORCH_WORKER_TIMEOUT)
+
+    result = _asyncio.run(_run_with_timeout())
     obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
     return OptimizationTrial(params=params, result=result, objective_value=obj_val)
 
@@ -641,6 +649,9 @@ class ParameterOptimizer:
         data: MultiTimeframeData,
         config_template: OrchestratorBacktestConfig,
         max_workers: int | None = None,
+        trial_timeout_sec: float = 120.0,
+        progress_every_n: int = 100,
+        checkpoint_path: str | None = None,
     ) -> OptimizationResult:
         """
         Grid-search optimization targeting OrchestratorBacktestConfig params.
@@ -691,10 +702,20 @@ class ParameterOptimizer:
 
         if max_workers and max_workers > 1:
             import concurrent.futures
+            import json
+            import logging as _logging
+            import time
 
+            _logger = _logging.getLogger(__name__)
             loop = asyncio.get_event_loop()
+            total = len(combinations)
 
             def _run_all_in_process_pool() -> list[OptimizationTrial]:
+                _trials: list[OptimizationTrial] = []
+                _timed_out = 0
+                _failed = 0
+                _t0 = time.monotonic()
+
                 with concurrent.futures.ProcessPoolExecutor(
                     max_workers=max_workers,
                     initializer=_init_orchestrator_worker,
@@ -703,9 +724,70 @@ class ParameterOptimizer:
                         config_template,
                         self.config.objective,
                         config_template.symbol,
+                        trial_timeout_sec,
                     ),
                 ) as pool:
-                    return list(pool.map(_run_orchestrator_trial, combinations))
+                    futures = {
+                        pool.submit(_run_orchestrator_trial, p): p
+                        for p in combinations
+                    }
+
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            trial = future.result()
+                            _trials.append(trial)
+                        except asyncio.TimeoutError:
+                            _timed_out += 1
+                            _logger.warning(
+                                "[Phase 2] Trial timed out (>%.0fs): %s",
+                                trial_timeout_sec,
+                                futures[future],
+                            )
+                        except Exception as e:
+                            _failed += 1
+                            _logger.warning("[Phase 2] Trial failed: %s — %s", futures[future], e)
+
+                        done = len(_trials) + _timed_out + _failed
+                        if done % progress_every_n == 0 or done == total:
+                            elapsed = time.monotonic() - _t0
+                            rate = done / elapsed if elapsed > 0 else 0
+                            eta = (total - done) / rate if rate > 0 else 0
+                            best_val = (
+                                max(_trials, key=lambda t: t.objective_value).objective_value
+                                if _trials else 0.0
+                            )
+                            _logger.info(
+                                "[Phase 2] %d/%d (%.0f%%) | best=%.3f | "
+                                "timeout=%d | failed=%d | ETA=%.0fs",
+                                done, total, done / total * 100,
+                                best_val, _timed_out, _failed, eta,
+                            )
+
+                            # Save intermediate checkpoint
+                            if checkpoint_path and _trials:
+                                _sorted = sorted(
+                                    _trials,
+                                    key=lambda t: t.objective_value,
+                                    reverse=True,
+                                )
+                                _top = _sorted[:20]
+                                _cp = {
+                                    "completed": done,
+                                    "total": total,
+                                    "timed_out": _timed_out,
+                                    "failed": _failed,
+                                    "top_trials": [
+                                        {"params": t.params, "objective": t.objective_value}
+                                        for t in _top
+                                    ],
+                                }
+                                try:
+                                    with open(checkpoint_path, "w") as _f:
+                                        json.dump(_cp, _f, indent=2, default=str)
+                                except Exception:
+                                    pass
+
+                return _trials
 
             trials = await loop.run_in_executor(None, _run_all_in_process_pool)
         else:

@@ -424,6 +424,7 @@ async def phase2_optimize(
     param_grid: dict,
     workers: int,
     factories: dict | None = None,
+    output_dir: Path | None = None,
 ) -> tuple[OptimizationResult, OrchestratorBacktestConfig]:
     """Phase 2: Parameter optimization."""
     logger.info("[Phase 2] Optimization — %s (%d combos)", symbol, _count_combos(param_grid))
@@ -434,11 +435,16 @@ async def phase2_optimize(
     if factories:
         optimizer._strategy_factories = factories
 
+    checkpoint_path = str(output_dir / "phase2_checkpoint.json") if output_dir else None
+
     opt_result = await optimizer.optimize_orchestrator(
         param_grid=param_grid,
         data=data,
         config_template=config_template,
         max_workers=workers if workers > 1 else None,
+        trial_timeout_sec=120.0,
+        progress_every_n=50,
+        checkpoint_path=checkpoint_path,
     )
 
     optimized_config = ParameterOptimizer._apply_orchestrator_params(
@@ -943,7 +949,8 @@ async def run_single(args: argparse.Namespace) -> None:
         return
 
     p2_result, optimized_config = await phase2_optimize(
-        symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers, factories=factories
+        symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers,
+        factories=factories, output_dir=output_dir,
     )
     _save_results(
         output_dir,
