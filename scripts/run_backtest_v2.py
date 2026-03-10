@@ -674,6 +674,7 @@ def _cfg_from_backtest_yaml(
     )
 
     max_pos_pct = float(risk.get("max_position_pct", 0.25))
+    max_per_trade_pct = float(risk.get("max_position_pct_per_trade", 0.05))
     max_daily_loss_pct = float(risk.get("max_daily_loss_pct", 0.06))
     min_order_size = Decimal(str(risk.get("min_order_size", 5)))
 
@@ -751,7 +752,7 @@ def _cfg_from_backtest_yaml(
         enable_trend_follower=bool(tf_cfg.get("enabled", True)),
         enable_smc=bool(smc_cfg.get("enabled", True)),
         max_position_size_pct=max_pos_pct,
-        max_position_pct=Decimal(str(max_pos_pct)),
+        max_position_pct=Decimal(str(max_per_trade_pct)),
         max_daily_loss_pct=max_daily_loss_pct,
         grid_params=grid_params,
         dca_params=dca_params,
