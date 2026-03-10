@@ -24,6 +24,47 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+# ---------------------------------------------------------------------------
+# Module-level state for ProcessPoolExecutor workers (set via initializer).
+# Must live at module level so worker processes can pickle/access them.
+# ---------------------------------------------------------------------------
+_ORCH_WORKER_DATA: Any = None
+_ORCH_WORKER_CONFIG: Any = None
+_ORCH_WORKER_OBJECTIVE: str = "sharpe_ratio"
+
+
+def _init_orchestrator_worker(data: Any, config_template: Any, objective: str) -> None:
+    """Initializer called once per worker process — loads shared read-only state."""
+    global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE
+    _ORCH_WORKER_DATA = data
+    _ORCH_WORKER_CONFIG = config_template
+    _ORCH_WORKER_OBJECTIVE = objective
+
+
+def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
+    """
+    Module-level worker function for ProcessPoolExecutor.
+    Runs one backtest trial and returns an OptimizationTrial.
+    Must be at module level (not a closure) to be picklable.
+    """
+    import asyncio as _asyncio
+
+    from bot.tests.backtesting.optimization import (
+        OptimizationTrial,
+        ParameterOptimizer,
+        _ORCH_WORKER_CONFIG,
+        _ORCH_WORKER_DATA,
+        _ORCH_WORKER_OBJECTIVE,
+    )
+    from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
+
+    cfg = ParameterOptimizer._apply_orchestrator_params(_ORCH_WORKER_CONFIG, params)
+    engine = BacktestOrchestratorEngine()
+    result = _asyncio.run(engine.run(_ORCH_WORKER_DATA, cfg))
+    obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
+    return OptimizationTrial(params=params, result=result, objective_value=obj_val)
+
+
 from bot.strategies.base import BaseStrategy
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
@@ -529,16 +570,19 @@ class ParameterOptimizer:
             return OptimizationTrial(params=params, result=result, objective_value=obj_val)
 
         if max_workers and max_workers > 1:
-            loop = asyncio.get_event_loop()
-
-            def _run_sync(p: dict[str, Any]) -> OptimizationTrial:
-                return asyncio.run(_run_trial(p))
-
             import concurrent.futures
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = [loop.run_in_executor(pool, _run_sync, p) for p in combinations]
-                trials = list(await asyncio.gather(*futures))
+            loop = asyncio.get_event_loop()
+
+            def _run_all_in_process_pool() -> list[OptimizationTrial]:
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=max_workers,
+                    initializer=_init_orchestrator_worker,
+                    initargs=(data, config_template, self.config.objective),
+                ) as pool:
+                    return list(pool.map(_run_orchestrator_trial, combinations))
+
+            trials = await loop.run_in_executor(None, _run_all_in_process_pool)
         else:
             for params in combinations:
                 trial = await _run_trial(params)
