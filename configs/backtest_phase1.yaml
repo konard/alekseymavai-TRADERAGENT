@@ -68,12 +68,12 @@ risk:
 
 grid:
   enabled: true
-  num_levels: 10                 # 10 уровней сетки (было 6) — больше тригеров
-  profit_per_grid: 0.008         # 0.8% прибыль на уровень (было 1.2%) — чаще срабатывает
-  grid_range_pct: 0.12           # 12% диапазон сетки (было 5%) — меньше рецентров
+  num_levels: 20                 # 20 уровней (было 10) — оптимум N*=R/√(C·ATR)≈22
+  profit_per_grid: 0.005         # 0.5% прибыль (было 0.8%) — ближе к S*=√(C·ATR)≈0.55%
+  grid_range_pct: 0.12           # 12% диапазон сетки — меньше рецентров
   recenter_cooldown_bars: 24     # кулдаун рецентра: 24 × 5m = 2 часа
   # amount_per_grid рассчитывается автоматически:
-  # initial_balance × max_position_pct / num_levels = $1000 × 0.25 / 10 = ~$25
+  # initial_balance × max_position_pct / num_levels = $1000 × 0.25 / 20 = ~$12.5
 
 # ---------------------------------------------------------------------------
 # Стратегия: DCA
@@ -105,7 +105,7 @@ trend_follower:
   rsi_period: 14
   risk_per_trade_pct: 0.01       # 1% риска на сделку ($10 из $1000)
   require_volume_confirmation: false  # снят блокирующий фильтр (было true)
-  tp_atr_multiplier_sideways: 1.5    # было 1.2 — шире цель при боковике
+  tp_atr_multiplier_sideways: 1.2    # оптимум по модели: k_tp* ≈ 1.1 при μ/σ=0.05
   tp_atr_multiplier_weak: 1.8
   tp_atr_multiplier_strong: 4.0      # было 2.5 — шире цель при сильном тренде
   sl_atr_multiplier_sideways: 0.7

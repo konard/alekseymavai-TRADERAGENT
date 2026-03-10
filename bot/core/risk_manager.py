@@ -77,6 +77,7 @@ class RiskManager:
         self.current_balance: Decimal | None = None
         self.daily_loss = Decimal("0")
         self.peak_balance: Decimal | None = None
+        self._peak_balance_today: Decimal | None = None  # for net daily loss calculation
         self.is_halted = False
         self.halt_reason: str | None = None
 
@@ -102,6 +103,7 @@ class RiskManager:
         self.initial_balance = balance
         self.current_balance = balance
         self.peak_balance = balance
+        self._peak_balance_today = balance
 
         logger.info("Balance initialized", balance=float(balance))
 
@@ -112,14 +114,21 @@ class RiskManager:
         Args:
             balance: Current account balance
         """
-        if self.current_balance is not None:
-            balance_change = balance - self.current_balance
-
-            # Track daily loss
-            if balance_change < 0:
-                self.daily_loss += abs(balance_change)
-
         self.current_balance = balance
+
+        # Track net daily loss from today's peak (not cumulative).
+        # Old logic summed every dip: daily_loss += abs(change).
+        # That caused false halts: with 4 strategies × 288 bars/day,
+        # normal oscillations easily exceed the daily limit.
+        # Net loss = max(0, peak_today − current) only counts the
+        # actual drawdown from the best point of the day.
+        if self._peak_balance_today is not None:
+            if balance > self._peak_balance_today:
+                self._peak_balance_today = balance
+            self.daily_loss = max(Decimal("0"), self._peak_balance_today - balance)
+        else:
+            self._peak_balance_today = balance
+            self.daily_loss = Decimal("0")
 
         # Fix initial_balance if it was 0 at startup
         if self.initial_balance is not None and self.initial_balance == 0 and balance > 0:
@@ -333,6 +342,7 @@ class RiskManager:
     def reset_daily_loss(self) -> None:
         """Reset daily loss counter (call at start of new day)"""
         self.daily_loss = Decimal("0")
+        self._peak_balance_today = self.current_balance
         logger.info("Daily loss counter reset")
 
     def resume(self) -> None:

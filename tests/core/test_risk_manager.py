@@ -463,3 +463,79 @@ class TestRiskManager:
         manager.update_position_value(Decimal("5000"))
 
         assert manager.current_position_value == Decimal("5000")
+
+    # ------------------------------------------------------------------
+    # Net daily loss tests (P0.1 fix)
+    # ------------------------------------------------------------------
+
+    def test_daily_loss_is_net_not_cumulative(self):
+        """Dip-and-recover must NOT accumulate losses cumulatively.
+
+        Old bug: 10000 → 9700 → 10000 → 9700 gave daily_loss=600 (cumulative).
+        Fix:     10000 → 9700 → 10000 → 9700 gives daily_loss=300 (net from peak).
+        """
+        manager = RiskManager(
+            max_position_size=Decimal("10000"),
+            min_order_size=Decimal("10"),
+            max_daily_loss=Decimal("500"),
+        )
+        manager.initialize_balance(Decimal("10000"))
+
+        manager.update_balance(Decimal("9700"))  # dip 300
+        assert manager.daily_loss == Decimal("300")
+
+        manager.update_balance(Decimal("10000"))  # recover
+        assert manager.daily_loss == Decimal("0")
+
+        manager.update_balance(Decimal("9700"))  # dip again
+        assert manager.daily_loss == Decimal("300")
+        # Old cumulative would give 600 here and halt.
+        assert manager.is_halted is False
+
+    def test_net_daily_loss_still_halts_on_real_drawdown(self):
+        """A genuine intraday drawdown must still trigger the daily loss halt."""
+        manager = RiskManager(
+            max_position_size=Decimal("10000"),
+            min_order_size=Decimal("10"),
+            max_daily_loss=Decimal("500"),
+        )
+        manager.initialize_balance(Decimal("10000"))
+
+        manager.update_balance(Decimal("10200"))  # peak today = 10200
+        manager.update_balance(Decimal("9600"))  # net loss = 10200 - 9600 = 600 > 500
+        assert manager.daily_loss == Decimal("600")
+        assert manager.is_halted is True
+
+    def test_daily_loss_peak_resets_on_new_day(self):
+        """After reset_daily_loss(), the daily peak restarts from current balance."""
+        manager = RiskManager(
+            max_position_size=Decimal("10000"),
+            min_order_size=Decimal("10"),
+            max_daily_loss=Decimal("500"),
+        )
+        manager.initialize_balance(Decimal("10000"))
+
+        manager.update_balance(Decimal("9800"))  # loss 200
+        assert manager.daily_loss == Decimal("200")
+
+        manager.reset_daily_loss()
+        assert manager.daily_loss == Decimal("0")
+        # Peak today is now 9800 (current balance)
+
+        manager.update_balance(Decimal("9600"))  # loss 200 from new peak
+        assert manager.daily_loss == Decimal("200")
+        assert manager.is_halted is False  # 200 < 500
+
+    def test_daily_loss_monotone_decline_matches_net(self):
+        """Monotone decline: net and cumulative give the same result."""
+        manager = RiskManager(
+            max_position_size=Decimal("10000"),
+            min_order_size=Decimal("10"),
+            max_daily_loss=Decimal("500"),
+        )
+        manager.initialize_balance(Decimal("10000"))
+
+        manager.update_balance(Decimal("9700"))  # -300
+        manager.update_balance(Decimal("9500"))  # -500 total from peak
+        assert manager.daily_loss == Decimal("500")
+        assert manager.is_halted is True
