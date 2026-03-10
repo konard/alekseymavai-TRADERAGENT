@@ -31,14 +31,119 @@ from typing import TYPE_CHECKING, Any
 _ORCH_WORKER_DATA: Any = None
 _ORCH_WORKER_CONFIG: Any = None
 _ORCH_WORKER_OBJECTIVE: str = "sharpe_ratio"
+_ORCH_WORKER_SYMBOL: str = ""
 
 
-def _init_orchestrator_worker(data: Any, config_template: Any, objective: str) -> None:
+def _init_orchestrator_worker(
+    data: Any, config_template: Any, objective: str, symbol: str
+) -> None:
     """Initializer called once per worker process — loads shared read-only state."""
-    global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE
+    global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE, _ORCH_WORKER_SYMBOL
     _ORCH_WORKER_DATA = data
     _ORCH_WORKER_CONFIG = config_template
     _ORCH_WORKER_OBJECTIVE = objective
+    _ORCH_WORKER_SYMBOL = symbol
+
+
+def _build_worker_factories(engine: Any, symbol: str, cfg: Any) -> None:
+    """
+    Register strategy factories on engine inside a worker process.
+    Closures are fine here — they live entirely within the subprocess.
+    Mirrors the factory logic from scripts/run_backtest_v2.py.
+    """
+    from decimal import Decimal as _D
+
+    try:
+        from bot.strategies.grid_adapter import GridAdapter
+
+        def _grid(p: dict) -> Any:
+            return GridAdapter(symbol=symbol, **{**cfg.grid_params, **p})
+
+        engine.register_strategy_factory("grid", _grid)
+    except Exception:
+        pass
+
+    try:
+        from bot.strategies.dca_adapter import DCAAdapter
+
+        def _dca(p: dict) -> Any:
+            merged = {**cfg.dca_params, **p}
+            trigger = merged.pop("trigger_pct", None)
+            tp = merged.pop("tp_pct", None)
+            if trigger is not None:
+                merged["price_deviation_pct"] = _D(str(trigger))
+            if tp is not None:
+                merged["take_profit_pct"] = _D(str(tp))
+            return DCAAdapter(symbol=symbol, **merged)
+
+        engine.register_strategy_factory("dca", _dca)
+    except Exception:
+        pass
+
+    try:
+        from bot.strategies.trend_follower.config import TrendFollowerConfig
+        from bot.strategies.trend_follower_adapter import TrendFollowerAdapter
+
+        _tf_fields = {f.name for f in TrendFollowerConfig.__dataclass_fields__.values()}
+        _key_map = {
+            "ema_fast": "ema_fast_period",
+            "ema_slow": "ema_slow_period",
+            "ema_fast_period": "ema_fast_period",
+            "ema_slow_period": "ema_slow_period",
+            "atr_period": "atr_period",
+            "rsi_period": "rsi_period",
+            "risk_per_trade_pct": "risk_per_trade_pct",
+            "max_positions": "max_positions",
+        }
+
+        def _tf(p: dict) -> Any:
+            merged = {**cfg.tf_params, **p}
+            kw: dict = {}
+            for k, v in merged.items():
+                mapped = _key_map.get(k, k)
+                if mapped in _tf_fields and mapped not in ("tp_multipliers", "sl_multipliers"):
+                    kw[mapped] = v
+            tp_s = merged.get("tp_atr_multiplier_sideways")
+            tp_w = merged.get("tp_atr_multiplier_weak")
+            tp_st = merged.get("tp_atr_multiplier_strong")
+            if tp_s is not None and tp_w is not None and tp_st is not None:
+                kw["tp_multipliers"] = (_D(str(tp_s)), _D(str(tp_w)), _D(str(tp_st)))
+            sl_s = merged.get("sl_atr_multiplier_sideways")
+            sl_t = merged.get("sl_atr_multiplier_trend")
+            if sl_s is not None and sl_t is not None:
+                kw["sl_multipliers"] = (_D(str(sl_s)), _D(str(sl_t)), _D(str(sl_t)))
+            kw.setdefault("require_volume_confirmation", False)
+            kw.setdefault("max_atr_filter_pct", _D("0.15"))
+            kw.setdefault("log_all_signals", False)
+            kw.setdefault("debug_mode", False)
+            return TrendFollowerAdapter(config=TrendFollowerConfig(**kw))
+
+        engine.register_strategy_factory("trend_follower", _tf)
+    except Exception:
+        pass
+
+    try:
+        from bot.strategies.smc.config import SMCConfig
+        from bot.strategies.smc_adapter import SMCStrategyAdapter
+
+        _smc_fields = {f.name for f in SMCConfig.__dataclass_fields__.values()}
+
+        def _smc(p: dict) -> Any:
+            merged = {**cfg.smc_params, **p}
+            merged.setdefault("warmup_bars", 0)
+            merged.setdefault("require_volume_confirmation", False)
+            merged.setdefault("debug_mode", False)
+            merged.setdefault("log_all_signals", False)
+            kw = {k: v for k, v in merged.items() if k in _smc_fields}
+            return SMCStrategyAdapter(
+                config=SMCConfig(**kw),
+                account_balance=_D("10000"),
+                name="smc-backtest",
+            )
+
+        engine.register_strategy_factory("smc", _smc)
+    except Exception:
+        pass
 
 
 def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
@@ -55,11 +160,14 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
         _ORCH_WORKER_CONFIG,
         _ORCH_WORKER_DATA,
         _ORCH_WORKER_OBJECTIVE,
+        _ORCH_WORKER_SYMBOL,
+        _build_worker_factories,
     )
     from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
 
     cfg = ParameterOptimizer._apply_orchestrator_params(_ORCH_WORKER_CONFIG, params)
     engine = BacktestOrchestratorEngine()
+    _build_worker_factories(engine, _ORCH_WORKER_SYMBOL, cfg)
     result = _asyncio.run(engine.run(_ORCH_WORKER_DATA, cfg))
     obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
     return OptimizationTrial(params=params, result=result, objective_value=obj_val)
@@ -578,7 +686,12 @@ class ParameterOptimizer:
                 with concurrent.futures.ProcessPoolExecutor(
                     max_workers=max_workers,
                     initializer=_init_orchestrator_worker,
-                    initargs=(data, config_template, self.config.objective),
+                    initargs=(
+                        data,
+                        config_template,
+                        self.config.objective,
+                        config_template.symbol,
+                    ),
                 ) as pool:
                     return list(pool.map(_run_orchestrator_trial, combinations))
 
