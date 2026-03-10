@@ -30,7 +30,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from bot.core.capital_arbiter import CapitalArbiter
 from bot.core.risk_manager import RiskManager
+from bot.core.virtual_position_manager import VirtualPosition, VirtualPositionManager
 from bot.orchestrator.market_regime import (
     MarketRegimeDetector,
     RegimeAnalysis,
@@ -128,6 +130,8 @@ class OrchestratorBacktestConfig:
     # RiskManager.update_balance(), so set generously to avoid false halts
     # from normal intraday price oscillations.
     enable_risk_manager: bool = True
+    enable_vpm: bool = True
+    enable_capital_arbiter: bool = True
     # max_position_size_pct: per-strategy cumulative cap (RiskManager receives per-strategy
     # position totals, so this is the max exposure ONE strategy can hold at once).
     max_position_size_pct: float = 0.25  # 25% of portfolio per strategy
@@ -541,12 +545,21 @@ class BacktestOrchestratorEngine:
             )
             risk_manager.initialize_balance(config.initial_balance)
 
+        # VirtualPositionManager and CapitalArbiter
+        vpm: VirtualPositionManager | None = None
+        capital_arbiter: CapitalArbiter | None = None
+        if config.enable_vpm:
+            vpm = VirtualPositionManager()
+        if config.enable_capital_arbiter and vpm is not None:
+            capital_arbiter = CapitalArbiter(vpm)
+
         # Per-strategy state tracking
         position_amounts: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
         position_directions: dict[str, dict[str, SignalDirection]] = {
             name: {} for name in strategies
         }
         position_entry_prices: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
+        vpm_pos_ids: dict[str, dict[str, str]] = {name: {} for name in strategies}
         per_strategy_pnl: dict[str, Decimal] = {name: Decimal("0") for name in strategies}
         regime_routing_stats: dict[str, int] = {}
         cooldown_events = 0
@@ -565,6 +578,7 @@ class BacktestOrchestratorEngine:
             name: {
                 "signals_generated": 0,
                 "blocked_by_router": 0,  # weight=0.0
+                "blocked_by_arbiter": 0,  # CapitalArbiter zero allocation
                 "blocked_by_balance": 0,  # insufficient quote balance
                 "blocked_by_risk_mgr": 0,  # RiskManager.check_trade() rejected
                 "blocked_by_error": 0,  # open_position/create_order exception
@@ -663,6 +677,8 @@ class BacktestOrchestratorEngine:
                                     position_amounts=position_amounts[deact_name],
                                     position_directions=position_directions[deact_name],
                                     position_entry_prices=position_entry_prices[deact_name],
+                                    vpm=vpm,
+                                    vpm_pos_ids=vpm_pos_ids[deact_name],
                                 )
                                 per_strategy_pnl[deact_name] += pnl_delta
                                 strat_trades[deact_name] += len(forced)
@@ -677,6 +693,14 @@ class BacktestOrchestratorEngine:
             # Mirrors live BotOrchestrator: every strategy runs every bar,
             # router only adjusts position size via weight.
             balance = simulator.get_portfolio_value()
+
+            # VPM aggregate exit scan (fires Grid aggregate SL, etc.)
+            if vpm is not None:
+                vpm_bar_exits: list[tuple[VirtualPosition, str]] = await vpm.check_exits(
+                    current_price
+                )
+            else:
+                vpm_bar_exits = []
 
             for strat_name, strategy in strategies.items():
                 weight = regime_weights.get(strat_name, 1.0)
@@ -706,15 +730,41 @@ class BacktestOrchestratorEngine:
                 if weight == 0.0:
                     signal = None
                 else:
-                    _gen_n = config.smc_generate_signal_every_n if strat_name == "smc" else 1
-                    if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
-                        try:
-                            signal = strategy.generate_signal(df_m5, balance)
-                        except Exception as e:
-                            logger.debug("generate_signal error %s bar %d: %s", strat_name, i, e)
+                    # CapitalArbiter gate — mirrors live BotOrchestrator
+                    if capital_arbiter is not None and current_regime is not None:
+                        _norm = strat_name.replace("trend_follower", "tf")
+                        _allowed = capital_arbiter.get_allowed_capital(
+                            _norm, current_regime.regime, balance
+                        )
+                        if _allowed <= Decimal("0"):
+                            signal_stats[strat_name]["blocked_by_arbiter"] += 1
                             signal = None
+                            # Skip to update_positions below (fall through with signal=None)
+                        else:
+                            signal = None  # will be set by generate_signal below
+                            _gen_n = (
+                                config.smc_generate_signal_every_n if strat_name == "smc" else 1
+                            )
+                            if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
+                                try:
+                                    signal = strategy.generate_signal(df_m5, balance)
+                                except Exception as e:
+                                    logger.debug(
+                                        "generate_signal error %s bar %d: %s", strat_name, i, e
+                                    )
+                                    signal = None
                     else:
-                        signal = None
+                        _gen_n = config.smc_generate_signal_every_n if strat_name == "smc" else 1
+                        if _gen_n <= 1 or bars_since_warmup % _gen_n == 0:
+                            try:
+                                signal = strategy.generate_signal(df_m5, balance)
+                            except Exception as e:
+                                logger.debug(
+                                    "generate_signal error %s bar %d: %s", strat_name, i, e
+                                )
+                                signal = None
+                        else:
+                            signal = None
 
                 if signal is not None:
                     signal_stats[strat_name]["signals_generated"] += 1
@@ -731,6 +781,8 @@ class BacktestOrchestratorEngine:
                         config=config,
                         position_weight=weight,
                         signal_stats=signal_stats[strat_name],
+                        vpm=vpm,
+                        vpm_pos_ids=vpm_pos_ids[strat_name],
                     )
 
                 # 4. update_positions — always (each strategy manages its own positions)
@@ -739,6 +791,20 @@ class BacktestOrchestratorEngine:
                 except Exception as e:
                     logger.debug("update_positions error %s bar %d: %s", strat_name, i, e)
                     exits = []
+
+                # Check if VPM fired an exit for this strategy
+                if vpm_bar_exits:
+                    _norm_strat = strat_name.replace("trend_follower", "tf")
+                    for vpos, _reason in vpm_bar_exits:
+                        vpos_strat = getattr(vpos, "strategy", None)
+                        if vpos_strat == _norm_strat:
+                            strategy_pos_id = (getattr(vpos, "meta", None) or {}).get("pos_id")
+                            if strategy_pos_id and strategy_pos_id in position_amounts.get(
+                                strat_name, {}
+                            ):
+                                if not any(p == strategy_pos_id for p, _ in (exits or [])):
+                                    exits = list(exits) if exits else []
+                                    exits.append((strategy_pos_id, ExitReason.STOP_LOSS))
 
                 if exits:
                     pnl_delta = await self._handle_exits(
@@ -750,6 +816,8 @@ class BacktestOrchestratorEngine:
                         position_amounts=position_amounts[strat_name],
                         position_directions=position_directions[strat_name],
                         position_entry_prices=position_entry_prices[strat_name],
+                        vpm=vpm,
+                        vpm_pos_ids=vpm_pos_ids[strat_name],
                     )
                     per_strategy_pnl[strat_name] += pnl_delta
                     # Count closed round-trips (not signals) as completed trades
@@ -838,6 +906,8 @@ class BacktestOrchestratorEngine:
         config: OrchestratorBacktestConfig,
         position_weight: float = 1.0,
         signal_stats: dict[str, int] | None = None,
+        vpm: VirtualPositionManager | None = None,
+        vpm_pos_ids: dict[str, str] | None = None,
     ) -> None:
         """Open a position if signal passes risk checks."""
         balance = simulator.get_portfolio_value()
@@ -878,6 +948,35 @@ class BacktestOrchestratorEngine:
             position_entry_prices[pos_id] = current_price  # for real PnL calculation
             if signal_stats is not None:
                 signal_stats["executed"] += 1
+
+            # Register in VirtualPositionManager
+            if vpm is not None and vpm_pos_ids is not None:
+                import uuid as _uuid
+
+                vpm_id = _uuid.uuid4().hex[:8]
+                vpos = VirtualPosition(
+                    pos_id=vpm_id,
+                    strategy=strat_name.replace("trend_follower", "tf"),
+                    symbol=config.symbol,
+                    side="long" if signal.direction == SignalDirection.LONG else "short",
+                    qty=position_size,
+                    entry_price=current_price,
+                    tp_price=(
+                        signal.take_profit
+                        if getattr(signal, "take_profit", None)
+                        and signal.take_profit > Decimal("0")
+                        else None
+                    ),
+                    sl_price=(
+                        signal.stop_loss
+                        if getattr(signal, "stop_loss", None)
+                        and signal.stop_loss > Decimal("0")
+                        else None
+                    ),
+                    meta={"pos_id": pos_id},
+                )
+                await vpm.open(vpos)
+                vpm_pos_ids[pos_id] = vpm_id
         except Exception as e:
             logger.debug("Signal execution failed for %s: %s", strat_name, e)
             if signal_stats is not None:
@@ -893,6 +992,8 @@ class BacktestOrchestratorEngine:
         position_amounts: dict[str, Decimal],
         position_directions: dict[str, SignalDirection],
         position_entry_prices: dict[str, Decimal],
+        vpm: VirtualPositionManager | None = None,
+        vpm_pos_ids: dict[str, str] | None = None,
     ) -> Decimal:
         """Close positions and return real P&L delta: (exit - entry) × amount."""
         pnl_delta = Decimal("0")
@@ -926,6 +1027,15 @@ class BacktestOrchestratorEngine:
                         amount=amount,
                     )
                     pnl_delta += (entry_price - current_price) * amount
+
+                # Close VPM position if registered
+                if vpm is not None and vpm_pos_ids is not None:
+                    vpm_id = vpm_pos_ids.pop(pos_id, None)
+                    if vpm_id:
+                        try:
+                            await vpm.close(vpm_id, current_price, exit_reason.value)
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.debug("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
         return pnl_delta
