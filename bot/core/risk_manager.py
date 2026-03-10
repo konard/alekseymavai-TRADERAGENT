@@ -45,6 +45,7 @@ class RiskManager:
         min_order_size: Decimal,
         stop_loss_percentage: Decimal | None = None,
         max_daily_loss: Decimal | None = None,
+        max_position_size_per_trade: Decimal | None = None,
     ):
         """
         Initialize Risk Manager.
@@ -54,6 +55,7 @@ class RiskManager:
             min_order_size: Minimum order size in quote currency
             stop_loss_percentage: Optional portfolio stop-loss percentage
             max_daily_loss: Optional maximum daily loss in quote currency
+            max_position_size_per_trade: Optional max size of a single entry in quote currency
         """
         if max_position_size <= 0:
             raise ValueError("max_position_size must be positive")
@@ -65,11 +67,14 @@ class RiskManager:
             raise ValueError("stop_loss_percentage must be between 0 and 1")
         if max_daily_loss is not None and max_daily_loss <= 0:
             raise ValueError("max_daily_loss must be positive")
+        if max_position_size_per_trade is not None and max_position_size_per_trade <= 0:
+            raise ValueError("max_position_size_per_trade must be positive")
 
         self.max_position_size = max_position_size
         self.min_order_size = min_order_size
         self.stop_loss_percentage = stop_loss_percentage
         self.max_daily_loss = max_daily_loss
+        self.max_position_size_per_trade = max_position_size_per_trade
 
         # State tracking
         self.current_position_value = Decimal("0")
@@ -193,6 +198,14 @@ class RiskManager:
                 False,
                 f"Position {new_position} would exceed max {self.max_position_size}",
             )
+
+        if self.max_position_size_per_trade is not None:
+            if additional_size > self.max_position_size_per_trade:
+                self.rejected_trades += 1
+                return RiskCheckResult(
+                    allowed=False,
+                    reason=f"Single trade size {additional_size:.2f} exceeds per-trade limit {self.max_position_size_per_trade:.2f}",
+                )
 
         return RiskCheckResult(True)
 
@@ -381,6 +394,7 @@ class RiskManager:
             "stop_loss_triggers": self.stop_loss_triggers,
             "max_position_size": float(self.max_position_size),
             "min_order_size": float(self.min_order_size),
+            "max_position_size_per_trade": float(self.max_position_size_per_trade) if self.max_position_size_per_trade is not None else None,
         }
 
     def update_position_value(self, value: Decimal) -> None:

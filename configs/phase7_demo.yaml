@@ -82,6 +82,7 @@ bots:
       stop_loss_percentage: "0.12"    # 12% stop loss
       max_daily_loss: "600"           # Max $600 daily loss
       min_order_size: "66"            # Min $66 per order (> 0.001 BTC)
+      max_position_size_per_trade: "150"  # Cap each grid/DCA entry at $150
       global_stop_loss_pct: "0.025"   # 2.5% of total capital aggregate risk triggers force-close
       force_close_cooldown_seconds: 1800  # 30-minute cooldown after force-close
 
@@ -120,6 +121,7 @@ bots:
       stop_loss_percentage: "0.15"
       max_daily_loss: "80"
       min_order_size: "30"    # must be >= amount_per_grid
+      max_position_size_per_trade: "30"   # Cap each grid entry at $30
 
     notifications:
       enabled: false
@@ -157,6 +159,7 @@ bots:
       stop_loss_percentage: "0.18"
       max_daily_loss: "60"
       min_order_size: "5"
+      max_position_size_per_trade: "20"   # Cap each DCA step at $20
 
     notifications:
       enabled: false

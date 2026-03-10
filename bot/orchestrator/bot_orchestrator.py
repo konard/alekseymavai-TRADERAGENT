@@ -254,6 +254,11 @@ class BotOrchestrator:
                     else None
                 ),
                 min_order_size=Decimal(str(self.config.risk_management.min_order_size)),
+                max_position_size_per_trade=(
+                    Decimal(str(self.config.risk_management.max_position_size_per_trade))
+                    if self.config.risk_management.max_position_size_per_trade
+                    else None
+                ),
             )
 
             # Initialize with current balance

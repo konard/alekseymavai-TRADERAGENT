@@ -387,6 +387,11 @@ class RiskManagementConfig(BaseModel):
         gt=0,
         description="Minimum order size in quote currency",
     )
+    max_position_size_per_trade: Decimal | None = Field(
+        default=None,
+        gt=0,
+        description="Max size of a single entry in quote currency. None = no per-trade cap.",
+    )
     global_stop_loss_pct: Decimal | None = Field(
         default=None,
         gt=0,
