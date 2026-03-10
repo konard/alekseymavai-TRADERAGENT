@@ -38,11 +38,23 @@ def _init_orchestrator_worker(
     data: Any, config_template: Any, objective: str, symbol: str
 ) -> None:
     """Initializer called once per worker process — loads shared read-only state."""
+    import logging as _logging
+
     global _ORCH_WORKER_DATA, _ORCH_WORKER_CONFIG, _ORCH_WORKER_OBJECTIVE, _ORCH_WORKER_SYMBOL
     _ORCH_WORKER_DATA = data
     _ORCH_WORKER_CONFIG = config_template
     _ORCH_WORKER_OBJECTIVE = objective
     _ORCH_WORKER_SYMBOL = symbol
+
+    # Suppress WARNING-level noise (SMC "insufficient data", TF "insufficient_data")
+    _logging.root.setLevel(_logging.ERROR)
+    for _h in _logging.root.handlers:
+        _h.setLevel(_logging.ERROR)
+    try:
+        import structlog as _sl
+        _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(_logging.ERROR))
+    except Exception:
+        pass
 
 
 def _build_worker_factories(engine: Any, symbol: str, cfg: Any) -> None:
