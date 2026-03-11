@@ -238,6 +238,16 @@ def _make_strategy_factories(
             cfg_kwargs.setdefault("max_atr_filter_pct", Decimal("0.15"))
             cfg_kwargs.setdefault("log_all_signals", False)
             cfg_kwargs.setdefault("debug_mode", False)
+            # Disable TF-internal daily loss limit: the limit uses date.today() which
+            # never advances during a backtest run, so a single day's losses would
+            # permanently block all future signals.  The orchestrator-level
+            # RiskManager already enforces a global daily loss guard.
+            cfg_kwargs.setdefault("max_daily_loss_usd", Decimal("999999999"))
+            # Ensure risk_per_trade_pct is Decimal (avoids Decimal*float TypeError)
+            if "risk_per_trade_pct" in cfg_kwargs and not isinstance(
+                cfg_kwargs["risk_per_trade_pct"], Decimal
+            ):
+                cfg_kwargs["risk_per_trade_pct"] = Decimal(str(cfg_kwargs["risk_per_trade_pct"]))
             cfg = TrendFollowerConfig(**cfg_kwargs)
             return TrendFollowerAdapter(config=cfg)
 
@@ -393,6 +403,7 @@ async def phase1_baseline(
     data: MultiTimeframeData,
     config: OrchestratorBacktestConfig,
     factories: dict,
+    progress_callback=None,
 ) -> OrchestratorBacktestResult:
     """Phase 1: Baseline run with default parameters."""
     logger.info("[Phase 1] Baseline — %s", symbol)
@@ -402,7 +413,7 @@ async def phase1_baseline(
     for name, factory in factories.items():
         engine.register_strategy_factory(name, factory)
 
-    result = await engine.run(data, config)
+    result = await engine.run(data, config, progress_callback=progress_callback)
     elapsed = time.perf_counter() - t0
 
     logger.info(
@@ -720,11 +731,12 @@ def _cfg_from_backtest_yaml(
             "ema_slow_period": int(tf_cfg.get("ema_slow_period", 50)),
             "atr_period": int(tf_cfg.get("atr_period", 14)),
             "rsi_period": int(tf_cfg.get("rsi_period", 14)),
-            "risk_per_trade_pct": float(tf_cfg.get("risk_per_trade_pct", 0.01)),
-            "max_positions": int(tf_cfg.get("max_positions", 2)),
+            "risk_per_trade_pct": Decimal(str(tf_cfg.get("risk_per_trade_pct", 0.01))),
+            "max_positions": int(tf_cfg.get("max_positions", 20)),
             "require_volume_confirmation": bool(tf_cfg.get("require_volume_confirmation", False)),
-            "tp_multiplier_sideways": float(tf_cfg.get("tp_atr_multiplier_sideways", 1.5)),
-            "tp_multiplier_strong": float(tf_cfg.get("tp_atr_multiplier_strong", 4.0)),
+            "tp_atr_multiplier_sideways": float(tf_cfg.get("tp_atr_multiplier_sideways", 1.5)),
+            "tp_atr_multiplier_weak": float(tf_cfg.get("tp_atr_multiplier_weak", 1.8)),
+            "tp_atr_multiplier_strong": float(tf_cfg.get("tp_atr_multiplier_strong", 4.0)),
         }
         if tf_cfg.get("enabled", True)
         else {}
@@ -962,9 +974,49 @@ async def run_single(args: argparse.Namespace) -> None:
     )
 
     output_dir = Path(args.output_dir) / f"single_{symbol}_{datetime.now():%Y%m%d_%H%M%S}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Progress callback: log + Telegram + checkpoint every 5 min ---
+    _p1_start = time.perf_counter()
+    _p1_total_bars = len(data.m5) - config.warmup_bars
+
+    async def _progress_cb(pct: float, bars_done: int, total_bars: int, pv: float) -> None:
+        elapsed_min = (time.perf_counter() - _p1_start) / 60.0
+        remaining_est = (elapsed_min / max(pct, 0.1)) * (100.0 - pct) if pct > 0 else 0
+        msg = (
+            f"[Phase 1 — {symbol}] {pct:.1f}% | "
+            f"{bars_done:,}/{total_bars:,} bars | "
+            f"Portfolio: ${pv:,.0f} | "
+            f"Elapsed: {elapsed_min:.1f}m | "
+            f"ETA: {remaining_est:.1f}m"
+        )
+        logger.info(msg)
+        tg_send(f"📊 <b>Phase 1 progress — {symbol}</b>\n{pct:.1f}% завершено\n"
+                f"Баров: {bars_done:,}/{total_bars:,}\nPortfolio: ${pv:,.0f}\n"
+                f"Прошло: {elapsed_min:.1f} мин | Осталось: ~{remaining_est:.1f} мин")
+        # Checkpoint save
+        checkpoint = {
+            "symbol": symbol,
+            "phase": "phase1_in_progress",
+            "pct_complete": round(pct, 2),
+            "bars_done": bars_done,
+            "total_bars": total_bars,
+            "portfolio_value": pv,
+            "elapsed_min": round(elapsed_min, 2),
+        }
+        _save_results(output_dir, "phase1_checkpoint", checkpoint)
 
     phases_set = set(args.phases.split(",")) if args.phases else set()
-    p1_result = await phase1_baseline(symbol, data, config, factories)
+
+    tg_send(
+        f"🚀 <b>Phase 1 запущен — {symbol}</b>\n"
+        f"Баров: {_p1_total_bars:,} | Warmup: {config.warmup_bars}\n"
+        f"Balance: ${float(config.initial_balance):,.0f}\n"
+        f"⏳ Прогресс каждые 5 минут..."
+    )
+
+    p1_result = await phase1_baseline(symbol, data, config, factories,
+                                      progress_callback=_progress_cb)
     p1_dict = p1_result.to_dict()
     _save_results(output_dir, "phase1_baseline", p1_dict)
 
@@ -1350,7 +1402,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def _suppress_strategy_logging() -> None:
-    """Suppress verbose DEBUG logs from bot strategies (structlog + stdlib)."""
+    """Suppress verbose DEBUG logs from bot strategies (structlog + stdlib).
+
+    Keeps INFO level for the orchestrator engine so progress messages are visible.
+    """
     # Suppress structlog debug output from strategies (pattern detection etc.)
     try:
         import structlog as _sl
@@ -1361,12 +1416,53 @@ def _suppress_strategy_logging() -> None:
     # Suppress stdlib DEBUG from all bot submodules
     for name in ("bot", "bot.strategies", "bot.tests", "bot.orchestrator"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # Re-enable INFO for the orchestrator engine — it emits progress logs every 5 min
+    logging.getLogger("bot.tests.backtesting.orchestrator_engine").setLevel(logging.INFO)
+
+
+class _DedupErrorFilter(logging.Filter):
+    """Logging filter that drops duplicate error/warning messages.
+
+    Only the first occurrence of each unique message is passed through;
+    subsequent identical messages are counted but not emitted.
+    Operates at WARNING level and above.
+    """
+
+    def __init__(self, max_unique: int = 500) -> None:
+        super().__init__()
+        self._seen: dict[str, int] = {}
+        self._max_unique = max_unique
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno < logging.WARNING:
+            return True  # always pass INFO and below
+        key = record.getMessage()[:300]
+        if key in self._seen:
+            self._seen[key] += 1
+            return False
+        if len(self._seen) < self._max_unique:
+            self._seen[key] = 1
+        return True
+
+    def summary(self) -> str:
+        suppressed = {k: v - 1 for k, v in self._seen.items() if v > 1}
+        if not suppressed:
+            return "No duplicate errors suppressed."
+        lines = [f"Suppressed {sum(suppressed.values())} duplicate log entries:"]
+        for msg, cnt in sorted(suppressed.items(), key=lambda x: -x[1])[:20]:
+            lines.append(f"  ×{cnt}  {msg[:100]}")
+        return "\n".join(lines)
 
 
 def main() -> None:
     args = parse_args()
     # Always suppress noisy strategy debug logs — they slow backtest 10-100x
     _suppress_strategy_logging()
+
+    # Install dedup filter on root logger to avoid duplicate error spam in log files
+    _dedup = _DedupErrorFilter()
+    logging.root.addFilter(_dedup)
+
     logger.info("Backtest V2.0 | mode=%s | workers=%d", args.mode, args.workers)
 
     if args.mode == "single":

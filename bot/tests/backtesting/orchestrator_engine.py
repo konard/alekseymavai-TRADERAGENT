@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -481,6 +482,7 @@ class BacktestOrchestratorEngine:
         self,
         data: MultiTimeframeData,
         config: OrchestratorBacktestConfig,
+        progress_callback=None,  # async (pct, bars_done, total_bars, portfolio_value) -> None
     ) -> OrchestratorBacktestResult:
         """
         Run the full orchestrator backtest.
@@ -626,6 +628,9 @@ class BacktestOrchestratorEngine:
 
         tradeable_bars = total_bars - config.warmup_bars
         _progress_interval = max(tradeable_bars // 20, 1000)  # log every 5%
+        _progress_interval_sec = 300.0  # 5 minutes between progress reports
+        _last_progress_t = _time.monotonic()
+        _run_start_t = _last_progress_t
 
         for i in range(config.warmup_bars, total_bars):
             df_d1, df_h4, df_h1, df_m15, df_m5 = self.data_loader.get_context_at(
@@ -636,14 +641,26 @@ class BacktestOrchestratorEngine:
 
             bars_since_warmup = i - config.warmup_bars
 
-            # Progress logging
-            if bars_since_warmup > 0 and bars_since_warmup % _progress_interval == 0:
-                pct = bars_since_warmup / tradeable_bars * 100
+            # Progress logging — time-based (every _progress_interval_sec) OR every 5%
+            _now_t = _time.monotonic()
+            _bar_pct_hit = (
+                bars_since_warmup > 0 and bars_since_warmup % _progress_interval == 0
+            )
+            _time_hit = (_now_t - _last_progress_t) >= _progress_interval_sec
+            if _bar_pct_hit or _time_hit:
+                _last_progress_t = _now_t
+                pct = bars_since_warmup / tradeable_bars * 100 if tradeable_bars > 0 else 0
                 pv = float(simulator.get_portfolio_value())
+                elapsed_min = (_now_t - _run_start_t) / 60.0
                 logger.info(
-                    "progress: %.0f%% (%d/%d bars) | price=%.2f | portfolio=$%.2f",
-                    pct, bars_since_warmup, tradeable_bars, float(current_price), pv,
+                    "progress: %.1f%% (%d/%d bars) | price=%.2f | portfolio=$%.2f | elapsed=%.1fm",
+                    pct, bars_since_warmup, tradeable_bars, float(current_price), pv, elapsed_min,
                 )
+                if progress_callback is not None:
+                    try:
+                        await progress_callback(pct, bars_since_warmup, tradeable_bars, pv)
+                    except Exception:
+                        pass
 
             # 1. Regime detection
             if bars_since_warmup % config.regime_check_every_n == 0 and len(df_h1) >= 60:
