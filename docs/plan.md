@@ -195,6 +195,25 @@ assert backtest_config.smc_params["min_risk_reward"] == live_yaml["smc"]["min_ri
 
 Добавить `regime_check_interval_seconds` в `TradingCore`, из которого `backtest_engine` автоматически вычисляет `regime_check_every_n = interval_seconds / bar_duration_seconds`.
 
+### C5. StrategyRouter ↔ CapitalArbiter конфликт 🔴 [Обнаружен 2026-03-11]
+
+**Проблема**: `strategy_routing.yaml` разрешает DCA в `tight_range` и `bull_trend` (weight=0.3), но `CapitalArbiter.ALLOCATION` для `_SIDEWAYS` и `_UPTREND` ставит DCA = 0.00.
+
+**Результат**: 924 блока `blocked_by_arbiter` из ~3036 баров где DCA активна по router.
+
+**Пример конфликта**:
+```
+tight_range:  router → DCA active (weight=0.3)   arbiter → DCA 0.00 (SIDEWAYS) ← CONFLICT
+bull_trend:   router → DCA active (weight=0.3)   arbiter → DCA 0.00 (UPTREND)  ← CONFLICT
+bear_trend:   router → DCA active (weight=0.7)   arbiter → DCA 0.25 (OK)
+```
+
+**Решение** (выбрать одно):
+1. Синхронизировать `ALLOCATION[_SIDEWAYS]["dca"] = 0.15` — дать DCA минимальный капитал в tight_range
+2. Убрать DCA из `tight_range` правил в `strategy_routing.yaml` — arbiter становится source of truth
+
+**Предпочтительно**: вариант 2 — убрать DCA из `tight_range` (grid+dca в tight range противоречит SMC-философии: в narrow range лучше grid).
+
 ---
 
 ## D. Phase 3 — Portfolio Backtest 🟡 P2

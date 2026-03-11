@@ -58,23 +58,20 @@ rules:
           weight: 0.2
           priority: 3
 
-  # BULL_TREND normal → trend_follower (primary) + dca + smc
+  # BULL_TREND normal → trend_follower (primary) + smc secondary
+  # DCA removed: CapitalArbiter blocks DCA in _UPTREND (allocation=0.00)
   - name: bull_trend_default
     conditions:
       market_regime: bull_trend
     strategies:
       - name: trend_follower
         params:
-          weight: 0.5
+          weight: 0.7
           priority: 1
-      - name: dca
+      - name: smc
         params:
           weight: 0.3
           priority: 2
-      - name: smc
-        params:
-          weight: 0.2
-          priority: 3
 
   # BEAR_TREND → dca primary + smc secondary
   - name: bear_trend
@@ -92,33 +89,25 @@ rules:
 
   # ── Range regimes ──────────────────────────────────────────────────────────
 
-  # TIGHT_RANGE → grid primary + dca secondary
+  # TIGHT_RANGE → grid only (DCA removed: CapitalArbiter blocks DCA in _SIDEWAYS → conflict)
   - name: tight_range
     conditions:
       market_regime: tight_range
     strategies:
       - name: grid
         params:
-          weight: 0.7
+          weight: 1.0
           priority: 1
-      - name: dca
-        params:
-          weight: 0.3
-          priority: 2
 
-  # WIDE_RANGE → grid primary + dca secondary
+  # WIDE_RANGE → grid only (DCA removed: CapitalArbiter blocks DCA in _SIDEWAYS → conflict)
   - name: wide_range
     conditions:
       market_regime: wide_range
     strategies:
       - name: grid
         params:
-          weight: 0.7
+          weight: 1.0
           priority: 1
-      - name: dca
-        params:
-          weight: 0.3
-          priority: 2
 
   # ── Transition regimes ─────────────────────────────────────────────────────
 
