@@ -1041,6 +1041,20 @@ class BacktestOrchestratorEngine:
             amount = position_amounts.pop(pos_id, None)
             direction = position_directions.pop(pos_id, SignalDirection.LONG)
             entry_price = position_entry_prices.pop(pos_id, current_price)
+
+            # Always close VPM position when an exit is triggered — even when
+            # the strategy-level position is already gone (amount=None).  Not
+            # closing the VPM position here leaves it open so VPM keeps firing
+            # the same SL exit on every subsequent bar, inflating strat_trades
+            # by ~N_remaining_bars and preventing the VPM slot from being freed.
+            if vpm is not None and vpm_pos_ids is not None:
+                vpm_id = vpm_pos_ids.pop(pos_id, None)
+                if vpm_id:
+                    try:
+                        await vpm.close(vpm_id, current_price, exit_reason.value)
+                    except Exception:
+                        pass
+
             if amount is None:
                 continue
             try:
@@ -1063,15 +1077,6 @@ class BacktestOrchestratorEngine:
                         amount=amount,
                     )
                     pnl_delta += (entry_price - current_price) * amount
-
-                # Close VPM position if registered
-                if vpm is not None and vpm_pos_ids is not None:
-                    vpm_id = vpm_pos_ids.pop(pos_id, None)
-                    if vpm_id:
-                        try:
-                            await vpm.close(vpm_id, current_price, exit_reason.value)
-                        except Exception:
-                            pass
             except Exception as e:
                 logger.debug("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
         return pnl_delta

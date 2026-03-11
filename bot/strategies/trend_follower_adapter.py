@@ -78,6 +78,7 @@ class TrendFollowerAdapter(BaseStrategy):
         self._log_trades = log_trades
         self._last_analysis: BaseMarketAnalysis | None = None
         self._last_df: pd.DataFrame | None = None
+        self._last_price: Decimal = Decimal("0")
 
         # Cache the most recent entry signal for open_position
         self._pending_signal: Any = None
@@ -229,6 +230,7 @@ class TrendFollowerAdapter(BaseStrategy):
         self, current_price: Decimal, df: pd.DataFrame
     ) -> list[tuple[str, BaseExitReason]]:
         """Update all active positions."""
+        self._last_price = current_price
         exits: list[tuple[str, BaseExitReason]] = []
 
         active_ids = list(self._strategy.position_manager.active_positions.keys())
@@ -252,7 +254,13 @@ class TrendFollowerAdapter(BaseStrategy):
         closed: list[tuple[str, BaseExitReason]] = []
         for pos_id in position_ids:
             pos = self._strategy.position_manager.active_positions.get(pos_id)
-            exit_price = pos.entry_price if pos is not None else Decimal("0")
+            # Use last known market price for force-close PnL; fall back to entry
+            # price only if we never received a price update (shouldn't happen).
+            exit_price = (
+                self._last_price
+                if self._last_price > Decimal("0")
+                else (pos.entry_price if pos is not None else Decimal("0"))
+            )
             self._strategy.close_position(pos_id, TFExitReason.MANUAL, exit_price)
             closed.append((pos_id, BaseExitReason.MANUAL))
         if closed:
@@ -366,6 +374,7 @@ class TrendFollowerAdapter(BaseStrategy):
         self._pending_metrics = None
         self._last_analysis = None
         self._last_df = None
+        self._last_price = Decimal("0")
         self._directive = None
         self._strategy = TrendFollowerStrategy(
             config=self._config,

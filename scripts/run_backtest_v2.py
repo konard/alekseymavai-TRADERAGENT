@@ -238,6 +238,12 @@ def _make_strategy_factories(
             cfg_kwargs.setdefault("max_atr_filter_pct", Decimal("0.15"))
             cfg_kwargs.setdefault("log_all_signals", False)
             cfg_kwargs.setdefault("debug_mode", False)
+            # EMA proximity threshold: default 1% is too narrow for trend entry.
+            # BULLISH_TREND requires price > ema_fast, but the entry condition
+            # requires price within 1% of ema_fast — nearly mutually exclusive in
+            # strong trends.  3% allows entries when price is slightly above EMA
+            # on pullbacks while still being in a confirmed bullish trend.
+            cfg_kwargs.setdefault("support_resistance_threshold", Decimal("0.03"))
             # Disable TF-internal daily loss limit: the limit uses date.today() which
             # never advances during a backtest run, so a single day's losses would
             # permanently block all future signals.  The orchestrator-level
