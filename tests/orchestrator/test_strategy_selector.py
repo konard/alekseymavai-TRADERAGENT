@@ -411,7 +411,7 @@ class TestExecuteTransition:
         assert grid.state == StrategyState.STOPPED
 
         # TrendFollower should be active (bull_trend → tf + smc, DCA removed)
-        tf = registry.get("trend-follower-1")
+        tf = registry.get("trend-1")
         assert tf.state == StrategyState.ACTIVE
 
     async def test_history_recorded(self):
