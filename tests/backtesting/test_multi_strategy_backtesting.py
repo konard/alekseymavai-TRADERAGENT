@@ -136,7 +136,7 @@ class TestGridAdapterUnit:
         # Phase 2: Grid SL is aggregate-loss-based via VPM (not raw boundary check).
         # 1 position at entry=100, max_grid_loss_pct=0.05 (5%).
         # At price=94 → loss = (100-94)/100 * qty/entry * entry = 6% > 5% → fires.
-        adapter = GridAdapter(max_grid_loss_pct=Decimal("0.05"))
+        adapter = GridAdapter()  # max_grid_loss_pct removed from GridAdapter (use VPM)
         signal = BaseSignal(
             direction=SignalDirection.LONG,
             entry_price=Decimal("100"),
