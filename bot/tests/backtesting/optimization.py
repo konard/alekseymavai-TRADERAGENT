@@ -652,6 +652,7 @@ class ParameterOptimizer:
         trial_timeout_sec: float = 120.0,
         progress_every_n: int = 100,
         checkpoint_path: str | None = None,
+        progress_callback=None,  # Callable[[done, total, best_val, eta_sec], None] | None
     ) -> OptimizationResult:
         """
         Grid-search optimization targeting OrchestratorBacktestConfig params.
@@ -762,6 +763,13 @@ class ParameterOptimizer:
                                 done, total, done / total * 100,
                                 best_val, _timed_out, _failed, eta,
                             )
+
+                            # Fire external progress callback (used for Telegram etc.)
+                            if progress_callback is not None:
+                                try:
+                                    progress_callback(done, total, best_val, eta)
+                                except Exception:
+                                    pass
 
                             # Save intermediate checkpoint
                             if checkpoint_path and _trials:

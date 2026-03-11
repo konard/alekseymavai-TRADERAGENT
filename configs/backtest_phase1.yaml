@@ -58,7 +58,7 @@ orchestrator:
 risk:
   max_position_pct: 0.25         # max 25% баланса в совокупности позиций ($250 из $1000)
   max_position_pct_per_trade: 0.05  # max 5% на одну сделку ($50 из $1000) → до 5 позиций
-  max_daily_loss_pct: 0.06       # max 6% дневного убытка ($60 из $1000)
+  max_daily_loss_pct: 0.25       # max 25% дневного убытка ($250 из $1000) — generous for backtest, avoids false halt
   min_order_size: 5              # минимум $5 на ордер
 
 # ---------------------------------------------------------------------------

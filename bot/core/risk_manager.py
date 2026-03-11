@@ -353,7 +353,18 @@ class RiskManager:
         return pnl_pct
 
     def reset_daily_loss(self) -> None:
-        """Reset daily loss counter (call at start of new day)"""
+        """Reset daily loss counter (call at start of new day).
+
+        If the system was halted due to daily loss limit (not portfolio stop-loss),
+        also clears the halt so trading can resume on the next trading day.
+        """
+        # Clear daily-loss-specific halt so trading resumes each new day.
+        # Portfolio stop-loss halts (halt_reason contains "stop-loss") are permanent
+        # and must be reset manually via resume().
+        if self.is_halted and self.halt_reason and "daily" in self.halt_reason.lower():
+            self.is_halted = False
+            self.halt_reason = None
+            logger.info("Daily loss halt cleared — new trading day starts")
         self.daily_loss = Decimal("0")
         self._peak_balance_today = self.current_balance
         logger.info("Daily loss counter reset")

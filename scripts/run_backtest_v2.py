@@ -244,6 +244,12 @@ def _make_strategy_factories(
             # strong trends.  3% allows entries when price is slightly above EMA
             # on pullbacks while still being in a confirmed bullish trend.
             cfg_kwargs.setdefault("support_resistance_threshold", Decimal("0.03"))
+            # EMA divergence threshold: default 0.5% is too high for M5 data.
+            # On M5, EMA20-EMA50 divergence typically stays below 0.24% even in
+            # confirmed bull trends. 0.1% allows BULLISH_TREND detection on
+            # short timeframes without triggering on pure noise (which would
+            # require > 5× the actual M5 divergence values seen empirically).
+            cfg_kwargs.setdefault("ema_divergence_threshold", Decimal("0.001"))
             # Disable TF-internal daily loss limit: the limit uses date.today() which
             # never advances during a backtest run, so a single day's losses would
             # permanently block all future signals.  The orchestrator-level
@@ -255,7 +261,7 @@ def _make_strategy_factories(
             ):
                 cfg_kwargs["risk_per_trade_pct"] = Decimal(str(cfg_kwargs["risk_per_trade_pct"]))
             cfg = TrendFollowerConfig(**cfg_kwargs)
-            return TrendFollowerAdapter(config=cfg)
+            return TrendFollowerAdapter(config=cfg, log_trades=False)
 
         factories["trend_follower"] = _tf_factory
     except ImportError as e:
@@ -442,6 +448,7 @@ async def phase2_optimize(
     workers: int,
     factories: dict | None = None,
     output_dir: Path | None = None,
+    progress_callback=None,  # Callable[[done, total, best_val, eta_sec], None] | None
 ) -> tuple[OptimizationResult, OrchestratorBacktestConfig]:
     """Phase 2: Parameter optimization."""
     logger.info("[Phase 2] Optimization — %s (%d combos)", symbol, _count_combos(param_grid))
@@ -462,6 +469,7 @@ async def phase2_optimize(
         trial_timeout_sec=120.0,
         progress_every_n=50,
         checkpoint_path=checkpoint_path,
+        progress_callback=progress_callback,
     )
 
     optimized_config = ParameterOptimizer._apply_orchestrator_params(
@@ -1035,9 +1043,39 @@ async def run_single(args: argparse.Namespace) -> None:
     if phases_set and "2" not in phases_set:
         return
 
+    # --- Phase 2 progress: time-based Telegram + console every 5 min ---
+    _p2_total = _count_combos(ORCHESTRATOR_PARAM_GRID)
+    _p2_last_tg = [time.monotonic()]
+    _p2_start_t = time.monotonic()
+
+    tg_send(
+        f"⚙️ <b>Phase 2 запущен — {symbol}</b>\n"
+        f"Оптимизация {_p2_total} комбо | workers={args.workers}\n"
+        f"⏳ Прогресс каждые 5 минут..."
+    )
+
+    def _p2_progress_cb(done: int, total: int, best_val: float, eta_sec: float) -> None:
+        now = time.monotonic()
+        if now - _p2_last_tg[0] >= 300.0 or done == total:  # every 5 min or final
+            _p2_last_tg[0] = now
+            elapsed_min = (now - _p2_start_t) / 60.0
+            msg = (
+                f"[Phase 2 — {symbol}] {done}/{total} комбо ({done/total*100:.0f}%) | "
+                f"Best Sharpe: {best_val:.3f} | "
+                f"Elapsed: {elapsed_min:.1f}m | ETA: {eta_sec/60:.0f}m"
+            )
+            logger.info(msg)
+            tg_send(
+                f"⚙️ <b>Phase 2 — {symbol}</b>\n"
+                f"{done}/{total} комбо ({done/total*100:.0f}%)\n"
+                f"Best Sharpe: {best_val:.3f}\n"
+                f"Прошло: {elapsed_min:.1f} мин | Осталось: ~{eta_sec/60:.0f} мин"
+            )
+
     p2_result, optimized_config = await phase2_optimize(
         symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers,
         factories=factories, output_dir=output_dir,
+        progress_callback=_p2_progress_cb,
     )
     _save_results(
         output_dir,
@@ -1045,7 +1083,13 @@ async def run_single(args: argparse.Namespace) -> None:
         {
             "best_params": p2_result.best_params,
             "best_objective": p2_result.best_objective,
+            "total_trials": len(p2_result.all_results) if hasattr(p2_result, "all_results") else 0,
         },
+    )
+    tg_send(
+        f"✅ <b>Phase 2 завершён — {symbol}</b>\n"
+        f"Best Sharpe: {p2_result.best_objective:.3f}\n"
+        f"Лучшие параметры: {p2_result.best_params}"
     )
 
     if phases_set and "3" not in phases_set and "4" not in phases_set:
@@ -1465,21 +1509,46 @@ def main() -> None:
     # Always suppress noisy strategy debug logs — they slow backtest 10-100x
     _suppress_strategy_logging()
 
-    # Install dedup filter on root logger to avoid duplicate error spam in log files
-    _dedup = _DedupErrorFilter()
-    logging.root.addFilter(_dedup)
+    # Install dedup filter on root logger (console/stream) to suppress repeated
+    # error spam from ProcessPool workers in the console output.
+    _dedup_console = _DedupErrorFilter()
+    logging.root.addFilter(_dedup_console)
+
+    # Dedicated error file handler — writes only WARNING+ and only unique messages.
+    # This keeps the file readable even when a single recurring error fires millions
+    # of times across 888k bars or hundreds of optimisation trials.
+    _err_log_dir = Path(args.output_dir)
+    _err_log_dir.mkdir(parents=True, exist_ok=True)
+    _err_log_path = _err_log_dir / f"errors_{datetime.now():%Y%m%d_%H%M%S}.log"
+    _err_fh = logging.FileHandler(_err_log_path, encoding="utf-8")
+    _err_fh.setLevel(logging.WARNING)
+    _err_fh_dedup = _DedupErrorFilter(max_unique=1000)
+    _err_fh.addFilter(_err_fh_dedup)
+    _err_fh.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    logging.root.addHandler(_err_fh)
+    logger.info("Error log (unique WARNING+): %s", _err_log_path)
 
     logger.info("Backtest V2.0 | mode=%s | workers=%d", args.mode, args.workers)
 
-    if args.mode == "single":
-        asyncio.run(run_single(args))
-    elif args.mode == "multi":
-        asyncio.run(run_multi(args))
-    elif args.mode == "auto":
-        asyncio.run(run_auto(args))
-    else:
-        logger.error("Unknown mode: %s", args.mode)
-        sys.exit(1)
+    try:
+        if args.mode == "single":
+            asyncio.run(run_single(args))
+        elif args.mode == "multi":
+            asyncio.run(run_multi(args))
+        elif args.mode == "auto":
+            asyncio.run(run_auto(args))
+        else:
+            logger.error("Unknown mode: %s", args.mode)
+            sys.exit(1)
+    finally:
+        # Log dedup summary so it's visible how many errors were suppressed
+        summary = _err_fh_dedup.summary()
+        if "No duplicate" not in summary:
+            logger.info("Dedup error summary:\n%s", summary)
+        logging.root.removeHandler(_err_fh)
+        _err_fh.close()
 
 
 if __name__ == "__main__":
