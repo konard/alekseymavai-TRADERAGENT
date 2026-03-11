@@ -148,7 +148,7 @@ DEFAULT_REGIME_STRATEGIES: dict[MarketRegime, list[StrategyWeight]] = {
         StrategyWeight(strategy_type="grid", weight=1.0, priority=1),
     ],
     MarketRegime.QUIET_TRANSITION: [
-        StrategyWeight(strategy_type="grid", weight=0.7, priority=1),
+        StrategyWeight(strategy_type="smc", weight=1.0, priority=1),
     ],
     MarketRegime.VOLATILE_TRANSITION: [
         StrategyWeight(strategy_type="smc", weight=1.0, priority=1),
