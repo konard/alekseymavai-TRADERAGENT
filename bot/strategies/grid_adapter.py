@@ -253,6 +253,12 @@ class GridAdapter(BaseStrategy):
             pos["current_price"] = current_price
             if current_price >= pos["take_profit"]:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
+            elif pos.get("stop_loss"):
+                sl = pos["stop_loss"]
+                if pos["direction"] == SignalDirection.LONG and current_price <= sl:
+                    exits.append((pos_id, ExitReason.STOP_LOSS))
+                elif pos["direction"] == SignalDirection.SHORT and current_price >= sl:
+                    exits.append((pos_id, ExitReason.STOP_LOSS))
 
         return exits
 
