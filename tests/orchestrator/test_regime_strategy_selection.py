@@ -155,15 +155,15 @@ class TestRegimeToStrategyMapping:
         assert "grid" in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_quiet_transition_grid_activates_grid(self) -> None:
-        """QUIET_TRANSITION with GRID recommendation activates grid strategy."""
+    async def test_quiet_transition_activates_smc(self) -> None:
+        """QUIET_TRANSITION routes to SMC (Grid removed — precedes trend breakouts)."""
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(
             MarketRegime.QUIET_TRANSITION, RecommendedStrategy.GRID
         )
         await orch._update_active_strategies()
-        # StrategySelector routes QUIET_TRANSITION → grid (fixes Conflict #2)
-        assert "grid" in orch._active_strategies
+        # StrategySelector routes QUIET_TRANSITION → smc (Stage 1 routing fix)
+        assert "smc" in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_volatile_transition_reduce_deactivates_all(self) -> None:
