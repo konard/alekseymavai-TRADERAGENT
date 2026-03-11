@@ -238,12 +238,18 @@ def _make_strategy_factories(
             cfg_kwargs.setdefault("max_atr_filter_pct", Decimal("0.15"))
             cfg_kwargs.setdefault("log_all_signals", False)
             cfg_kwargs.setdefault("debug_mode", False)
-            # EMA proximity threshold: default 1% is too narrow for trend entry.
-            # BULLISH_TREND requires price > ema_fast, but the entry condition
-            # requires price within 1% of ema_fast — nearly mutually exclusive in
-            # strong trends.  3% allows entries when price is slightly above EMA
-            # on pullbacks while still being in a confirmed bullish trend.
+            # S/R zone width: 3% threshold for counting price touches near a level.
+            # Default 1% misses many valid S/R levels on M5 due to tick-level noise.
             cfg_kwargs.setdefault("support_resistance_threshold", Decimal("0.03"))
+            # EMA entry corridor: [EMA, EMA*(1+max_distance_from_ema_pct)].
+            # 3% matches the former support_resistance_threshold that was used
+            # for EMA proximity in the old unified code.  Now separated so S/R
+            # width and EMA corridor can be tuned independently.
+            # Also enables the A+ "return from above" scenario (Stage 1 fix).
+            cfg_kwargs.setdefault("max_distance_from_ema_pct", Decimal("0.03"))
+            # S/R minimum touches: 1 is enough on M5 (50-bar window = 4h, finding
+            # 2 touches of the same level in 4h is overly restrictive).
+            cfg_kwargs.setdefault("min_sr_touches", 1)
             # EMA divergence threshold: default 0.5% is too high for M5 data.
             # On M5, EMA20-EMA50 divergence typically stays below 0.24% even in
             # confirmed bull trends. 0.1% allows BULLISH_TREND detection on
