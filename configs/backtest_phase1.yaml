@@ -69,10 +69,11 @@ risk:
 
 grid:
   enabled: true
-  num_levels: 20                 # 20 уровней (было 10) — оптимум N*=R/√(C·ATR)≈22
-  profit_per_grid: 0.005         # 0.5% прибыль (было 0.8%) — ближе к S*=√(C·ATR)≈0.55%
-  grid_range_pct: 0.12           # 12% диапазон сетки — меньше рецентров
-  recenter_cooldown_bars: 24     # кулдаун рецентра: 24 × 5m = 2 часа
+  num_levels: 10                 # 10 уровней (было 20) — вдвое меньше экспозиция
+  profit_per_grid: 0.005         # 0.5% прибыль
+  grid_range_pct: 0.06           # 6% диапазон (было 12%) — уменьшение exposure в 2 раза
+  recenter_cooldown_bars: 6      # кулдаун рецентра: 6 × 5m = 30 минут (было 2 часа)
+  adx_filter: 25                 # не открывать новые ордера если ADX(14) > 25 (тренд)
   # amount_per_grid рассчитывается автоматически:
   # initial_balance × max_position_pct / num_levels = $1000 × 0.25 / 20 = ~$12.5
 

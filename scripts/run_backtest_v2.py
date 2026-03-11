@@ -449,8 +449,33 @@ async def phase2_optimize(
     factories: dict | None = None,
     output_dir: Path | None = None,
     progress_callback=None,  # Callable[[done, total, best_val, eta_sec], None] | None
+    max_bars: int | None = None,  # Trim data for optimization trials (avoids 120s timeout on long runs)
 ) -> tuple[OptimizationResult, OrchestratorBacktestConfig]:
-    """Phase 2: Parameter optimization."""
+    """Phase 2: Parameter optimization.
+
+    ``max_bars`` limits the dataset used per trial so that each trial finishes
+    within the timeout budget.  A good default is 15_000 bars (~53 days of M5),
+    which processes in ~105 s at the typical 142 bars/s throughput.  The trial
+    timeout is set automatically to ``max(120, max_bars / 70)`` (adds ~43%
+    headroom over the expected processing time).
+    """
+    # Trim data for Phase 2 trials if requested
+    opt_data = data
+    if max_bars and len(data.m5) > max_bars:
+        opt_data = _trim_data(data, max_bars)
+        logger.info(
+            "[Phase 2] Data trimmed for optimization: %d → %d M5 bars",
+            len(data.m5), max_bars,
+        )
+
+    # Dynamic timeout: allow 43% headroom above expected processing time
+    # (empirical: ~142 bars/sec per worker on a 16-core machine)
+    if max_bars:
+        trial_timeout = max(120.0, max_bars / 70.0)
+    else:
+        trial_timeout = 120.0
+    logger.info("[Phase 2] trial_timeout_sec=%.0fs | bars=%d", trial_timeout, len(opt_data.m5))
+
     logger.info("[Phase 2] Optimization — %s (%d combos)", symbol, _count_combos(param_grid))
     t0 = time.perf_counter()
 
@@ -463,10 +488,10 @@ async def phase2_optimize(
 
     opt_result = await optimizer.optimize_orchestrator(
         param_grid=param_grid,
-        data=data,
+        data=opt_data,
         config_template=config_template,
         max_workers=workers if workers > 1 else None,
-        trial_timeout_sec=120.0,
+        trial_timeout_sec=trial_timeout,
         progress_every_n=50,
         checkpoint_path=checkpoint_path,
         progress_callback=progress_callback,
@@ -722,6 +747,8 @@ def _cfg_from_backtest_yaml(
         _grid_params["grid_range_pct"] = Decimal(str(grid_cfg["grid_range_pct"]))
     if "recenter_cooldown_bars" in grid_cfg:
         _grid_params["recenter_cooldown_bars"] = int(grid_cfg["recenter_cooldown_bars"])
+    if "adx_filter" in grid_cfg:
+        _grid_params["adx_filter"] = int(grid_cfg["adx_filter"])
     grid_params = _grid_params if grid_cfg.get("enabled", True) else {}
 
     _dca_params: dict = {
@@ -1076,6 +1103,7 @@ async def run_single(args: argparse.Namespace) -> None:
         symbol, data, config, ORCHESTRATOR_PARAM_GRID, args.workers,
         factories=factories, output_dir=output_dir,
         progress_callback=_p2_progress_cb,
+        max_bars=getattr(args, "phase2_max_bars", None) or 15000,
     )
     _save_results(
         output_dir,
@@ -1408,7 +1436,15 @@ def parse_args() -> argparse.Namespace:
         "--max-bars",
         type=int,
         default=None,
-        help="Limit M5 bars (for smoke tests, e.g. 1000)",
+        help="Limit M5 bars for Phase 1/3/4 (for smoke tests, e.g. 1000)",
+    )
+    parser.add_argument(
+        "--phase2-max-bars",
+        type=int,
+        default=15000,
+        help="Max M5 bars per Phase 2 optimization trial (default: 15000 ≈ 53 days). "
+        "Keeps each trial under the timeout budget. At ~142 bars/sec, 15000 bars ≈ 105s "
+        "(timeout auto-set to max(120, bars/70)).",
     )
     parser.add_argument(
         "--warmup-bars",

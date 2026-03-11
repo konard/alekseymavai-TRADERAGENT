@@ -38,6 +38,7 @@ class EntryReason(str, Enum):
 
     # Trend scenarios
     TREND_PULLBACK_TO_EMA = "trend_pullback_to_ema"
+    TREND_RETURN_FROM_ABOVE = "trend_return_from_above"  # A+: price returns into EMA corridor from above
     TREND_BOUNCE_FROM_SUPPORT = "trend_bounce_from_support"
     TREND_BOUNCE_FROM_RESISTANCE = "trend_bounce_from_resistance"
 
@@ -94,6 +95,8 @@ class EntryLogicAnalyzer:
         max_atr_filter_pct: Decimal = Decimal("0.05"),
         support_resistance_lookback: int = 50,
         support_resistance_threshold: Decimal = Decimal("0.01"),
+        min_sr_touches: int = 1,
+        max_distance_from_ema_pct: Decimal = Decimal("0.03"),
         rsi_oversold: Decimal = Decimal("30"),
         rsi_overbought: Decimal = Decimal("70"),
     ):
@@ -108,6 +111,8 @@ class EntryLogicAnalyzer:
             max_atr_filter_pct: Max ATR as % of price (filter)
             support_resistance_lookback: Candles for S/R identification
             support_resistance_threshold: % threshold for S/R zones
+            min_sr_touches: Min price touches to validate S/R level (default 1 for M5)
+            max_distance_from_ema_pct: Max distance from EMA for trend entry (default 3%)
             rsi_oversold: RSI oversold threshold
             rsi_overbought: RSI overbought threshold
         """
@@ -118,6 +123,8 @@ class EntryLogicAnalyzer:
         self.max_atr_filter_pct = max_atr_filter_pct
         self.support_resistance_lookback = support_resistance_lookback
         self.support_resistance_threshold = support_resistance_threshold
+        self.min_sr_touches = min_sr_touches
+        self.max_distance_from_ema_pct = max_distance_from_ema_pct
         self.rsi_oversold = rsi_oversold
         self.rsi_overbought = rsi_overbought
 
@@ -212,7 +219,7 @@ class EntryLogicAnalyzer:
             ):
                 # Count touches near this level
                 touches = self._count_touches(df, Decimal(str(high)), is_high=True)
-                if touches >= 2:  # At least 2 touches to be valid
+                if touches >= self.min_sr_touches:
                     levels.append(
                         SupportResistanceLevel(
                             price=Decimal(str(high)),
@@ -230,7 +237,7 @@ class EntryLogicAnalyzer:
                 and low < lookback_data["low"].iloc[i + 1 : i + 3].min()
             ):
                 touches = self._count_touches(df, Decimal(str(low)), is_high=False)
-                if touches >= 2:
+                if touches >= self.min_sr_touches:
                     levels.append(
                         SupportResistanceLevel(
                             price=Decimal(str(low)),
@@ -267,49 +274,67 @@ class EntryLogicAnalyzer:
         volume_confirmed: bool,
     ) -> Optional[EntrySignal]:
         """
-        Analyze LONG entry in bullish trend
+        Analyze LONG entry in bullish trend — Variant A+.
 
-        Main scenario: Wait for pullback to EMA(20) or support zone.
-        Enter on bounce with volume confirmation.
+        Entry corridor: price in [EMA20, EMA20 * (1 + max_distance_from_ema_pct)].
+        Three scenarios (first match wins):
+
+        1. Pullback to EMA20: price is within the corridor and rising.
+        2. Return from above (A+): price was above the corridor last bar and
+           has just returned inside — pullback after overextension.
+        3. Bounce from support: price near a validated S/R support and rising.
         """
         current_price = conditions.current_price
         prev_close = Decimal(str(df["close"].iloc[-2]))
+        ema = conditions.ema_fast
+        ema_upper = ema * (Decimal("1") + self.max_distance_from_ema_pct)
 
-        # Check if price pulled back to EMA(20)
-        if self._is_near_level(current_price, conditions.ema_fast):
-            # Check for bounce (price rising)
-            if current_price > prev_close:
-                confidence = Decimal("0.8") if volume_confirmed else Decimal("0.6")
+        # --- Scenario 1: classic pullback — price inside corridor and bouncing ---
+        in_corridor = ema <= current_price <= ema_upper
+        if in_corridor and current_price > prev_close:
+            confidence = Decimal("0.8") if volume_confirmed else Decimal("0.6")
+            return EntrySignal(
+                signal_type=SignalType.LONG,
+                entry_reason=EntryReason.TREND_PULLBACK_TO_EMA,
+                entry_price=current_price,
+                confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                market_conditions=conditions,
+                volume_confirmed=volume_confirmed,
+                timestamp=conditions.timestamp,
+            )
+
+        # --- Scenario 2 (A+): return from above — price was overbought, cools back ---
+        prev_above_corridor = prev_close > ema_upper
+        now_in_corridor = ema <= current_price <= ema_upper
+        if prev_above_corridor and now_in_corridor:
+            confidence = Decimal("0.7") if volume_confirmed else Decimal("0.5")
+            return EntrySignal(
+                signal_type=SignalType.LONG,
+                entry_reason=EntryReason.TREND_RETURN_FROM_ABOVE,
+                entry_price=current_price,
+                confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                market_conditions=conditions,
+                volume_confirmed=volume_confirmed,
+                timestamp=conditions.timestamp,
+            )
+
+        # --- Scenario 3: bounce from support level ---
+        support_levels = [lvl for lvl in sr_levels if lvl.is_support]
+        for support in support_levels:
+            if self._is_near_level(current_price, support.price) and current_price > prev_close:
+                confidence = Decimal("0.75") * support.strength
+                if volume_confirmed:
+                    confidence *= Decimal("1.2")
+                confidence = min(confidence, Decimal("0.95"))
                 return EntrySignal(
                     signal_type=SignalType.LONG,
-                    entry_reason=EntryReason.TREND_PULLBACK_TO_EMA,
+                    entry_reason=EntryReason.TREND_BOUNCE_FROM_SUPPORT,
                     entry_price=current_price,
-                    confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                    confidence=confidence,
                     market_conditions=conditions,
                     volume_confirmed=volume_confirmed,
                     timestamp=conditions.timestamp,
                 )
-
-        # Check for bounce from support
-        support_levels = [lvl for lvl in sr_levels if lvl.is_support]
-        for support in support_levels:
-            if self._is_near_level(current_price, support.price):
-                # Check for bounce
-                if current_price > prev_close:
-                    confidence = Decimal("0.75") * support.strength
-                    if volume_confirmed:
-                        confidence *= Decimal("1.2")
-                    confidence = min(confidence, Decimal("0.95"))
-
-                    return EntrySignal(
-                        signal_type=SignalType.LONG,
-                        entry_reason=EntryReason.TREND_BOUNCE_FROM_SUPPORT,
-                        entry_price=current_price,
-                        confidence=confidence,
-                        market_conditions=conditions,
-                        volume_confirmed=volume_confirmed,
-                        timestamp=conditions.timestamp,
-                    )
 
         return None
 
@@ -321,48 +346,67 @@ class EntryLogicAnalyzer:
         volume_confirmed: bool,
     ) -> Optional[EntrySignal]:
         """
-        Analyze SHORT entry in bearish trend
+        Analyze SHORT entry in bearish trend — Variant A+ (symmetric to bullish).
 
-        Inverse of bullish logic: pullback to EMA(20) or resistance, then rejection.
+        Entry corridor (inverse): price in [EMA20 * (1 - max_distance_from_ema_pct), EMA20].
+        Three scenarios (first match wins):
+
+        1. Pullback to EMA20: price is within the corridor and falling.
+        2. Return from below (A+): price was below corridor last bar and
+           has just returned inside — relief bounce after overextension.
+        3. Rejection from resistance: price near a validated S/R resistance and falling.
         """
         current_price = conditions.current_price
         prev_close = Decimal(str(df["close"].iloc[-2]))
+        ema = conditions.ema_fast
+        ema_lower = ema * (Decimal("1") - self.max_distance_from_ema_pct)
 
-        # Check if price pulled back to EMA(20)
-        if self._is_near_level(current_price, conditions.ema_fast):
-            # Check for rejection (price falling)
-            if current_price < prev_close:
-                confidence = Decimal("0.8") if volume_confirmed else Decimal("0.6")
+        # --- Scenario 1: price inside corridor [ema_lower, ema] and falling ---
+        in_corridor = ema_lower <= current_price <= ema
+        if in_corridor and current_price < prev_close:
+            confidence = Decimal("0.8") if volume_confirmed else Decimal("0.6")
+            return EntrySignal(
+                signal_type=SignalType.SHORT,
+                entry_reason=EntryReason.TREND_PULLBACK_TO_EMA,
+                entry_price=current_price,
+                confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                market_conditions=conditions,
+                volume_confirmed=volume_confirmed,
+                timestamp=conditions.timestamp,
+            )
+
+        # --- Scenario 2 (A+): return from below — relief bounce back into corridor ---
+        prev_below_corridor = prev_close < ema_lower
+        now_in_corridor = ema_lower <= current_price <= ema
+        if prev_below_corridor and now_in_corridor:
+            confidence = Decimal("0.7") if volume_confirmed else Decimal("0.5")
+            return EntrySignal(
+                signal_type=SignalType.SHORT,
+                entry_reason=EntryReason.TREND_RETURN_FROM_ABOVE,
+                entry_price=current_price,
+                confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                market_conditions=conditions,
+                volume_confirmed=volume_confirmed,
+                timestamp=conditions.timestamp,
+            )
+
+        # --- Scenario 3: rejection from resistance level ---
+        resistance_levels = [lvl for lvl in sr_levels if not lvl.is_support]
+        for resistance in resistance_levels:
+            if self._is_near_level(current_price, resistance.price) and current_price < prev_close:
+                confidence = Decimal("0.75") * resistance.strength
+                if volume_confirmed:
+                    confidence *= Decimal("1.2")
+                confidence = min(confidence, Decimal("0.95"))
                 return EntrySignal(
                     signal_type=SignalType.SHORT,
-                    entry_reason=EntryReason.TREND_PULLBACK_TO_EMA,
+                    entry_reason=EntryReason.TREND_BOUNCE_FROM_RESISTANCE,
                     entry_price=current_price,
-                    confidence=confidence * (Decimal("1.0") + conditions.ema_divergence_pct),
+                    confidence=confidence,
                     market_conditions=conditions,
                     volume_confirmed=volume_confirmed,
                     timestamp=conditions.timestamp,
                 )
-
-        # Check for rejection from resistance
-        resistance_levels = [lvl for lvl in sr_levels if not lvl.is_support]
-        for resistance in resistance_levels:
-            if self._is_near_level(current_price, resistance.price):
-                # Check for rejection
-                if current_price < prev_close:
-                    confidence = Decimal("0.75") * resistance.strength
-                    if volume_confirmed:
-                        confidence *= Decimal("1.2")
-                    confidence = min(confidence, Decimal("0.95"))
-
-                    return EntrySignal(
-                        signal_type=SignalType.SHORT,
-                        entry_reason=EntryReason.TREND_BOUNCE_FROM_RESISTANCE,
-                        entry_price=current_price,
-                        confidence=confidence,
-                        market_conditions=conditions,
-                        volume_confirmed=volume_confirmed,
-                        timestamp=conditions.timestamp,
-                    )
 
         return None
 

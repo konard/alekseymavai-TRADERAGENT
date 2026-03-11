@@ -44,7 +44,13 @@ class TrendFollowerConfig:
 
     # Support/Resistance zones
     support_resistance_lookback: int = 50  # Candles for S/R identification
-    support_resistance_threshold: Decimal = Decimal("0.01")  # 1% zone around levels
+    support_resistance_threshold: Decimal = Decimal("0.01")  # 1% zone around S/R levels
+    min_sr_touches: int = 1  # Min touches to validate S/R level (was hardcoded 2; 1 works on M5)
+
+    # EMA proximity for trend entries
+    # Corridor [EMA, EMA*(1+max_distance_from_ema_pct)] is the valid entry zone.
+    # Wider than support_resistance_threshold to capture pullbacks on short timeframes.
+    max_distance_from_ema_pct: Decimal = Decimal("0.03")  # 3% above EMA20 (was hardcoded 1%)
 
     # Filters
     max_atr_filter_pct: Decimal = Decimal("0.05")  # Don't trade if ATR > 5% of price

@@ -99,6 +99,8 @@ class TrendFollowerStrategy:
             max_atr_filter_pct=self.config.max_atr_filter_pct,
             support_resistance_lookback=self.config.support_resistance_lookback,
             support_resistance_threshold=self.config.support_resistance_threshold,
+            min_sr_touches=self.config.min_sr_touches,
+            max_distance_from_ema_pct=self.config.max_distance_from_ema_pct,
             rsi_oversold=self.config.rsi_oversold,
             rsi_overbought=self.config.rsi_overbought,
         )
