@@ -198,7 +198,7 @@ async def run_smoke(bars: int, trend: str, engine_warmup: int, rr: float) -> Non
     print(f"{'='*60}")
     print(f"  Total trades:  {result.total_trades}")
     print(f"  Total return:  {result.total_return_pct:+.2f}%")
-    print(f"  Win rate:      {result.win_rate:.1%}")
+    print(f"  Win rate:      {result.win_rate:.1f}%")
     sharpe = f"{result.sharpe_ratio:.2f}" if result.sharpe_ratio is not None else "N/A"
     print(f"  Sharpe:        {sharpe}")
     dd = result.max_drawdown_pct if result.max_drawdown_pct is not None else 0.0
@@ -225,6 +225,15 @@ async def run_smoke(bars: int, trend: str, engine_warmup: int, rr: float) -> Non
     print()
     print(f"  Signals → non-None from adapter: {CTR.signal_to_trade}")
     print(f"  Signals → trades opened:         {result.total_trades}")
+
+    # Engine-level signal blocking stats (router / arbiter / risk mgr)
+    smc_stats = (result.signal_stats or {}).get("smc", {})
+    if smc_stats:
+        print()
+        print(f"  Engine-level blocks:")
+        for k, v in sorted(smc_stats.items(), key=lambda x: -x[1]):
+            if v > 0:
+                print(f"    {k:<35} {v:>7}")
 
     # 5. Diagnosis
     print(f"\n{'='*60}")

@@ -45,13 +45,11 @@ class SMCConfig:
     liquidity_range_percent: float = 0.01  # Liquidity: % range for grouping swing clusters
 
     # Risk Management
-    risk_per_trade: Decimal = Decimal(
-        "0.02"
-    )  # 2% risk per trade (fraction of balance, e.g. 0.02 = 2%)
-    risk_per_trade_pct: Decimal = Decimal(
-        "0.02"
-    )  # Alias kept for backward compatibility; prefer risk_per_trade
-    min_risk_reward: Decimal = Decimal("2.5")  # Minimum R:R ratio
+    # NOTE: PositionManager expects percentage, not fraction.
+    # 2.0 means 2% risk per trade (PositionManager divides by 100 internally).
+    risk_per_trade: Decimal = Decimal("2.0")  # 2% risk per trade
+    risk_per_trade_pct: Decimal = Decimal("2.0")  # Alias for backward compatibility
+    min_risk_reward: Decimal = Decimal("2.0")  # Minimum R:R ratio
     max_position_size: Decimal = Decimal("10000")  # Max position in USD
 
     # Entry Signal parameters

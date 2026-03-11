@@ -73,6 +73,7 @@ configs/*.yaml
 !configs/smc.yaml
 !configs/phase7_demo.yaml
 !configs/backtest_phase1.yaml
+!configs/backtest_phase2.yaml
 !configs/strategy_routing.yaml
 !configs/README.md
 

@@ -1,0 +1,120 @@
+# Phase 2 Backtest Configuration
+# ================================
+# Оптимизация параметров для топ-10 пар после Phase 1.
+# Ключевые изменения vs Phase 1:
+#   1. initial_balance: $1000 → $10000 (устраняет DCA DAILY_LOSS_LIMIT на 60% пар)
+#   2. smc.risk_per_trade: 0.01 → 2.0 (fix: PositionManager ожидает %, не долю)
+#   3. smc.min_risk_reward: 2.5 → 2.0 (синхронизация с live YAML)
+#   4. enable_smc_bypass_router: true (SMC всегда активна для получения Phase 2 метрик)
+#
+# Запуск:
+#   python scripts/run_backtest_v2.py \
+#     --mode multi \
+#     --config configs/backtest_phase2.yaml \
+#     --pairs "LDOUSDT,SANDUSDT,BCHUSDT,XEMUSDT,BATUSDT,ZILUSDT,SOLUSDT,LTCUSDT,HBARUSDT,BTCUSDT" \
+#     --workers 8 \
+#     --phase optimize
+#
+# Дата создания: 2026-03-11
+
+# ---------------------------------------------------------------------------
+# Глобальные параметры прогона
+# ---------------------------------------------------------------------------
+
+backtest:
+  initial_balance: 10000         # $10000 (было $1000) — реалистичный дневной лимит
+  warmup_bars: 500               # 500 × 5m = ~42 часа прогрева
+  max_bars: 50000                # ~173 дня (~6 месяцев) торговли
+  workers: 8                     # параллельных процессов
+  vpm_max_grid_loss_pct: 0.25   # VPM агрегированный SL для Grid
+
+  # Пары исключённые из Phase 2
+  exclude_symbols:
+    - FTTUSDT    # FTX Token — делистинг
+    - LUNAUSDT   # Terra Luna — крах
+
+# ---------------------------------------------------------------------------
+# Параметры оркестратора
+# ---------------------------------------------------------------------------
+
+orchestrator:
+  enable_strategy_router: true
+  router_cooldown_bars: 2        # 600 сек / 300 сек на бар M5 = 2 бара (как в live)
+  regime_check_every_n: 12       # каждые 12 × 5m = 1 час
+  analyze_every_n: 1             # анализировать каждый бар
+  smc_generate_signal_every_n: 12  # SMC signal каждый час (производительность)
+
+# ---------------------------------------------------------------------------
+# Risk management
+# ---------------------------------------------------------------------------
+
+risk:
+  max_position_pct: 0.25         # max 25% баланса ($2500 из $10000)
+  max_position_pct_per_trade: 0.05  # max 5% на одну сделку ($500 из $10000)
+  max_daily_loss_pct: 0.06       # max 6% дневного убытка ($600 из $10000)
+  min_order_size: 5
+
+# ---------------------------------------------------------------------------
+# Стратегия: Grid
+# Phase 2 оптимизация: num_levels × profit_per_grid (20 комбинаций)
+# ---------------------------------------------------------------------------
+
+grid:
+  enabled: true
+  num_levels: 8                  # Phase 2 baseline (оптимизация: [4, 6, 8, 10])
+  profit_per_grid: 0.012         # 1.2% baseline (оптимизация: [0.008, 0.010, 0.012, 0.016, 0.020])
+  grid_range_pct: 0.12
+  recenter_cooldown_bars: 24
+
+# ---------------------------------------------------------------------------
+# Стратегия: DCA
+# Phase 2 оптимизация: trigger_pct × max_steps × take_profit_pct (48 комбинаций)
+# ---------------------------------------------------------------------------
+
+dca:
+  enabled: true
+  trigger_pct: 0.04              # baseline (оптимизация: [0.03, 0.04, 0.05, 0.06])
+  max_steps: 4                   # baseline (оптимизация: [3, 4, 5])
+  take_profit_pct: 0.08          # baseline (оптимизация: [0.06, 0.08, 0.10, 0.12])
+  safety_order_size: 500         # $500 на шаг DCA (5% от $10k)
+  catch_up_enabled: true
+  martingale_multiplier: 1.3
+  hard_stop_loss_pct: 15
+  max_holding_bars: 288
+
+# ---------------------------------------------------------------------------
+# Стратегия: TrendFollower
+# Phase 2 оптимизация: ema_fast × ema_slow × risk_pct (36 комбинаций)
+# ---------------------------------------------------------------------------
+
+trend_follower:
+  enabled: true
+  ema_fast_period: 20            # baseline (оптимизация: [10, 20, 30])
+  ema_slow_period: 50            # baseline (оптимизация: [40, 50, 60])
+  atr_period: 14
+  rsi_period: 14
+  risk_per_trade_pct: 0.01       # baseline (оптимизация: [0.005, 0.010, 0.015, 0.020])
+  require_volume_confirmation: false
+  tp_atr_multiplier_sideways: 1.2
+  tp_atr_multiplier_weak: 1.8
+  tp_atr_multiplier_strong: 4.0
+  sl_atr_multiplier_sideways: 0.7
+  sl_atr_multiplier_trend: 1.0
+  max_positions: 2
+
+# ---------------------------------------------------------------------------
+# Стратегия: SMC
+# FIX: risk_per_trade теперь в % (2.0 = 2%), не дробью (0.02)
+# FIX: min_risk_reward=2.0 (синхронизировано с YAML live-бота)
+# Phase 2 оптимизация: swing_length × min_risk_reward (16 комбинаций)
+# ---------------------------------------------------------------------------
+
+smc:
+  enabled: true
+  swing_length: 10               # baseline (оптимизация: [5, 10, 15, 20])
+  risk_per_trade: 2.0            # FIX: 2% риска (было 0.01 = 0.01%)
+  min_risk_reward: 2.0           # FIX: синхронизировано с live YAML (было 2.5)
+  max_positions: 2
+  require_volume_confirmation: false
+  debug_mode: false
+  log_all_signals: false
