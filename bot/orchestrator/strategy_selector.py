@@ -155,19 +155,21 @@ DEFAULT_REGIME_STRATEGIES: dict[MarketRegime, list[StrategyWeight]] = {
     ],
     MarketRegime.BULL_TREND: [
         StrategyWeight(strategy_type="trend_follower", weight=0.7, priority=1),
-        StrategyWeight(strategy_type="dca", weight=0.3, priority=2),
+        StrategyWeight(strategy_type="smc", weight=0.3, priority=2),
     ],
     MarketRegime.BEAR_TREND: [
-        StrategyWeight(strategy_type="dca", weight=1.0, priority=1),
+        StrategyWeight(strategy_type="dca", weight=0.7, priority=1),
+        StrategyWeight(strategy_type="smc", weight=0.3, priority=2),
     ],
     MarketRegime.UNKNOWN: [],
 }
 
-# Hybrid mode adds grid to trending strategies
+# Hybrid mode: grid + tf + smc (matches YAML bull_trend_hybrid_grid rule)
+# Note: DCA removed — CapitalArbiter blocks DCA in _UPTREND (allocation=0.00)
 HYBRID_STRATEGY_WEIGHTS: list[StrategyWeight] = [
-    StrategyWeight(strategy_type="dca", weight=0.5, priority=1),
-    StrategyWeight(strategy_type="grid", weight=0.3, priority=2),
-    StrategyWeight(strategy_type="trend_follower", weight=0.2, priority=3),
+    StrategyWeight(strategy_type="grid", weight=0.5, priority=1),
+    StrategyWeight(strategy_type="trend_follower", weight=0.3, priority=2),
+    StrategyWeight(strategy_type="smc", weight=0.2, priority=3),
 ]
 
 
