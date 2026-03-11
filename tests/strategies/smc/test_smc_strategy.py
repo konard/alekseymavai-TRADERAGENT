@@ -206,8 +206,8 @@ class TestSMCConfigDataclass:
         assert cfg.structure_timeframe == "4h"
         assert cfg.working_timeframe == "1h"
         assert cfg.entry_timeframe == "15m"
-        assert cfg.risk_per_trade == Decimal("0.02")
-        assert cfg.min_risk_reward == Decimal("2.5")
+        assert cfg.risk_per_trade == Decimal("2.0")
+        assert cfg.min_risk_reward == Decimal("2.0")
         assert cfg.swing_length == 10
         assert cfg.close_break is True
         assert cfg.close_mitigation is False

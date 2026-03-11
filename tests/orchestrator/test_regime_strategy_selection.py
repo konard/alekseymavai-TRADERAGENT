@@ -108,24 +108,26 @@ class TestRegimeToStrategyMapping:
         assert orch._active_strategies == {"grid"}
 
     @pytest.mark.asyncio
-    async def test_bull_trend_selects_trend_follower_and_dca(self) -> None:
+    async def test_bull_trend_selects_trend_follower_and_smc(self) -> None:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.DCA)
         await orch._update_active_strategies()
-        # StrategySelector routes BULL_TREND → trend_follower + dca (no hardcoded SMC)
-        assert "dca" in orch._active_strategies
+        # StrategySelector routes BULL_TREND → trend_follower + smc (DCA removed: arbiter conflict)
         assert "trend_follower" in orch._active_strategies
+        assert "smc" in orch._active_strategies
+        assert "dca" not in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_bull_trend_hybrid_selects_grid_dca_tf(self) -> None:
+    async def test_bull_trend_hybrid_selects_grid_tf_smc(self) -> None:
         orch = _make_orchestrator_stub()
         orch._current_regime = _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID)
         await orch._update_active_strategies()
-        # HYBRID_STRATEGY_WEIGHTS: dca + grid + trend_follower (no SMC)
+        # HYBRID_STRATEGY_WEIGHTS: grid + trend_follower + smc (DCA removed: arbiter conflict)
         assert "grid" in orch._active_strategies
-        assert "dca" in orch._active_strategies
         assert "trend_follower" in orch._active_strategies
+        assert "smc" in orch._active_strategies
+        assert "dca" not in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_bear_trend_selects_dca_only(self) -> None:

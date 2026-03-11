@@ -311,13 +311,13 @@ class SMCConfigSchema(BaseModel):
 
     # Risk Management
     risk_per_trade: Decimal = Field(
-        default=Decimal("0.02"),
+        default=Decimal("2.0"),
         gt=0,
-        le=0.1,
-        description="Risk per trade as fraction of balance (0.02 = 2%)",
+        le=100,
+        description="Risk per trade as percentage of balance (2.0 = 2%)",
     )
     min_risk_reward: Decimal = Field(
-        default=Decimal("2.5"),
+        default=Decimal("2.0"),
         gt=0,
         description="Minimum risk:reward ratio",
     )

@@ -204,7 +204,7 @@ class TestRegimeChangeCausesStrategyChange:
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
         assert "grid" in orch._active_strategies
-        assert "dca" in orch._active_strategies
+        assert "trend_follower" in orch._active_strategies  # HYBRID: grid+tf+smc (DCA removed)
 
     @pytest.mark.asyncio
     async def test_no_change_when_throttled(self):

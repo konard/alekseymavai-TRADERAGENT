@@ -426,10 +426,11 @@ class TestBacktestResultHasRegimeRiskFields:
 class TestRegimeAllowedStrategyTypes:
     """Verify the REGIME_ALLOWED_STRATEGY_TYPES mapping is built correctly."""
 
-    def test_bull_trend_allows_trend_follower_and_dca(self):
+    def test_bull_trend_allows_trend_follower_and_smc(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.BULL_TREND]
         assert "trend_follower" in allowed
-        assert "dca" in allowed
+        assert "smc" in allowed
+        assert "dca" not in allowed  # DCA removed: arbiter blocks DCA in _UPTREND
 
     def test_bear_trend_allows_dca(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.BEAR_TREND]

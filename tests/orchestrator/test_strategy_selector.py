@@ -83,11 +83,12 @@ class TestDefaultRegimeStrategies:
         assert len(weights) == 1
         assert weights[0].strategy_type == "grid"
 
-    def test_bull_trend_maps_to_trend_and_dca(self):
+    def test_bull_trend_maps_to_trend_follower_and_smc(self):
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.BULL_TREND]
         types = {w.strategy_type for w in weights}
         assert "trend_follower" in types
-        assert "dca" in types
+        assert "smc" in types
+        assert "dca" not in types  # DCA removed: arbiter blocks DCA in _UPTREND
 
     def test_bear_trend_maps_to_dca_only(self):
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.BEAR_TREND]
@@ -109,11 +110,12 @@ class TestDefaultRegimeStrategies:
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.UNKNOWN]
         assert len(weights) == 0
 
-    def test_hybrid_includes_grid_and_dca(self):
+    def test_hybrid_includes_grid_tf_smc(self):
         types = {w.strategy_type for w in HYBRID_STRATEGY_WEIGHTS}
-        assert "dca" in types
         assert "grid" in types
         assert "trend_follower" in types
+        assert "smc" in types
+        assert "dca" not in types  # DCA removed: arbiter blocks DCA in _UPTREND
 
 
 class TestSelectorInit:
@@ -187,7 +189,7 @@ class TestSelectMethod:
         result = selector.select(analysis)
 
         start_types = {w.strategy_type for w in result.strategies_to_start}
-        assert "trend_follower" in start_types or "dca" in start_types
+        assert "trend_follower" in start_types
 
     def test_hybrid_selects_multiple(self):
         registry = _make_registry_with_strategies()
@@ -202,8 +204,8 @@ class TestSelectMethod:
         result = selector.select(analysis)
 
         start_types = {w.strategy_type for w in result.strategies_to_start}
-        assert "dca" in start_types
         assert "grid" in start_types
+        assert "trend_follower" in start_types
 
     async def test_reduce_exposure_stops_all(self):
         registry = _make_registry_with_strategies()
@@ -408,9 +410,9 @@ class TestExecuteTransition:
         grid = registry.get("grid-1")
         assert grid.state == StrategyState.STOPPED
 
-        # DCA should be active
-        dca = registry.get("dca-1")
-        assert dca.state == StrategyState.ACTIVE
+        # TrendFollower should be active (bull_trend → tf + smc, DCA removed)
+        tf = registry.get("trend-follower-1")
+        assert tf.state == StrategyState.ACTIVE
 
     async def test_history_recorded(self):
         registry = _make_registry_with_strategies()
@@ -630,11 +632,10 @@ class TestIntegrationWithBotOrchestrator:
         orch._current_regime = analysis
         await orch._update_active_strategies()
 
-        # DEFAULT_REGIME_STRATEGIES: BULL_TREND → trend_follower + dca (no SMC hardcode)
+        # DEFAULT_REGIME_STRATEGIES: BULL_TREND → trend_follower + smc (DCA removed: arbiter conflict)
         assert "trend_follower" in orch._active_strategies
-        assert "dca" in orch._active_strategies
-        # SMC is NOT hardcoded for BULL_TREND in DEFAULT_REGIME_STRATEGIES
-        assert "smc" not in orch._active_strategies
+        assert "smc" in orch._active_strategies
+        assert "dca" not in orch._active_strategies
 
     async def test_conflict2_quiet_transition_activates_grid(self):
         """Conflict #2: QUIET_TRANSITION/GRID activates grid, not empty set."""
