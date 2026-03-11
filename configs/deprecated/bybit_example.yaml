@@ -1,0 +1,122 @@
+# ByBit Bot Configuration Example
+# Copy this file and configure with your settings
+
+# Database Configuration
+database_url: postgresql+asyncpg://traderagent:password@localhost:5432/traderagent
+database_pool_size: 5
+
+# Logging Configuration
+log_level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_to_file: true
+log_to_console: true
+json_logs: false
+
+# Encryption Key (Get from ENCRYPTION_KEY environment variable)
+# Generate with: python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+encryption_key: ${ENCRYPTION_KEY}
+
+# Bot Configurations
+bots:
+  # ByBit Grid Trading Bot Example
+  - version: 1
+    name: bybit_btc_grid
+    symbol: BTC/USDT
+    strategy: grid  # grid, dca, or hybrid
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_main  # Must match the name in database
+      sandbox: true  # Use testnet for testing (HIGHLY RECOMMENDED)
+      rate_limit: true
+
+    grid:
+      enabled: true
+      upper_price: "45000"    # Upper price boundary
+      lower_price: "40000"    # Lower price boundary
+      grid_levels: 10         # Number of grid levels (2-100)
+      amount_per_grid: "50"   # Amount in USDT per grid level
+      profit_per_grid: "0.01" # 1% profit per grid level
+
+    risk_management:
+      max_position_size: "5000"     # Maximum total position in USDT
+      stop_loss_percentage: "0.15"  # 15% stop loss (optional)
+      max_daily_loss: null          # Maximum daily loss (optional)
+      min_order_size: "10"          # Minimum order size in USDT
+
+    notifications:
+      enabled: false  # Set to true when Telegram is configured
+      telegram_bot_token: null
+      telegram_chat_id: null
+      notify_on_trade: true
+      notify_on_error: true
+
+    dry_run: true   # Simulation mode - no real orders (KEEP TRUE FOR TESTING)
+    auto_start: false  # Auto-start on bot initialization
+
+  # ByBit DCA Bot Example
+  - version: 1
+    name: bybit_eth_dca
+    symbol: ETH/USDT
+    strategy: dca
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_main
+      sandbox: true
+      rate_limit: true
+
+    dca:
+      enabled: true
+      trigger_percentage: "0.05"      # Buy when price drops 5%
+      amount_per_step: "50"           # Amount per DCA step in USDT
+      max_steps: 5                    # Maximum DCA steps (1-20)
+      take_profit_percentage: "0.10"  # Take profit at 10% gain
+
+    risk_management:
+      max_position_size: "3000"
+      stop_loss_percentage: "0.20"  # 20% stop loss
+      min_order_size: "10"
+
+    notifications:
+      enabled: false
+
+    dry_run: true
+    auto_start: false
+
+  # ByBit Hybrid Strategy Example
+  - version: 1
+    name: bybit_btc_hybrid
+    symbol: BTC/USDT
+    strategy: hybrid  # Grid + DCA combined
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_main
+      sandbox: true
+      rate_limit: true
+
+    grid:
+      enabled: true
+      upper_price: "45000"
+      lower_price: "42000"
+      grid_levels: 5
+      amount_per_grid: "100"
+      profit_per_grid: "0.015"  # 1.5% profit
+
+    dca:
+      enabled: true
+      trigger_percentage: "0.03"      # DCA when price drops 3% below grid
+      amount_per_step: "100"
+      max_steps: 3
+      take_profit_percentage: "0.08"  # 8% profit
+
+    risk_management:
+      max_position_size: "10000"
+      stop_loss_percentage: "0.25"  # 25% stop loss
+      min_order_size: "10"
+
+    notifications:
+      enabled: false
+
+    dry_run: true
+    auto_start: false

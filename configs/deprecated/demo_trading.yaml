@@ -1,0 +1,131 @@
+# ByBit Demo Trading Configuration
+# DCA-Grid Bot for Testing on Demo Trading (Paper Trading)
+# Current BTC Price: ~$67,000
+
+# Database Configuration
+database_url: ${DATABASE_URL}
+database_pool_size: 5
+
+# Logging Configuration
+log_level: INFO
+log_to_file: true
+log_to_console: true
+json_logs: false
+
+# Encryption Key
+encryption_key: ${ENCRYPTION_KEY}
+
+# Bot Configurations
+bots:
+  # BTC/USDT Hybrid DCA-Grid Strategy (Demo Trading)
+  - version: 1
+    name: demo_btc_hybrid
+    symbol: BTC/USDT  # Futures symbol (Demo only supports linear/futures!)
+    strategy: hybrid  # Grid + DCA combined
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_production  # As configured in database
+      sandbox: true  # Demo Trading mode (api-demo.bybit.com)
+      rate_limit: true
+
+    # Grid Trading Parameters
+    grid:
+      enabled: true
+      upper_price: "72000"     # Upper boundary (+7% from current)
+      lower_price: "62000"     # Lower boundary (-7% from current)
+      grid_levels: 8           # 8 grid levels
+      amount_per_grid: "15"    # $15 per grid (small for testing)
+      profit_per_grid: "0.015" # 1.5% profit per grid level
+
+    # DCA (Dollar Cost Averaging) Parameters
+    dca:
+      enabled: true
+      trigger_percentage: "0.04"      # DCA when price drops 4% below grid
+      amount_per_step: "20"           # $20 per DCA step
+      max_steps: 4                    # Maximum 4 DCA steps
+      take_profit_percentage: "0.10"  # Take profit at 10% gain
+
+    # Risk Management
+    risk_management:
+      max_position_size: "500"      # Max $500 total position
+      stop_loss_percentage: "0.15"  # 15% stop loss
+      max_daily_loss: "100"         # Max $100 daily loss
+      min_order_size: "10"          # Minimum $10 per order
+
+    # Notifications (Telegram disabled for demo)
+    notifications:
+      enabled: false
+      telegram_bot_token: null
+      telegram_chat_id: null
+      notify_on_trade: false
+      notify_on_error: false
+
+    # CRITICAL: Keep true for testing!
+    dry_run: true
+    auto_start: true  # Auto-start on initialization
+
+  # ETH/USDT Grid Strategy (Demo Trading)
+  - version: 1
+    name: demo_eth_grid
+    symbol: ETH/USDT  # Futures symbol
+    strategy: grid
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_production
+      sandbox: true
+      rate_limit: true
+
+    # Grid Trading Parameters
+    grid:
+      enabled: true
+      upper_price: "3800"      # Upper boundary
+      lower_price: "3200"      # Lower boundary
+      grid_levels: 6           # 6 grid levels
+      amount_per_grid: "10"    # $10 per grid
+      profit_per_grid: "0.02"  # 2% profit per grid
+
+    # Risk Management
+    risk_management:
+      max_position_size: "300"
+      stop_loss_percentage: "0.15"
+      min_order_size: "10"
+
+    notifications:
+      enabled: false
+
+    dry_run: true
+    auto_start: false  # Manual start
+
+  # SOL/USDT DCA Strategy (Demo Trading)
+  - version: 1
+    name: demo_sol_dca
+    symbol: SOL/USDT  # Futures symbol
+    strategy: dca
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_production
+      sandbox: true
+      rate_limit: true
+
+    # DCA Parameters
+    dca:
+      enabled: true
+      trigger_percentage: "0.05"      # Buy when price drops 5%
+      amount_per_step: "15"           # $15 per step
+      max_steps: 5                    # Max 5 steps
+      take_profit_percentage: "0.12"  # Take profit at 12%
+
+    # Risk Management
+    risk_management:
+      max_position_size: "200"
+      stop_loss_percentage: "0.20"
+      min_order_size: "10"
+
+    notifications:
+      enabled: false
+
+    dry_run: true
+    auto_start: false  # Manual start

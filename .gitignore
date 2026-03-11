@@ -69,12 +69,12 @@ Thumbs.db
 
 # Bot specific
 configs/*.yaml
-!configs/example.yaml
-!configs/schema.yaml
 !configs/trend_follower_production.yaml
+!configs/smc.yaml
 !configs/phase7_demo.yaml
 !configs/backtest_phase1.yaml
 !configs/strategy_routing.yaml
+!configs/README.md
 
 # Alembic
 alembic.ini
@@ -95,6 +95,13 @@ ci-logs/
 
 # Playwright MCP logs
 .playwright-mcp/
+
+# Claude conversation checkpoints
+.modern/
+
+# Backtest results (large, re-generated)
+data/backtest_results/
+results/
 
 # Node.js
 node_modules/

@@ -1,4 +1,7 @@
-# TRADERAGENT — Архитектура
+# TRADERAGENT — Архитектура [АРХИВ]
+
+> ⚠️ **УСТАРЕЛО**: Этот документ заменён актуальным [architecture_v2.md](architecture_v2.md) (v2.2.0, 2026-03-09).
+> Оставлен как архив для истории разработки.
 
 > Дата: 2026-03-07 · Версия: v2.0.1 (P0-фиксы: force_close_all TF/SMC, strat_trades, cooldown)
 
