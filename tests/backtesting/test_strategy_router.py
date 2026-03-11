@@ -98,8 +98,8 @@ class TestStrategyRouterBasicRouting:
         assert "dca" in event.active_strategies
         assert "grid" not in event.active_strategies
 
-    def test_bull_trend_default_selects_trend_follower_and_dca(self) -> None:
-        """BULL_TREND with low confluence → trend_follower + dca (from YAML)."""
+    def test_bull_trend_default_selects_trend_follower_and_smc(self) -> None:
+        """BULL_TREND with low confluence → trend_follower + smc (DCA removed: arbiter conflict)."""
         router = _make_router()
         # low confluence_score (<0.7) → not HYBRID rule
         regime = _make_regime(
@@ -109,10 +109,11 @@ class TestStrategyRouterBasicRouting:
         )
         event = router.on_bar(regime, current_bar=0)
         assert "trend_follower" in event.active_strategies
-        assert "dca" in event.active_strategies
+        assert "smc" in event.active_strategies
+        assert "dca" not in event.active_strategies  # removed: arbiter blocks DCA in _UPTREND
 
     def test_bull_trend_high_confluence_selects_hybrid(self) -> None:
-        """BULL_TREND with high confluence (>=0.7) → hybrid rule (dca + grid + tf)."""
+        """BULL_TREND with high confluence (>=0.7) → hybrid rule (grid + tf + smc)."""
         router = _make_router()
         regime = _make_regime(
             MarketRegime.BULL_TREND,
@@ -120,7 +121,6 @@ class TestStrategyRouterBasicRouting:
             confluence_score=0.8,
         )
         event = router.on_bar(regime, current_bar=0)
-        assert "dca" in event.active_strategies
         assert "grid" in event.active_strategies
         assert "trend_follower" in event.active_strategies
 
