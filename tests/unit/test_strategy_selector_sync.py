@@ -268,12 +268,13 @@ class TestRoutingConfigInit:
         result = selector.select(analysis)
 
         start_types = {w.strategy_type for w in result.strategies_to_start}
-        # BULL_TREND (low confluence) → trend_follower + dca
+        # BULL_TREND (low confluence) → trend_follower + smc (DCA removed: arbiter conflict)
         assert "trend_follower" in start_types
-        assert "dca" in start_types
+        assert "smc" in start_types
+        assert "dca" not in start_types
 
     def test_routing_config_hybrid_via_confluence_high(self) -> None:
-        """High confluence activates the hybrid (bull_trend_hybrid) rule in YAML."""
+        """High confluence activates the hybrid (bull_trend_hybrid_grid) rule in YAML."""
         analysis = _make_analysis(
             regime=MarketRegime.BULL_TREND,
             recommended=RecommendedStrategy.HYBRID,
@@ -283,10 +284,10 @@ class TestRoutingConfigInit:
         result = selector.select(analysis)
 
         start_types = {w.strategy_type for w in result.strategies_to_start}
-        # Hybrid rule: dca + grid + trend_follower
-        assert "dca" in start_types
+        # Hybrid grid rule: grid + trend_follower + smc (DCA removed: arbiter conflict)
         assert "grid" in start_types
         assert "trend_follower" in start_types
+        assert "dca" not in start_types
 
     def test_reduce_exposure_always_returns_empty(self) -> None:
         """REDUCE_EXPOSURE overrides RoutingConfig and returns no strategies."""
