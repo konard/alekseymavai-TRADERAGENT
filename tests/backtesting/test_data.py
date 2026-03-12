@@ -183,14 +183,21 @@ class HistoricalDataProvider:
         """
         interval_delta = self._parse_interval(interval)
 
-        current_price = base_price
-        volatility = Decimal("0.015")  # 1.5% volatility
+        # Estimate total bars to scale trend_strength adaptively.
+        # Target: price triples (×3) over the full series for "up" trend.
+        total_seconds = (end_date - start_date).total_seconds()
+        est_bars = max(int(total_seconds / interval_delta.total_seconds()), 1)
 
-        # Trend parameters
+        current_price = base_price
+        volatility = Decimal("0.003")  # 0.3% volatility per bar
+
+        # Adaptive trend: ln(3)/est_bars per bar → price ×3 over full series.
+        import math
+        _drift_per_bar = Decimal(str(math.log(3) / est_bars))
         if trend == "up":
-            trend_strength = Decimal("0.001")  # 0.1% upward bias per candle
+            trend_strength = _drift_per_bar
         elif trend == "down":
-            trend_strength = Decimal("-0.001")  # 0.1% downward bias
+            trend_strength = -_drift_per_bar
         else:  # sideways
             trend_strength = Decimal("0")
 

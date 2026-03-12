@@ -324,7 +324,9 @@ def _load_data(
     loader = MultiTimeframeDataLoader()
 
     if data_dir and data_dir.exists():
-        csv_files = [f for f in data_dir.glob(f"*{symbol}*.csv") if f.stem.endswith("_5m")]
+        # Normalise symbol: "ETH/USDT" → "ETHUSDT" so glob matches filenames
+        _sym_clean = symbol.replace("/", "")
+        csv_files = [f for f in data_dir.glob(f"*{_sym_clean}*.csv") if f.stem.endswith("_5m")]
         if csv_files:
             try:
                 csv_path = csv_files[0]
