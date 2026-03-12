@@ -1,0 +1,1203 @@
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Card } from '../components/common/Card';
+import { PageTransition } from '../components/common/PageTransition';
+import { useEventStore, type DomainEvent } from '../stores/eventStore';
+import { eventsApi } from '../api/events';
+import { WebSocketClient } from '../api/websocket';
+
+/* ─────────────────── constants ─────────────────── */
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+const ENTITY_COLORS: Record<string, string> = {
+  position: '#3b82f6',
+  regime: '#8b5cf6',
+  strategy: '#10b981',
+  risk: '#ef4444',
+  portfolio: '#f59e0b',
+  bot: '#6b7280',
+};
+
+const ENTITY_LABELS: Record<string, string> = {
+  position: 'Position',
+  regime: 'Regime',
+  strategy: 'Strategy',
+  risk: 'Risk',
+  portfolio: 'Portfolio',
+  bot: 'Bot',
+};
+
+const TABS = [
+  { key: 'timeline', label: 'Timeline' },
+  { key: 'graph', label: 'Event Graph' },
+  { key: 'state', label: 'State Projections' },
+  { key: 'registry', label: 'Registry & Matrix' },
+] as const;
+
+type TabKey = (typeof TABS)[number]['key'];
+
+function entityColor(type: string): string {
+  return ENTITY_COLORS[type.toLowerCase()] || '#6b7280';
+}
+
+function fmtTs(ts: number): string {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtDate(ts: number): string {
+  const d = new Date(ts * 1000);
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function abbreviate(eventType: string): string {
+  return eventType
+    .split('_')
+    .map((w) => w[0]?.toUpperCase() || '')
+    .join('');
+}
+
+/* ─────────────────── main page ─────────────────── */
+
+export function EventOntology() {
+  const [activeTab, setActiveTab] = useState<TabKey>('timeline');
+
+  return (
+    <PageTransition>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-text font-[Manrope]">Event Ontology</h2>
+          <p className="text-xs text-text-muted mt-1">Real-time event monitoring & causal analysis</p>
+        </div>
+        <EventStats />
+      </div>
+
+      {/* tabs */}
+      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 mb-6 w-fit">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 text-sm rounded-md transition-all duration-200 ${
+              activeTab === tab.key
+                ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                : 'text-text-muted hover:text-text hover:bg-surface-hover'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'timeline' && <TimelineTab />}
+      {activeTab === 'graph' && <GraphTab />}
+      {activeTab === 'state' && <StateTab />}
+      {activeTab === 'registry' && <RegistryTab />}
+    </PageTransition>
+  );
+}
+
+/* ─────────────────── event stats badge ─────────────────── */
+
+function EventStats() {
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    eventsApi
+      .getStats()
+      .then((r) => setStats(r.data))
+      .catch(() => {});
+  }, []);
+
+  if (!stats) return null;
+
+  return (
+    <div className="flex items-center gap-3">
+      {typeof stats.total_events === 'number' && (
+        <div className="text-right">
+          <p className="text-xs text-text-muted">Total Events</p>
+          <p className="text-lg font-bold text-text">{(stats.total_events as number).toLocaleString()}</p>
+        </div>
+      )}
+      <div className="w-3 h-3 rounded-full bg-profit animate-pulse" />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 1: TIMELINE
+   ═══════════════════════════════════════════════════════════ */
+
+function TimelineTab() {
+  const { events, filteredEntityType, isPaused, addEvent, setFilter, togglePause, clearEvents } = useEventStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocketClient | null>(null);
+
+  // bootstrap: fetch recent events
+  useEffect(() => {
+    eventsApi
+      .getAllEvents(100)
+      .then((r) => {
+        const items: DomainEvent[] = Array.isArray(r.data) ? r.data : r.data?.events || [];
+        items.reverse().forEach(addEvent);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // websocket for real-time
+  useEffect(() => {
+    const ws = new WebSocketClient(API_BASE_URL);
+    wsRef.current = ws;
+    const token = localStorage.getItem('access_token') || '';
+    ws.connect(token);
+    const unsub = ws.onMessage((msg) => {
+      if (msg.type === 'domain_event' && msg.data) {
+        addEvent(msg.data as unknown as DomainEvent);
+      }
+    });
+    return () => {
+      unsub();
+      ws.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // auto-scroll
+  useEffect(() => {
+    if (!isPaused && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [events.length, isPaused]);
+
+  const filtered = useMemo(() => {
+    if (!filteredEntityType) return events;
+    return events.filter((e) => e.entity_type === filteredEntityType);
+  }, [events, filteredEntityType]);
+
+  // build cause lookup for dotted lines
+  const causeMap = useMemo(() => {
+    const m = new Map<string, number>();
+    filtered.forEach((e, i) => m.set(e.event_id, i));
+    return m;
+  }, [filtered]);
+
+  return (
+    <div className="space-y-4">
+      {/* toolbar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={filteredEntityType || ''}
+          onChange={(e) => setFilter(e.target.value || null)}
+          className="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-primary"
+        >
+          <option value="">All entities</option>
+          {Object.entries(ENTITY_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={togglePause}
+          className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+            isPaused
+              ? 'border-loss text-loss hover:bg-loss/10'
+              : 'border-profit text-profit hover:bg-profit/10'
+          }`}
+        >
+          {isPaused ? '▶ Resume' : '⏸ Pause'}
+        </button>
+
+        <button
+          onClick={clearEvents}
+          className="px-4 py-2 text-sm rounded-lg border border-border text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+        >
+          Clear
+        </button>
+
+        <span className="text-xs text-text-muted ml-auto">
+          {filtered.length} events {isPaused && '(paused)'}
+        </span>
+      </div>
+
+      {/* event feed */}
+      <div ref={scrollRef} className="max-h-[calc(100vh-280px)] overflow-y-auto space-y-2 pr-1">
+        <AnimatePresence initial={false}>
+          {filtered.map((event, idx) => (
+            <TimelineCard key={event.event_id} event={event} causeMap={causeMap} index={idx} />
+          ))}
+        </AnimatePresence>
+
+        {filtered.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-text-muted">
+            <div className="text-4xl mb-3 opacity-30">~</div>
+            <p className="text-sm">No events yet</p>
+            <p className="text-xs mt-1">Events will appear here in real time</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TimelineCard({
+  event,
+  causeMap,
+}: {
+  event: DomainEvent;
+  causeMap: Map<string, number>;
+  index: number;
+}) {
+  const color = entityColor(event.entity_type);
+  const hasCauses = event.causes && event.causes.length > 0;
+  const causeExists = hasCauses && event.causes.some((c) => causeMap.has(c));
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      transition={{ duration: 0.2 }}
+      className="relative"
+    >
+      {/* causal chain dotted line */}
+      {causeExists && (
+        <div
+          className="absolute left-6 -top-2 w-px h-2"
+          style={{ borderLeft: `2px dotted ${color}40` }}
+        />
+      )}
+
+      <div
+        className="bg-surface border border-border rounded-lg p-4 hover:bg-surface-hover transition-colors group"
+        style={{ borderLeftWidth: '3px', borderLeftColor: color }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* entity type badge */}
+            <span
+              className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: `${color}20`, color }}
+            >
+              {event.entity_type}
+            </span>
+
+            {/* event type */}
+            <span className="text-sm font-medium text-text truncate">{event.event_type}</span>
+          </div>
+
+          {/* timestamp */}
+          <span className="text-xs text-text-muted shrink-0 font-mono">{fmtTs(event.ts)}</span>
+        </div>
+
+        {/* entity info */}
+        <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
+          <span>
+            entity: <span className="text-text">{event.entity_id}</span>
+          </span>
+          {event.bot_name && (
+            <span>
+              bot: <span className="text-text">{event.bot_name}</span>
+            </span>
+          )}
+          {event.priority > 0 && (
+            <span>
+              priority: <span className="text-orange">{event.priority}</span>
+            </span>
+          )}
+        </div>
+
+        {/* data summary */}
+        {event.data && Object.keys(event.data).length > 0 && (
+          <div className="mt-2 bg-background rounded-md p-2 text-xs font-mono text-text-muted overflow-x-auto max-h-20 overflow-y-auto">
+            {Object.entries(event.data)
+              .slice(0, 6)
+              .map(([k, v]) => (
+                <div key={k}>
+                  <span className="text-text-muted">{k}:</span>{' '}
+                  <span className="text-text">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+                </div>
+              ))}
+            {Object.keys(event.data).length > 6 && (
+              <div className="text-text-muted opacity-50">... +{Object.keys(event.data).length - 6} more</div>
+            )}
+          </div>
+        )}
+
+        {/* causal links */}
+        {hasCauses && (
+          <div className="mt-2 flex items-center gap-1 text-[10px] text-text-muted">
+            <span style={{ color: `${color}90` }}>caused by:</span>
+            {event.causes.map((c) => (
+              <span key={c} className="font-mono px-1 py-0.5 rounded bg-background" style={{ color: `${color}80` }}>
+                {c.slice(0, 8)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {event.enables && event.enables.length > 0 && (
+          <div className="mt-1 flex items-center gap-1 text-[10px] text-text-muted">
+            <span style={{ color: `${color}90` }}>enables:</span>
+            {event.enables.map((e) => (
+              <span key={e} className="font-mono px-1 py-0.5 rounded bg-background" style={{ color: `${color}80` }}>
+                {e.slice(0, 8)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 2: EVENT GRAPH
+   ═══════════════════════════════════════════════════════════ */
+
+interface GraphNode {
+  id: string;
+  event_type: string;
+  entity_type: string;
+  ts: number;
+  x: number;
+  y: number;
+}
+
+interface GraphEdge {
+  from: string;
+  to: string;
+}
+
+function GraphTab() {
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [selected, setSelected] = useState<GraphNode | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<DomainEvent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [entityFilter, setEntityFilter] = useState<string>('');
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: 1200, h: 700 });
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    setLoading(true);
+    eventsApi
+      .getGraph(entityFilter || undefined, undefined, 200)
+      .then((r) => {
+        const data = r.data;
+        const rawNodes: DomainEvent[] = data.nodes || data.events || [];
+        const rawEdges: GraphEdge[] = data.edges || [];
+
+        // layout: force-directed-like circular placement
+        const laid = layoutNodes(rawNodes);
+        setNodes(laid);
+        setEdges(rawEdges.length > 0 ? rawEdges : buildEdgesFromCauses(rawNodes));
+      })
+      .catch(() => {
+        setNodes([]);
+        setEdges([]);
+      })
+      .finally(() => setLoading(false));
+  }, [entityFilter]);
+
+  const handleNodeClick = useCallback(
+    (node: GraphNode) => {
+      setSelected(node);
+      // fetch full event data
+      eventsApi
+        .getTimeline(node.entity_type, node.id)
+        .then((r) => {
+          const evts = Array.isArray(r.data) ? r.data : r.data?.events || [];
+          const found = evts.find((e: DomainEvent) => e.event_id === node.id);
+          setSelectedEvent(found || null);
+        })
+        .catch(() => setSelectedEvent(null));
+    },
+    [],
+  );
+
+  // pan handlers
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.target === svgRef.current || (e.target as SVGElement).tagName === 'rect') {
+      setDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+    }
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    setViewBox((v) => ({ ...v, x: v.x - dx * (v.w / 1200), y: v.y - dy * (v.h / 700) }));
+    setDragStart({ x: e.clientX, y: e.clientY });
+  };
+  const onMouseUp = () => setDragging(false);
+  const onWheel = (e: React.WheelEvent) => {
+    const factor = e.deltaY > 0 ? 1.1 : 0.9;
+    setViewBox((v) => ({
+      x: v.x + (v.w * (1 - factor)) / 2,
+      y: v.y + (v.h * (1 - factor)) / 2,
+      w: v.w * factor,
+      h: v.h * factor,
+    }));
+  };
+
+  const nodeMap = useMemo(() => {
+    const m = new Map<string, GraphNode>();
+    nodes.forEach((n) => m.set(n.id, n));
+    return m;
+  }, [nodes]);
+
+  return (
+    <div className="flex gap-4 h-[calc(100vh-280px)]">
+      {/* graph canvas */}
+      <div className="flex-1 bg-surface border border-border rounded-xl overflow-hidden relative">
+        {/* entity filter */}
+        <div className="absolute top-3 left-3 z-10">
+          <select
+            value={entityFilter}
+            onChange={(e) => setEntityFilter(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-text focus:outline-none focus:border-primary"
+          >
+            <option value="">All entities</option>
+            {Object.entries(ENTITY_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* zoom controls */}
+        <div className="absolute top-3 right-3 z-10 flex flex-col gap-1">
+          <button
+            onClick={() =>
+              setViewBox((v) => ({
+                x: v.x + v.w * 0.05,
+                y: v.y + v.h * 0.05,
+                w: v.w * 0.9,
+                h: v.h * 0.9,
+              }))
+            }
+            className="w-7 h-7 bg-background border border-border rounded text-text text-xs hover:bg-surface-hover"
+          >
+            +
+          </button>
+          <button
+            onClick={() =>
+              setViewBox((v) => ({
+                x: v.x - v.w * 0.05,
+                y: v.y - v.h * 0.05,
+                w: v.w * 1.1,
+                h: v.h * 1.1,
+              }))
+            }
+            className="w-7 h-7 bg-background border border-border rounded text-text text-xs hover:bg-surface-hover"
+          >
+            -
+          </button>
+          <button
+            onClick={() => setViewBox({ x: 0, y: 0, w: 1200, h: 700 })}
+            className="w-7 h-7 bg-background border border-border rounded text-text text-[10px] hover:bg-surface-hover"
+          >
+            fit
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-text-muted text-sm">Loading graph...</div>
+        ) : nodes.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-text-muted">
+            <div className="text-3xl mb-2 opacity-30">~</div>
+            <p className="text-sm">No graph data available</p>
+          </div>
+        ) : (
+          <svg
+            ref={svgRef}
+            className="w-full h-full cursor-grab active:cursor-grabbing"
+            viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+            onWheel={onWheel}
+          >
+            <rect x={viewBox.x} y={viewBox.y} width={viewBox.w} height={viewBox.h} fill="transparent" />
+
+            {/* edges */}
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#30363d" />
+              </marker>
+            </defs>
+            {edges.map((edge, i) => {
+              const from = nodeMap.get(edge.from);
+              const to = nodeMap.get(edge.to);
+              if (!from || !to) return null;
+              return (
+                <line
+                  key={i}
+                  x1={from.x}
+                  y1={from.y}
+                  x2={to.x}
+                  y2={to.y}
+                  stroke="#30363d"
+                  strokeWidth="1.5"
+                  markerEnd="url(#arrowhead)"
+                  opacity={0.6}
+                />
+              );
+            })}
+
+            {/* nodes */}
+            {nodes.map((node) => {
+              const color = entityColor(node.entity_type);
+              const isSelected = selected?.id === node.id;
+              return (
+                <g
+                  key={node.id}
+                  onClick={() => handleNodeClick(node)}
+                  className="cursor-pointer"
+                >
+                  {/* glow on select */}
+                  {isSelected && <circle cx={node.x} cy={node.y} r={26} fill={`${color}20`} />}
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={20}
+                    fill={`${color}30`}
+                    stroke={color}
+                    strokeWidth={isSelected ? 2.5 : 1.5}
+                  />
+                  <text
+                    x={node.x}
+                    y={node.y + 1}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill={color}
+                    fontSize="8"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    {abbreviate(node.event_type)}
+                  </text>
+                  {/* tooltip label below */}
+                  <text
+                    x={node.x}
+                    y={node.y + 32}
+                    textAnchor="middle"
+                    fill="#8b949e"
+                    fontSize="7"
+                    fontFamily="sans-serif"
+                  >
+                    {node.event_type.length > 18 ? node.event_type.slice(0, 18) + '..' : node.event_type}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {/* legend */}
+        <div className="absolute bottom-3 left-3 flex items-center gap-3 text-[10px] text-text-muted">
+          {Object.entries(ENTITY_LABELS).map(([k, v]) => (
+            <div key={k} className="flex items-center gap-1">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entityColor(k) }} />
+              {v}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* side panel */}
+      <AnimatePresence>
+        {selected && (
+          <motion.div
+            initial={{ opacity: 0, x: 40 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 40 }}
+            className="w-80 shrink-0"
+          >
+            <Card className="h-full overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-semibold text-text">Event Details</h4>
+                <button onClick={() => setSelected(null)} className="text-text-muted hover:text-text text-lg">
+                  x
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <KV label="Event ID" value={selected.id} mono />
+                <KV label="Event Type" value={selected.event_type} />
+                <KV
+                  label="Entity Type"
+                  value={
+                    <span style={{ color: entityColor(selected.entity_type) }}>
+                      {selected.entity_type}
+                    </span>
+                  }
+                />
+                <KV label="Timestamp" value={fmtDate(selected.ts)} mono />
+
+                {selectedEvent && (
+                  <>
+                    <KV label="Bot" value={selectedEvent.bot_name || '-'} />
+                    <KV label="Priority" value={String(selectedEvent.priority)} />
+
+                    {selectedEvent.causes.length > 0 && (
+                      <div>
+                        <span className="text-text-muted">Causes:</span>
+                        <div className="mt-1 space-y-1">
+                          {selectedEvent.causes.map((c) => (
+                            <span key={c} className="block font-mono text-[10px] text-text bg-background rounded px-2 py-1">
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedEvent.enables.length > 0 && (
+                      <div>
+                        <span className="text-text-muted">Enables:</span>
+                        <div className="mt-1 space-y-1">
+                          {selectedEvent.enables.map((e) => (
+                            <span key={e} className="block font-mono text-[10px] text-text bg-background rounded px-2 py-1">
+                              {e}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedEvent.data && Object.keys(selectedEvent.data).length > 0 && (
+                      <div>
+                        <span className="text-text-muted">Data:</span>
+                        <div className="mt-1 bg-background rounded-md p-2 font-mono text-[10px] max-h-60 overflow-y-auto">
+                          {Object.entries(selectedEvent.data).map(([k, v]) => (
+                            <div key={k} className="py-0.5">
+                              <span className="text-text-muted">{k}: </span>
+                              <span className="text-text">
+                                {typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function layoutNodes(events: DomainEvent[]): GraphNode[] {
+  if (events.length === 0) return [];
+
+  const centerX = 600;
+  const centerY = 350;
+  const maxRadius = 280;
+
+  // group by entity_type, then radial layout
+  const byType: Record<string, DomainEvent[]> = {};
+  events.forEach((e) => {
+    const t = e.entity_type || 'unknown';
+    (byType[t] ||= []).push(e);
+  });
+
+  const types = Object.keys(byType);
+  const nodes: GraphNode[] = [];
+
+  types.forEach((type, ti) => {
+    const items = byType[type];
+    const sectorAngle = (2 * Math.PI) / types.length;
+    const baseAngle = ti * sectorAngle;
+
+    items.forEach((e, ei) => {
+      const rings = Math.ceil(items.length / 8);
+      const ring = Math.floor(ei / 8);
+      const posInRing = ei % 8;
+      const ringItemCount = Math.min(8, items.length - ring * 8);
+      const r = maxRadius * 0.3 + (maxRadius * 0.7 * (ring + 1)) / (rings + 1);
+      const angle = baseAngle + (sectorAngle * (posInRing + 0.5)) / ringItemCount;
+
+      nodes.push({
+        id: e.event_id,
+        event_type: e.event_type,
+        entity_type: e.entity_type,
+        ts: e.ts,
+        x: centerX + r * Math.cos(angle),
+        y: centerY + r * Math.sin(angle),
+      });
+    });
+  });
+
+  return nodes;
+}
+
+function buildEdgesFromCauses(events: DomainEvent[]): GraphEdge[] {
+  const ids = new Set(events.map((e) => e.event_id));
+  const edges: GraphEdge[] = [];
+  events.forEach((e) => {
+    if (e.causes) {
+      e.causes.forEach((causeId) => {
+        if (ids.has(causeId)) {
+          edges.push({ from: causeId, to: e.event_id });
+        }
+      });
+    }
+  });
+  return edges;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 3: STATE PROJECTIONS
+   ═══════════════════════════════════════════════════════════ */
+
+const STATE_ENTITIES = [
+  { type: 'position', label: 'Position', defaultId: 'default' },
+  { type: 'regime', label: 'Regime', defaultId: 'global' },
+  { type: 'portfolio', label: 'Portfolio', defaultId: 'main' },
+  { type: 'strategy', label: 'Strategy', defaultId: 'default' },
+];
+
+function StateTab() {
+  const [states, setStates] = useState<Record<string, Record<string, unknown>>>({});
+  const [loading, setLoading] = useState(true);
+  const [replayTs, setReplayTs] = useState<number | undefined>(undefined);
+  const [tsRange, setTsRange] = useState({ min: 0, max: 0 });
+
+  const fetchStates = useCallback(
+    (at?: number) => {
+      setLoading(true);
+      Promise.all(
+        STATE_ENTITIES.map((e) =>
+          eventsApi
+            .getEntityState(e.type, e.defaultId, at)
+            .then((r) => ({ type: e.type, data: r.data }))
+            .catch(() => ({ type: e.type, data: null })),
+        ),
+      ).then((results) => {
+        const s: Record<string, Record<string, unknown>> = {};
+        results.forEach((r) => {
+          if (r.data) s[r.type] = r.data as Record<string, unknown>;
+        });
+        setStates(s);
+        setLoading(false);
+      });
+    },
+    [],
+  );
+
+  // initial fetch + determine time range
+  useEffect(() => {
+    fetchStates();
+    eventsApi
+      .getStats()
+      .then((r) => {
+        const data = r.data as Record<string, unknown>;
+        if (data.first_event_ts && data.last_event_ts) {
+          setTsRange({
+            min: data.first_event_ts as number,
+            max: data.last_event_ts as number,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [fetchStates]);
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    if (val === tsRange.max) {
+      setReplayTs(undefined);
+      fetchStates();
+    } else {
+      setReplayTs(val);
+      fetchStates(val);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* replay slider */}
+      {tsRange.max > 0 && (
+        <Card>
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-text-muted whitespace-nowrap">Replay</span>
+            <input
+              type="range"
+              min={tsRange.min}
+              max={tsRange.max}
+              step={1}
+              value={replayTs ?? tsRange.max}
+              onChange={handleSliderChange}
+              className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer accent-primary"
+              style={{ background: 'linear-gradient(to right, #640075, #30363d)' }}
+            />
+            <span className="text-xs font-mono text-text-muted whitespace-nowrap w-40 text-right">
+              {replayTs ? fmtDate(replayTs) : 'current'}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {STATE_ENTITIES.map((e) => (
+            <Card key={e.type}>
+              <div className="animate-pulse space-y-3">
+                <div className="h-4 bg-border rounded w-1/3" />
+                <div className="h-3 bg-border rounded w-2/3" />
+                <div className="h-3 bg-border rounded w-1/2" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {STATE_ENTITIES.map((entity) => {
+            const data = states[entity.type];
+            const color = entityColor(entity.type);
+            return (
+              <Card key={entity.type}>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                  <h4 className="text-sm font-semibold text-text">{entity.label}</h4>
+                  <span className="text-[10px] font-mono text-text-muted ml-auto">{entity.type}/{entity.defaultId}</span>
+                </div>
+
+                {data ? (
+                  <div className="space-y-1.5">
+                    {Object.entries(data).map(([k, v]) => (
+                      <div key={k} className="flex items-start justify-between gap-2 py-1 border-b border-border/50 last:border-0">
+                        <span className="text-xs text-text-muted shrink-0">{k}</span>
+                        <span className="text-xs text-text font-mono text-right break-all">
+                          {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted">No state data</p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 4: REGISTRY & MATRIX
+   ═══════════════════════════════════════════════════════════ */
+
+interface RegistryEntry {
+  event_type: string;
+  label: string;
+  entity_type: string;
+  causes: string[];
+  enables: string[];
+}
+
+interface TransitionEntry {
+  from: string;
+  to: string;
+  count: number;
+  probability: number;
+}
+
+function RegistryTab() {
+  const [subTab, setSubTab] = useState<'registry' | 'matrix'>('registry');
+  const [registry, setRegistry] = useState<RegistryEntry[]>([]);
+  const [matrix, setMatrix] = useState<TransitionEntry[]>([]);
+  const [matrixFilter, setMatrixFilter] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getRegistry().catch(() => ({ data: [] })),
+      eventsApi.getTransitionMatrix().catch(() => ({ data: [] })),
+    ]).then(([regRes, matRes]) => {
+      const regData = Array.isArray(regRes.data) ? regRes.data : regRes.data?.event_types || [];
+      setRegistry(regData);
+      const matData = Array.isArray(matRes.data) ? matRes.data : matRes.data?.transitions || [];
+      setMatrix(matData);
+      setLoading(false);
+    });
+  }, []);
+
+  // build heatmap data
+  const heatmapData = useMemo(() => {
+    const filtered = matrixFilter ? matrix.filter((m) => m.from.includes(matrixFilter) || m.to.includes(matrixFilter)) : matrix;
+    const types = Array.from(new Set([...filtered.map((m) => m.from), ...filtered.map((m) => m.to)]));
+    const grid: Record<string, Record<string, number>> = {};
+    types.forEach((from) => {
+      grid[from] = {};
+      types.forEach((to) => {
+        grid[from][to] = 0;
+      });
+    });
+    filtered.forEach((m) => {
+      if (grid[m.from]) grid[m.from][m.to] = m.probability;
+    });
+    return { types, grid };
+  }, [matrix, matrixFilter]);
+
+  return (
+    <div className="space-y-4">
+      {/* sub-tabs */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setSubTab('registry')}
+          className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+            subTab === 'registry' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
+          }`}
+        >
+          Event Registry
+        </button>
+        <button
+          onClick={() => setSubTab('matrix')}
+          className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+            subTab === 'matrix' ? 'bg-primary/20 text-primary' : 'text-text-muted hover:text-text hover:bg-surface-hover'
+          }`}
+        >
+          Transition Matrix
+        </button>
+      </div>
+
+      {loading ? (
+        <Card>
+          <div className="animate-pulse space-y-3">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-4 bg-border rounded" style={{ width: `${60 + Math.random() * 30}%` }} />
+            ))}
+          </div>
+        </Card>
+      ) : subTab === 'registry' ? (
+        <RegistryPanel registry={registry} />
+      ) : (
+        <MatrixPanel heatmapData={heatmapData} matrixFilter={matrixFilter} setMatrixFilter={setMatrixFilter} />
+      )}
+    </div>
+  );
+}
+
+function RegistryPanel({ registry }: { registry: RegistryEntry[] }) {
+  if (registry.length === 0) {
+    return (
+      <Card>
+        <div className="flex flex-col items-center justify-center py-12 text-text-muted">
+          <div className="text-3xl mb-2 opacity-30">~</div>
+          <p className="text-sm">No registry data available</p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="text-left py-3 px-2 text-text-muted font-medium uppercase tracking-wider">Event Type</th>
+              <th className="text-left py-3 px-2 text-text-muted font-medium uppercase tracking-wider">Label</th>
+              <th className="text-left py-3 px-2 text-text-muted font-medium uppercase tracking-wider">Entity</th>
+              <th className="text-left py-3 px-2 text-text-muted font-medium uppercase tracking-wider">Causes</th>
+              <th className="text-left py-3 px-2 text-text-muted font-medium uppercase tracking-wider">Enables</th>
+            </tr>
+          </thead>
+          <tbody>
+            {registry.map((entry) => {
+              const color = entityColor(entry.entity_type);
+              return (
+                <tr key={entry.event_type} className="border-b border-border/30 hover:bg-surface-hover transition-colors">
+                  <td className="py-2.5 px-2 font-mono text-text">{entry.event_type}</td>
+                  <td className="py-2.5 px-2 text-text-muted">{entry.label}</td>
+                  <td className="py-2.5 px-2">
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: `${color}20`, color }}
+                    >
+                      {entry.entity_type}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <div className="flex flex-wrap gap-1">
+                      {entry.causes.map((c) => (
+                        <span key={c} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-background text-text-muted">
+                          {c}
+                        </span>
+                      ))}
+                      {entry.causes.length === 0 && <span className="text-text-muted opacity-50">-</span>}
+                    </div>
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <div className="flex flex-wrap gap-1">
+                      {entry.enables.map((e) => (
+                        <span key={e} className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-background text-text-muted">
+                          {e}
+                        </span>
+                      ))}
+                      {entry.enables.length === 0 && <span className="text-text-muted opacity-50">-</span>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function MatrixPanel({
+  heatmapData,
+  matrixFilter,
+  setMatrixFilter,
+}: {
+  heatmapData: { types: string[]; grid: Record<string, Record<string, number>> };
+  matrixFilter: string;
+  setMatrixFilter: (v: string) => void;
+}) {
+  const { types, grid } = heatmapData;
+
+  if (types.length === 0) {
+    return (
+      <Card>
+        <div className="flex flex-col items-center justify-center py-12 text-text-muted">
+          <div className="text-3xl mb-2 opacity-30">~</div>
+          <p className="text-sm">No transition data available</p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <input
+          type="text"
+          placeholder="Filter event types..."
+          value={matrixFilter}
+          onChange={(e) => setMatrixFilter(e.target.value)}
+          className="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text placeholder-text-muted focus:outline-none focus:border-primary w-64"
+        />
+        {matrixFilter && (
+          <button onClick={() => setMatrixFilter('')} className="text-xs text-text-muted hover:text-text">
+            Clear
+          </button>
+        )}
+      </div>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <div className="inline-block min-w-full">
+            <table className="text-[10px]">
+              <thead>
+                <tr>
+                  <th className="p-1.5 text-text-muted font-medium sticky left-0 bg-surface z-10 min-w-[120px]">
+                    from \ to
+                  </th>
+                  {types.map((t) => (
+                    <th
+                      key={t}
+                      className="p-1.5 text-text-muted font-medium"
+                      style={{ writingMode: 'vertical-rl', textOrientation: 'mixed', maxWidth: '30px' }}
+                    >
+                      <span className="block max-h-[100px] overflow-hidden">{t}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {types.map((from) => (
+                  <tr key={from}>
+                    <td className="p-1.5 font-mono text-text-muted sticky left-0 bg-surface z-10 whitespace-nowrap">
+                      {from}
+                    </td>
+                    {types.map((to) => {
+                      const prob = grid[from]?.[to] || 0;
+                      const intensity = Math.min(prob, 1);
+                      return (
+                        <td key={to} className="p-0.5">
+                          <div
+                            className="w-6 h-6 rounded-sm flex items-center justify-center text-[8px] font-mono transition-colors"
+                            style={{
+                              backgroundColor:
+                                prob > 0
+                                  ? `rgba(100, 0, 117, ${0.15 + intensity * 0.7})`
+                                  : 'rgba(48, 54, 61, 0.3)',
+                              color: prob > 0.3 ? '#e6edf3' : prob > 0 ? '#8b949e' : 'transparent',
+                            }}
+                            title={`${from} -> ${to}: ${(prob * 100).toFixed(1)}%`}
+                          >
+                            {prob > 0 ? (prob * 100).toFixed(0) : ''}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* color legend */}
+        <div className="mt-4 flex items-center gap-2 text-[10px] text-text-muted">
+          <span>0%</span>
+          <div className="flex h-3 rounded overflow-hidden">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div
+                key={i}
+                className="w-4"
+                style={{ backgroundColor: `rgba(100, 0, 117, ${0.15 + (i / 10) * 0.7})` }}
+              />
+            ))}
+          </div>
+          <span>100%</span>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ─────────────────── shared ─────────────────── */
+
+function KV({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <span className="text-text-muted text-[10px] uppercase tracking-wider">{label}</span>
+      <div className={`text-text text-xs mt-0.5 break-all ${mono ? 'font-mono' : ''}`}>{value}</div>
+    </div>
+  );
+}

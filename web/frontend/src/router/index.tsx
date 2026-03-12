@@ -9,6 +9,7 @@ import { Strategies } from '../pages/Strategies';
 import { Portfolio } from '../pages/Portfolio';
 import { Backtesting } from '../pages/Backtesting';
 import { Settings } from '../pages/Settings';
+import { EventOntology } from '../pages/EventOntology';
 
 export const router = createBrowserRouter([
   {
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
           { path: '/strategies', element: <Strategies /> },
           { path: '/portfolio', element: <Portfolio /> },
           { path: '/backtesting', element: <Backtesting /> },
+          { path: '/events', element: <EventOntology /> },
           { path: '/settings', element: <Settings /> },
         ],
       },
