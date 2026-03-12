@@ -101,10 +101,11 @@ class TestDefaultRegimeStrategies:
         assert len(weights) == 1
         assert weights[0].strategy_type == "smc"
 
-    def test_quiet_transition_maps_to_grid(self):
+    def test_quiet_transition_maps_to_smc(self):
+        # QUIET_TRANSITION → SMC (Grid removed: precedes trend breakouts, causes trend losses)
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.QUIET_TRANSITION]
         assert len(weights) == 1
-        assert weights[0].strategy_type == "grid"
+        assert weights[0].strategy_type == "smc"
 
     def test_unknown_maps_to_nothing(self):
         weights = DEFAULT_REGIME_STRATEGIES[MarketRegime.UNKNOWN]
@@ -637,8 +638,8 @@ class TestIntegrationWithBotOrchestrator:
         assert "smc" in orch._active_strategies
         assert "dca" not in orch._active_strategies
 
-    async def test_conflict2_quiet_transition_activates_grid(self):
-        """Conflict #2: QUIET_TRANSITION/GRID activates grid, not empty set."""
+    async def test_conflict2_quiet_transition_activates_smc(self):
+        """Conflict #2: QUIET_TRANSITION now routes to SMC (Grid removed — trend losses)."""
         from unittest.mock import AsyncMock
 
         from bot.orchestrator.bot_orchestrator import BotOrchestrator
@@ -668,8 +669,8 @@ class TestIntegrationWithBotOrchestrator:
         orch._current_regime = analysis
         await orch._update_active_strategies()
 
-        # QUIET_TRANSITION → grid (not empty set as in the old buggy code)
-        assert "grid" in orch._active_strategies
+        # QUIET_TRANSITION → smc (Grid removed: precedes trend breakouts, causes trend losses)
+        assert "smc" in orch._active_strategies
 
     async def test_conflict3_volatile_transition_reduce_empty(self):
         """Conflict #3: VOLATILE_TRANSITION/REDUCE_EXPOSURE → empty, not {smc}."""

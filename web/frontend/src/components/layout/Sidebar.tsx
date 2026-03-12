@@ -9,6 +9,7 @@ const navItems = [
   { path: '/strategies', label: 'Strategies', icon: '◎' },
   { path: '/portfolio', label: 'Portfolio', icon: '◈' },
   { path: '/backtesting', label: 'Backtesting', icon: '▶' },
+  { path: '/events', label: 'Events', icon: '◇' },
   { path: '/settings', label: 'Settings', icon: '☰' },
 ];
 

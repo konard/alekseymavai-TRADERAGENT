@@ -836,6 +836,13 @@ class BacktestOrchestratorEngine:
                                     exits.append((strategy_pos_id, ExitReason.STOP_LOSS))
 
                 if exits:
+                    # Only count exits where the position was actually tracked
+                    # (pos_id in position_amounts). Phantom exits from stuck
+                    # positions (where close_position silently failed) have
+                    # amount=None and should not be counted as completed trades.
+                    actual_exit_count = sum(
+                        1 for pos_id, _ in exits if pos_id in position_amounts[strat_name]
+                    )
                     pnl_delta = await self._handle_exits(
                         strat_name=strat_name,
                         strategy=strategy,
@@ -849,8 +856,8 @@ class BacktestOrchestratorEngine:
                         vpm_pos_ids=vpm_pos_ids[strat_name],
                     )
                     per_strategy_pnl[strat_name] += pnl_delta
-                    # Count closed round-trips (not signals) as completed trades
-                    strat_trades[strat_name] += len(exits)
+                    # Count only actually-processed exits (not phantom repeats)
+                    strat_trades[strat_name] += actual_exit_count
                     # Record individual trade PnLs for win_rate
                     if len(exits) > 0:
                         per_trade = pnl_delta / len(exits)
@@ -1078,7 +1085,7 @@ class BacktestOrchestratorEngine:
                     )
                     pnl_delta += (entry_price - current_price) * amount
             except Exception as e:
-                logger.debug("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
+                logger.warning("Exit failed for %s pos %s: %s", strat_name, pos_id, e)
         return pnl_delta
 
     # ------------------------------------------------------------------

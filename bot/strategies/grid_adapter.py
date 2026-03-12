@@ -49,7 +49,8 @@ class GridAdapter(BaseStrategy):
         name: str = "grid-default",
         # Level 1 — Universal parameter (P1.1 unification)
         risk_per_trade_pct: Optional[Decimal] = None,
-        recenter_cooldown_bars: int = 24,
+        recenter_cooldown_bars: int = 6,
+        adx_filter: int = 25,  # Skip new grid orders when ADX(14) > threshold (trending market)
     ) -> None:
 
         self._symbol = symbol
@@ -59,6 +60,7 @@ class GridAdapter(BaseStrategy):
         self._grid_range_pct = grid_range_pct
         self._recenter_cooldown_bars = recenter_cooldown_bars
         self._recenter_countdown: int = 0
+        self._adx_filter = adx_filter
         # risk_per_trade_pct is stored for reference / future position-sizing use.
         self._risk_per_trade_pct: Optional[Decimal] = (
             Decimal(str(risk_per_trade_pct)) if risk_per_trade_pct is not None else None
@@ -173,6 +175,53 @@ class GridAdapter(BaseStrategy):
         )
         return self._last_analysis
 
+    @staticmethod
+    def _compute_adx(df: pd.DataFrame, period: int = 14) -> float:
+        """Compute Wilder's ADX(period). Returns NaN if insufficient data."""
+        needed = period * 2 + 1
+        if len(df) < needed:
+            return float("nan")
+        high = df["high"].values[-needed:].astype(float)
+        low = df["low"].values[-needed:].astype(float)
+        close = df["close"].values[-needed:].astype(float)
+
+        tr = np.maximum(
+            high[1:] - low[1:],
+            np.maximum(np.abs(high[1:] - close[:-1]), np.abs(low[1:] - close[:-1])),
+        )
+        up_move = high[1:] - high[:-1]
+        dn_move = low[:-1] - low[1:]
+        plus_dm = np.where((up_move > dn_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((dn_move > up_move) & (dn_move > 0), dn_move, 0.0)
+
+        alpha = 1.0 / period
+
+        def _wilder(arr: np.ndarray) -> np.ndarray:
+            # Proper Wilder's smoothing:
+            #   out[0] = simple mean of first `period` values
+            #   out[i] = out[i-1] * (1 - 1/p) + arr[i] * (1/p)
+            # Using sum instead of mean (or omitting the alpha on arr[i]) inflates
+            # ATR/DM proportionally — the error cancels in the DI ratio — but
+            # ADX = wilder(DX) has no such cancellation, yielding values 14× too
+            # large (median ~430 instead of ~30), which blocks ALL grid signals.
+            out = np.empty(len(arr))
+            out[0] = arr[:period].mean()
+            for i in range(1, len(arr)):
+                out[i] = out[i - 1] * (1.0 - alpha) + arr[i] * alpha
+            return out
+
+        atr_w = _wilder(tr)
+        plus_w = _wilder(plus_dm)
+        minus_w = _wilder(minus_dm)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            plus_di = 100.0 * plus_w / atr_w
+            minus_di = 100.0 * minus_w / atr_w
+            dx = 100.0 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+        dx = np.nan_to_num(dx, nan=0.0)
+        adx = _wilder(dx)
+        return float(adx[-1])
+
     def generate_signal(self, df: pd.DataFrame, current_balance: Decimal) -> Optional[BaseSignal]:
         """Generate buy signal when price is near a grid buy level."""
         if not self._grid_levels or df.empty:
@@ -180,6 +229,12 @@ class GridAdapter(BaseStrategy):
 
         close = Decimal(str(df["close"].iloc[-1]))
         self._current_price = close
+
+        # ADX filter: skip new orders when market is trending (Grid loses in trends)
+        if self._adx_filter > 0:
+            adx_val = self._compute_adx(df)
+            if not (adx_val != adx_val) and adx_val > self._adx_filter:  # NaN-safe check
+                return None
 
         # Find nearest buy level below current price
         buy_levels = [lvl for lvl in self._grid_levels if lvl < close]

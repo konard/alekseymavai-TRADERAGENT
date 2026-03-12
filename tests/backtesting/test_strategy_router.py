@@ -130,11 +130,13 @@ class TestStrategyRouterBasicRouting:
         event = router.on_bar(regime, current_bar=0)
         assert "smc" in event.active_strategies
 
-    def test_quiet_transition_selects_grid(self) -> None:
+    def test_quiet_transition_selects_smc(self) -> None:
+        # QUIET_TRANSITION now routes to SMC (Grid removed — prone to trend losses)
         router = _make_router()
         regime = _make_regime(MarketRegime.QUIET_TRANSITION, RecommendedStrategy.GRID)
         event = router.on_bar(regime, current_bar=0)
-        assert "grid" in event.active_strategies
+        assert "smc" in event.active_strategies
+        assert "grid" not in event.active_strategies
 
 
 class TestStrategyRouterSpecialCases:

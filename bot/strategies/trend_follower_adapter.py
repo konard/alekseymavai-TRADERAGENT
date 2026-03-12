@@ -271,7 +271,19 @@ class TrendFollowerAdapter(BaseStrategy):
         self, position_id: str, exit_reason: BaseExitReason, exit_price: Decimal
     ) -> None:
         """Close position via underlying strategy."""
-        self._strategy.close_position(position_id, TFExitReason(exit_reason.value), exit_price)
+        try:
+            tf_reason = TFExitReason(exit_reason.value)
+        except ValueError:
+            tf_reason = TFExitReason.MANUAL
+        try:
+            self._strategy.close_position(position_id, tf_reason, exit_price)
+        except Exception as exc:
+            # Safety net: ensure the position is removed from active_positions
+            # even if close_position throws (e.g. trade_logger or risk_manager
+            # error). Without this, update_positions would return phantom exits
+            # for the stuck position on every subsequent bar.
+            logger.warning("tf_close_position_failed pos=%s exc=%s", position_id, exc)
+            self._strategy.position_manager.active_positions.pop(position_id, None)
 
     def get_active_positions(self) -> list[PositionInfo]:
         """Get active positions from underlying strategy."""
