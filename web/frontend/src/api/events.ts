@@ -46,4 +46,10 @@ export const eventsApi = {
   getPatternsStatus: () => client.get('/api/v1/events/patterns/status'),
   getTopPatterns: (n = 20) =>
     client.get('/api/v1/events/patterns/top', { params: { n } }),
+
+  // Leaderboard
+  getLeaderboard: () => client.get('/api/v1/events/leaderboard'),
+  getAllocations: () => client.get('/api/v1/events/allocations'),
+  getAnomalies: (limit = 50) =>
+    client.get('/api/v1/events/anomalies', { params: { limit } }),
 };

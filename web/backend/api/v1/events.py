@@ -410,3 +410,133 @@ async def get_top_patterns(n: int = Query(20, le=100)):
         return {"patterns": [], "count": 0}
     patterns = _pattern_learner.get_top_patterns(n=n)
     return {"patterns": patterns, "count": len(patterns)}
+
+
+# ── Leaderboard / Meta-allocator / Anomaly detector ──────────────────────
+
+# Global singletons
+_meta_allocator = None
+_anomaly_detector = None
+_telegram_feed = None
+
+
+def set_meta_allocator(allocator) -> None:
+    global _meta_allocator
+    _meta_allocator = allocator
+
+
+def set_anomaly_detector(detector) -> None:
+    global _anomaly_detector
+    _anomaly_detector = detector
+
+
+def set_telegram_feed(feed) -> None:
+    global _telegram_feed
+    _telegram_feed = feed
+
+
+REGIME_TYPES = [
+    "bull_trend", "bear_trend", "sideways", "volatile",
+    "accumulation", "distribution", "breakout", "mean_reversion",
+]
+
+
+@router.get("/leaderboard")
+async def get_leaderboard():
+    """Get expert leaderboard: accuracy, regime breakdown, weight history, ranking."""
+    experts: list[dict] = []
+
+    # Pull committee expert data
+    if _committee:
+        try:
+            status = _committee.get_status()
+            raw_experts = status.get("experts", [])
+            for exp in raw_experts:
+                experts.append({
+                    "name": exp.get("name", "unknown"),
+                    "role": exp.get("role", ""),
+                    "weight": exp.get("weight", 1.0),
+                    "base_weight": exp.get("base_weight", exp.get("weight", 1.0)),
+                    "accuracy": exp.get("accuracy", 0.0),
+                    "correct": exp.get("correct", 0),
+                    "total": exp.get("total", 0),
+                    "regime_accuracy": exp.get("regime_accuracy", {}),
+                    "weight_history": exp.get("weight_history", []),
+                })
+        except Exception:
+            pass
+
+    # Augment with pattern learner stats
+    pattern_stats: dict = {}
+    if _pattern_learner:
+        try:
+            pattern_stats = _pattern_learner.get_stats()
+        except Exception:
+            pass
+
+    # Augment with predictive model stats
+    prediction_stats: dict = {}
+    if _predictive_model:
+        try:
+            prediction_stats = _predictive_model.get_stats()
+        except Exception:
+            pass
+
+    # Rank by accuracy descending
+    experts.sort(key=lambda e: e.get("accuracy", 0), reverse=True)
+    for rank, exp in enumerate(experts, 1):
+        exp["rank"] = rank
+
+    return {
+        "experts": experts,
+        "regime_types": REGIME_TYPES,
+        "pattern_stats": pattern_stats,
+        "prediction_stats": prediction_stats,
+        "total_experts": len(experts),
+    }
+
+
+@router.get("/allocations")
+async def get_allocations():
+    """Get current meta-strategy allocation."""
+    if _meta_allocator:
+        try:
+            plan = _meta_allocator.get_current_plan()
+            return {
+                "allocations": plan.get("allocations", {}),
+                "regime": plan.get("regime", "unknown"),
+                "persistence_probability": plan.get("persistence_probability", 0.0),
+                "updated_at": plan.get("updated_at", None),
+            }
+        except Exception:
+            pass
+
+    return {
+        "allocations": {
+            "grid": 0.25,
+            "dca": 0.25,
+            "trend_follower": 0.25,
+            "smc": 0.25,
+        },
+        "regime": "unknown",
+        "persistence_probability": 0.0,
+        "updated_at": None,
+    }
+
+
+@router.get("/anomalies")
+async def get_anomalies(limit: int = Query(50, le=200)):
+    """Get recent anomalies."""
+    if _anomaly_detector:
+        try:
+            anomalies = _anomaly_detector.get_recent_anomalies(limit=limit)
+            stats = _anomaly_detector.get_stats()
+            return {
+                "anomalies": anomalies,
+                "stats": stats,
+                "count": len(anomalies),
+            }
+        except Exception:
+            pass
+
+    return {"anomalies": [], "stats": {}, "count": 0}

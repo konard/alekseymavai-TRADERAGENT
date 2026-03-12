@@ -37,6 +37,7 @@ const TABS = [
   { key: 'automation', label: 'Automation' },
   { key: 'predictions', label: 'Predictions' },
   { key: 'patterns', label: 'Patterns' },
+  { key: 'leaderboard', label: 'Leaderboard' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -109,6 +110,7 @@ export function EventOntology() {
       {activeTab === 'automation' && <AutomationTab />}
       {activeTab === 'predictions' && <PredictionsTab />}
       {activeTab === 'patterns' && <PatternsTab />}
+      {activeTab === 'leaderboard' && <LeaderboardTab />}
     </PageTransition>
   );
 }
@@ -1552,6 +1554,363 @@ function PatternsTab() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 9: EXPERT LEADERBOARD
+   ═══════════════════════════════════════════════════════════ */
+
+interface LeaderboardExpert {
+  rank: number;
+  name: string;
+  role: string;
+  weight: number;
+  base_weight: number;
+  accuracy: number;
+  correct: number;
+  total: number;
+  regime_accuracy: Record<string, number>;
+  weight_history: number[];
+}
+
+interface AllocationData {
+  allocations: Record<string, number>;
+  regime: string;
+  persistence_probability: number;
+  updated_at: number | null;
+}
+
+interface AnomalyEntry {
+  ts: number;
+  type: string;
+  severity: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+const REGIME_LABELS: Record<string, string> = {
+  bull_trend: 'Bull',
+  bear_trend: 'Bear',
+  sideways: 'Side',
+  volatile: 'Vol',
+  accumulation: 'Accum',
+  distribution: 'Distr',
+  breakout: 'Break',
+  mean_reversion: 'MR',
+};
+
+function LeaderboardTab() {
+  const [experts, setExperts] = useState<LeaderboardExpert[]>([]);
+  const [regimeTypes, setRegimeTypes] = useState<string[]>([]);
+  const [allocations, setAllocations] = useState<AllocationData | null>(null);
+  const [anomalies, setAnomalies] = useState<AnomalyEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getLeaderboard().catch(() => ({ data: { experts: [], regime_types: [] } })),
+      eventsApi.getAllocations().catch(() => ({ data: null })),
+      eventsApi.getAnomalies().catch(() => ({ data: { anomalies: [] } })),
+    ]).then(([lbRes, allocRes, anomRes]) => {
+      const lbData = lbRes.data as Record<string, unknown>;
+      setExperts((lbData?.experts as LeaderboardExpert[]) || []);
+      setRegimeTypes((lbData?.regime_types as string[]) || []);
+      setAllocations(allocRes.data as AllocationData | null);
+      setAnomalies(((anomRes.data as Record<string, unknown>)?.anomalies as AnomalyEntry[]) || []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 bg-border rounded w-1/3" />
+          <div className="h-3 bg-border rounded w-2/3" />
+          <div className="h-3 bg-border rounded w-1/2" />
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Section 1: Expert Rankings */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Expert Rankings</h4>
+        {experts.length === 0 ? (
+          <p className="text-xs text-text-muted">No expert data yet. Rankings appear after committee sessions run.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-2 px-2 text-text-muted font-medium uppercase tracking-wider">#</th>
+                  <th className="text-left py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Expert</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Weight</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Accuracy</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Correct / Total</th>
+                  <th className="text-left py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Best Regime</th>
+                  <th className="text-left py-2 px-2 text-text-muted font-medium uppercase tracking-wider">Worst Regime</th>
+                </tr>
+              </thead>
+              <tbody>
+                {experts.map((exp) => {
+                  const acc = Number(exp.accuracy || 0);
+                  const accColor = acc > 0.6 ? '#10b981' : acc >= 0.4 ? '#6b7280' : '#ef4444';
+                  const regimeEntries = Object.entries(exp.regime_accuracy || {});
+                  const bestRegime = regimeEntries.length > 0
+                    ? regimeEntries.reduce((a, b) => (Number(b[1]) > Number(a[1]) ? b : a))
+                    : null;
+                  const worstRegime = regimeEntries.length > 0
+                    ? regimeEntries.reduce((a, b) => (Number(b[1]) < Number(a[1]) ? b : a))
+                    : null;
+
+                  return (
+                    <tr key={exp.name} className="border-b border-border/30 hover:bg-surface-hover transition-colors">
+                      <td className="py-2.5 px-2 font-bold text-text">{exp.rank}</td>
+                      <td className="py-2.5 px-2">
+                        <div className="text-text font-semibold">{exp.name}</div>
+                        <div className="text-[10px] text-text-muted">{exp.role}</div>
+                      </td>
+                      <td className="py-2.5 px-2 text-right font-mono text-text">{Number(exp.weight).toFixed(2)}</td>
+                      <td className="py-2.5 px-2 text-right font-mono font-bold" style={{ color: accColor }}>
+                        {(acc * 100).toFixed(1)}%
+                      </td>
+                      <td className="py-2.5 px-2 text-right text-text-muted font-mono">
+                        {exp.correct} / {exp.total}
+                      </td>
+                      <td className="py-2.5 px-2">
+                        {bestRegime ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-profit/10 text-profit">
+                            {REGIME_LABELS[bestRegime[0]] || bestRegime[0]} ({(Number(bestRegime[1]) * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-text-muted opacity-50">-</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-2">
+                        {worstRegime ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-loss/10 text-loss">
+                            {REGIME_LABELS[worstRegime[0]] || worstRegime[0]} ({(Number(worstRegime[1]) * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-text-muted opacity-50">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Section 2: Weight Evolution */}
+      {experts.length > 0 && (
+        <Card>
+          <h4 className="text-sm font-semibold text-text mb-4">Weight Evolution</h4>
+          <p className="text-[10px] text-text-muted mb-3">Current weight vs base weight per expert</p>
+          <div className="space-y-3">
+            {experts.map((exp) => {
+              const current = Number(exp.weight);
+              const base = Number(exp.base_weight);
+              const delta = current - base;
+              const maxWeight = Math.max(...experts.map((e) => Math.max(Number(e.weight), Number(e.base_weight))), 1);
+              const barWidthCurrent = (current / maxWeight) * 100;
+              const barWidthBase = (base / maxWeight) * 100;
+              const deltaColor = delta > 0 ? '#10b981' : delta < 0 ? '#ef4444' : '#6b7280';
+
+              return (
+                <div key={exp.name} className="flex items-center gap-3">
+                  <span className="text-xs text-text-muted w-32 truncate">{exp.name}</span>
+                  <div className="flex-1 space-y-1">
+                    {/* Base weight bar */}
+                    <div className="h-2.5 bg-background rounded overflow-hidden relative">
+                      <div
+                        className="h-full rounded opacity-30"
+                        style={{ width: `${barWidthBase}%`, backgroundColor: '#6b7280' }}
+                      />
+                    </div>
+                    {/* Current weight bar */}
+                    <div className="h-2.5 bg-background rounded overflow-hidden">
+                      <div
+                        className="h-full rounded transition-all duration-300"
+                        style={{ width: `${barWidthCurrent}%`, backgroundColor: deltaColor }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-right w-20">
+                    <span className="text-xs font-mono text-text">{current.toFixed(2)}</span>
+                    <span className="text-[10px] font-mono ml-1" style={{ color: deltaColor }}>
+                      ({delta >= 0 ? '+' : ''}{delta.toFixed(2)})
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex items-center gap-4 text-[10px] text-text-muted">
+            <div className="flex items-center gap-1">
+              <div className="w-4 h-2 rounded opacity-30" style={{ backgroundColor: '#6b7280' }} />
+              <span>Base weight</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-4 h-2 rounded" style={{ backgroundColor: '#10b981' }} />
+              <span>Current (increased)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-4 h-2 rounded" style={{ backgroundColor: '#ef4444' }} />
+              <span>Current (decreased)</span>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Section 3: Regime Heatmap */}
+      {experts.length > 0 && regimeTypes.length > 0 && (
+        <Card>
+          <h4 className="text-sm font-semibold text-text mb-4">Regime Accuracy Heatmap</h4>
+          <p className="text-[10px] text-text-muted mb-3">Per-expert accuracy across market regimes</p>
+          <div className="overflow-x-auto">
+            <table className="text-[10px]">
+              <thead>
+                <tr>
+                  <th className="p-1.5 text-text-muted font-medium text-left min-w-[120px]">Expert</th>
+                  {regimeTypes.map((regime) => (
+                    <th key={regime} className="p-1.5 text-text-muted font-medium text-center">
+                      {REGIME_LABELS[regime] || regime}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {experts.map((exp) => (
+                  <tr key={exp.name}>
+                    <td className="p-1.5 font-mono text-text-muted whitespace-nowrap">{exp.name}</td>
+                    {regimeTypes.map((regime) => {
+                      const accuracy = Number(exp.regime_accuracy?.[regime] || 0);
+                      return (
+                        <td key={regime} className="p-0.5">
+                          <div
+                            className="w-12 h-8 rounded-sm flex items-center justify-center text-[10px] font-mono transition-colors"
+                            style={{
+                              backgroundColor: accuracy > 0
+                                ? `rgba(100, 0, 117, ${0.15 + accuracy * 0.7})`
+                                : 'rgba(48, 54, 61, 0.3)',
+                              color: accuracy > 0.6 ? '#e6edf3' : accuracy > 0 ? '#8b949e' : 'transparent',
+                            }}
+                            title={`${exp.name} / ${regime}: ${(accuracy * 100).toFixed(1)}%`}
+                          >
+                            {accuracy > 0 ? `${(accuracy * 100).toFixed(0)}%` : ''}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* color legend */}
+          <div className="mt-4 flex items-center gap-2 text-[10px] text-text-muted">
+            <span>0%</span>
+            <div className="flex h-3 rounded overflow-hidden">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="w-4"
+                  style={{ backgroundColor: `rgba(100, 0, 117, ${0.15 + (i / 10) * 0.7})` }}
+                />
+              ))}
+            </div>
+            <span>100%</span>
+          </div>
+        </Card>
+      )}
+
+      {/* Section 4: Capital Allocation */}
+      {allocations && (
+        <Card>
+          <h4 className="text-sm font-semibold text-text mb-4">Capital Allocation</h4>
+          <div className="flex gap-4 text-xs text-text-muted mb-3">
+            <div>Regime: <span className="font-bold text-text">{allocations.regime}</span></div>
+            {allocations.persistence_probability > 0 && (
+              <div>Persistence: <span className="font-bold text-text">{(allocations.persistence_probability * 100).toFixed(1)}%</span></div>
+            )}
+            {allocations.updated_at && (
+              <div>Updated: <span className="text-text">{fmtDate(allocations.updated_at)}</span></div>
+            )}
+          </div>
+          {Object.keys(allocations.allocations).length === 0 ? (
+            <p className="text-xs text-text-muted">No allocation data available</p>
+          ) : (
+            <div className="space-y-2">
+              {Object.entries(allocations.allocations)
+                .sort(([, a], [, b]) => (b as number) - (a as number))
+                .map(([strategy, pct]) => {
+                  const value = Number(pct);
+                  return (
+                    <div key={strategy} className="flex items-center gap-3">
+                      <span className="text-xs text-text-muted w-32 truncate font-mono">{strategy}</span>
+                      <div className="flex-1 h-5 bg-background rounded overflow-hidden">
+                        <div
+                          className="h-full rounded transition-all duration-300"
+                          style={{ width: `${value * 100}%`, backgroundColor: '#640075' }}
+                        />
+                      </div>
+                      <span className="text-xs text-text w-14 text-right font-mono">{(value * 100).toFixed(1)}%</span>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Section 5: Anomaly Log */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Anomaly Log</h4>
+        {anomalies.length === 0 ? (
+          <p className="text-xs text-text-muted">No anomalies detected yet</p>
+        ) : (
+          <div className="space-y-2">
+            {anomalies.map((a, i) => {
+              const severityColor =
+                a.severity === 'severe' ? '#ef4444'
+                : a.severity === 'moderate' ? '#f97316'
+                : '#eab308';
+              const severityBg =
+                a.severity === 'severe' ? 'rgba(239,68,68,0.1)'
+                : a.severity === 'moderate' ? 'rgba(249,115,22,0.1)'
+                : 'rgba(234,179,8,0.1)';
+
+              return (
+                <div key={i} className="flex items-start gap-3 border border-border/30 rounded-lg p-3 hover:bg-surface-hover transition-colors">
+                  <span
+                    className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full whitespace-nowrap mt-0.5"
+                    style={{ backgroundColor: severityBg, color: severityColor }}
+                  >
+                    {a.severity}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-text">{a.type}</span>
+                      {a.ts && <span className="text-[10px] text-text-muted font-mono">{fmtTs(a.ts)}</span>}
+                    </div>
+                    <p className="text-xs text-text-muted mt-1">{a.message}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
