@@ -23,4 +23,27 @@ export const eventsApi = {
     client.get('/api/v1/events/transition-matrix', {
       params: { entity_type: entityType },
     }),
+
+  // Committee
+  getCommitteeStatus: () => client.get('/api/v1/events/committee/status'),
+  getCommitteeHistory: (limit = 20) =>
+    client.get('/api/v1/events/committee/history', { params: { limit } }),
+
+  // Automation
+  getAutomationStatus: () => client.get('/api/v1/events/automation/status'),
+  getAutomationHistory: (limit = 20) =>
+    client.get('/api/v1/events/automation/history', { params: { limit } }),
+
+  // Predictions
+  getPredictionsStatus: () => client.get('/api/v1/events/predictions/status'),
+  predictNext: (currentState: string, prevState?: string) =>
+    client.get('/api/v1/events/predictions/predict', {
+      params: { current_state: currentState, prev_state: prevState },
+    }),
+  getMarkovMatrix: () => client.get('/api/v1/events/predictions/matrix'),
+
+  // Patterns
+  getPatternsStatus: () => client.get('/api/v1/events/patterns/status'),
+  getTopPatterns: (n = 20) =>
+    client.get('/api/v1/events/patterns/top', { params: { n } }),
 };

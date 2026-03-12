@@ -33,6 +33,10 @@ const TABS = [
   { key: 'graph', label: 'Event Graph' },
   { key: 'state', label: 'State Projections' },
   { key: 'registry', label: 'Registry & Matrix' },
+  { key: 'committee', label: 'Committee' },
+  { key: 'automation', label: 'Automation' },
+  { key: 'predictions', label: 'Predictions' },
+  { key: 'patterns', label: 'Patterns' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -101,6 +105,10 @@ export function EventOntology() {
       {activeTab === 'graph' && <GraphTab />}
       {activeTab === 'state' && <StateTab />}
       {activeTab === 'registry' && <RegistryTab />}
+      {activeTab === 'committee' && <CommitteeTab />}
+      {activeTab === 'automation' && <AutomationTab />}
+      {activeTab === 'predictions' && <PredictionsTab />}
+      {activeTab === 'patterns' && <PatternsTab />}
     </PageTransition>
   );
 }
@@ -1178,6 +1186,374 @@ function MatrixPanel({
           </div>
           <span>100%</span>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 5: INVESTMENT COMMITTEE
+   ═══════════════════════════════════════════════════════════ */
+
+function CommitteeTab() {
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getCommitteeStatus().catch(() => ({ data: null })),
+      eventsApi.getCommitteeHistory(20).catch(() => ({ data: { decisions: [] } })),
+    ]).then(([statusRes, histRes]) => {
+      setStatus(statusRes.data);
+      setDecisions((histRes.data as Record<string, unknown>)?.decisions as Record<string, unknown>[] || []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return <Card><div className="animate-pulse space-y-3"><div className="h-4 bg-border rounded w-1/3" /><div className="h-3 bg-border rounded w-2/3" /></div></Card>;
+  }
+
+  const experts = (status?.experts || []) as Record<string, unknown>[];
+  const totalSessions = (status?.total_sessions || 0) as number;
+  const verdictDist = (status?.verdict_distribution || {}) as Record<string, number>;
+
+  return (
+    <div className="space-y-6">
+      {/* Expert panel */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {experts.map((exp) => (
+          <Card key={String(exp.name)}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />
+              <span className="text-sm font-semibold text-text">{String(exp.name)}</span>
+            </div>
+            <p className="text-xs text-text-muted">{String(exp.role)}</p>
+            <p className="text-xs text-text-muted mt-1">Weight: <span className="text-text">{String(exp.weight)}</span></p>
+          </Card>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div className="flex gap-6 text-sm">
+        <div>Sessions: <span className="font-bold text-text">{totalSessions}</span></div>
+        <div className="text-profit">Approve: {verdictDist.approve || 0}</div>
+        <div className="text-loss">Reject: {verdictDist.reject || 0}</div>
+        <div className="text-text-muted">Defer: {verdictDist.defer || 0}</div>
+      </div>
+
+      {/* Decision history */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Recent Decisions</h4>
+        {decisions.length === 0 ? (
+          <p className="text-xs text-text-muted">No decisions yet</p>
+        ) : (
+          <div className="space-y-3">
+            {decisions.map((d, i) => {
+              const verdict = String(d.verdict);
+              const color = verdict === 'approve' ? '#10b981' : verdict === 'reject' ? '#ef4444' : '#6b7280';
+              return (
+                <div key={i} className="border border-border rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full" style={{ backgroundColor: `${color}20`, color }}>
+                      {verdict}
+                    </span>
+                    <span className="text-xs text-text-muted font-mono">
+                      score: {String(d.score)} | {fmtTs(d.ts as number)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-text-muted mt-2">{String(d.reasoning)}</p>
+                  {Array.isArray(d.votes) && (
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      {(d.votes as Record<string, unknown>[]).map((v, vi) => (
+                        <span key={vi} className="text-[10px] px-2 py-0.5 rounded bg-background text-text-muted">
+                          {String(v.expert)}: <span style={{ color: String(v.verdict) === 'approve' ? '#10b981' : String(v.verdict) === 'reject' ? '#ef4444' : '#6b7280' }}>{String(v.verdict)}</span> ({String(v.confidence)})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 6: AUTOMATION RULES
+   ═══════════════════════════════════════════════════════════ */
+
+function AutomationTab() {
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [history, setHistory] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getAutomationStatus().catch(() => ({ data: null })),
+      eventsApi.getAutomationHistory(20).catch(() => ({ data: { history: [] } })),
+    ]).then(([statusRes, histRes]) => {
+      setStatus(statusRes.data);
+      setHistory((histRes.data as Record<string, unknown>)?.history as Record<string, unknown>[] || []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return <Card><div className="animate-pulse space-y-3"><div className="h-4 bg-border rounded w-1/3" /></div></Card>;
+  }
+
+  const rules = (status?.rules || []) as Record<string, unknown>[];
+  const totalFires = (status?.total_fires || 0) as number;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-6 text-sm">
+        <div>Rules: <span className="font-bold text-text">{rules.length}</span></div>
+        <div>Active: <span className="font-bold text-profit">{status?.active_rules as number || 0}</span></div>
+        <div>Total fires: <span className="font-bold text-text">{totalFires}</span></div>
+        <div>Loss streak: <span className="font-bold text-loss">{status?.consecutive_losses as number || 0}</span></div>
+      </div>
+
+      {/* Rules */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Automation Rules</h4>
+        <div className="space-y-2">
+          {rules.map((r, i) => (
+            <div key={i} className="flex items-center justify-between border border-border rounded-lg p-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-profit' : 'bg-border'}`} />
+                  <span className="text-xs font-semibold text-text">{String(r.name)}</span>
+                </div>
+                <p className="text-[10px] text-text-muted mt-1">{String(r.description)}</p>
+              </div>
+              <div className="text-right text-xs text-text-muted">
+                <div>trigger: <span className="font-mono text-text">{String(r.trigger)}</span></div>
+                <div>fires: {String(r.fire_count)} | cd: {String(r.cooldown)}s</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* History */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Recent Fires</h4>
+        {history.length === 0 ? (
+          <p className="text-xs text-text-muted">No automation events fired yet</p>
+        ) : (
+          <div className="space-y-2">
+            {history.map((h, i) => (
+              <div key={i} className="flex items-center justify-between text-xs border-b border-border/30 py-2 last:border-0">
+                <div>
+                  <span className="font-semibold text-text">{String(h.rule)}</span>
+                  <span className="text-text-muted ml-2">via {String(h.trigger_event)}</span>
+                </div>
+                <span className="text-text-muted font-mono">{h.ts ? fmtTs(h.ts as number) : '-'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 7: PREDICTIONS (Markov Model)
+   ═══════════════════════════════════════════════════════════ */
+
+function PredictionsTab() {
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+  const [matrixData, setMatrixData] = useState<Record<string, unknown> | null>(null);
+  const [predInput, setPredInput] = useState('');
+  const [prediction, setPrediction] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getPredictionsStatus().catch(() => ({ data: null })),
+      eventsApi.getMarkovMatrix().catch(() => ({ data: null })),
+    ]).then(([statsRes, matRes]) => {
+      setStats(statsRes.data);
+      setMatrixData(matRes.data);
+      setLoading(false);
+    });
+  }, []);
+
+  const handlePredict = () => {
+    if (!predInput) return;
+    eventsApi.predictNext(predInput).then((r) => setPrediction(r.data)).catch(() => {});
+  };
+
+  if (loading) {
+    return <Card><div className="animate-pulse space-y-3"><div className="h-4 bg-border rounded w-1/3" /></div></Card>;
+  }
+
+  const states = (stats?.states || []) as string[];
+  const stationary = (matrixData?.stationary || {}) as Record<string, number>;
+
+  return (
+    <div className="space-y-6">
+      {/* Stats */}
+      <div className="flex gap-6 text-sm flex-wrap">
+        <div>States: <span className="font-bold text-text">{stats?.total_states as number || 0}</span></div>
+        <div>Transitions: <span className="font-bold text-text">{stats?.total_transitions as number || 0}</span></div>
+        <div>Entities: <span className="font-bold text-text">{stats?.entities_tracked as number || 0}</span></div>
+        <div>Predictions: <span className="font-bold text-text">{stats?.predictions_made as number || 0}</span></div>
+      </div>
+
+      {/* Predict tool */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-3">Predict Next State</h4>
+        <div className="flex gap-2">
+          <select
+            value={predInput}
+            onChange={(e) => setPredInput(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary flex-1"
+          >
+            <option value="">Select current state...</option>
+            {states.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <button onClick={handlePredict} className="px-4 py-2 bg-primary text-white text-xs rounded-lg hover:bg-primary/80 transition-colors">
+            Predict
+          </button>
+        </div>
+
+        {prediction && (
+          <div className="mt-4 bg-background rounded-lg p-3">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-xs text-text-muted">Predicted:</span>
+              <span className="text-sm font-bold text-primary">{String(prediction.predicted_state)}</span>
+              <span className="text-xs text-text-muted">P={String(prediction.probability)}</span>
+            </div>
+            {prediction.horizon_seconds && (
+              <p className="text-xs text-text-muted">ETA: {Math.round(prediction.horizon_seconds as number)}s</p>
+            )}
+            <p className="text-[10px] text-text-muted mt-1">basis: {String(prediction.basis)}</p>
+            {Array.isArray(prediction.alternatives) && (prediction.alternatives as Record<string, unknown>[]).length > 0 && (
+              <div className="mt-2 flex gap-2 flex-wrap">
+                {(prediction.alternatives as Record<string, unknown>[]).map((a, i) => (
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-surface text-text-muted">
+                    {String(a.state)}: {String(a.probability)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Stationary distribution */}
+      {Object.keys(stationary).length > 0 && (
+        <Card>
+          <h4 className="text-sm font-semibold text-text mb-3">Stationary Distribution</h4>
+          <p className="text-[10px] text-text-muted mb-3">Long-run proportion of time in each state</p>
+          <div className="space-y-2">
+            {Object.entries(stationary)
+              .sort(([, a], [, b]) => b - a)
+              .map(([state, prob]) => (
+                <div key={state} className="flex items-center gap-3">
+                  <span className="text-xs text-text-muted w-40 truncate font-mono">{state}</span>
+                  <div className="flex-1 h-4 bg-background rounded overflow-hidden">
+                    <div
+                      className="h-full rounded transition-all duration-300"
+                      style={{ width: `${prob * 100}%`, backgroundColor: '#640075' }}
+                    />
+                  </div>
+                  <span className="text-xs text-text-muted w-12 text-right">{(prob * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 8: PATTERN LEARNER
+   ═══════════════════════════════════════════════════════════ */
+
+function PatternsTab() {
+  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
+  const [patterns, setPatterns] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      eventsApi.getPatternsStatus().catch(() => ({ data: null })),
+      eventsApi.getTopPatterns(20).catch(() => ({ data: { patterns: [] } })),
+    ]).then(([statsRes, patRes]) => {
+      setStats(statsRes.data);
+      setPatterns((patRes.data as Record<string, unknown>)?.patterns as Record<string, unknown>[] || []);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) {
+    return <Card><div className="animate-pulse space-y-3"><div className="h-4 bg-border rounded w-1/3" /></div></Card>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Stats */}
+      <div className="flex gap-6 text-sm flex-wrap">
+        <div>Patterns: <span className="font-bold text-text">{stats?.total_patterns as number || 0}</span></div>
+        <div>Observations: <span className="font-bold text-text">{stats?.total_observations as number || 0}</span></div>
+        <div className="text-profit">Profitable: {stats?.profitable_patterns as number || 0}</div>
+        <div className="text-loss">Unprofitable: {stats?.unprofitable_patterns as number || 0}</div>
+        <div>Fired: <span className="font-bold text-text">{stats?.patterns_fired as number || 0}</span></div>
+      </div>
+
+      {/* Pattern table */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Top Patterns (by confidence)</h4>
+        {patterns.length === 0 ? (
+          <p className="text-xs text-text-muted">No patterns learned yet. Patterns accumulate as trades close.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-2 px-2 text-text-muted font-medium">Pattern</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium">Trades</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium">Win Rate</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium">Confidence</th>
+                  <th className="text-right py-2 px-2 text-text-muted font-medium">Avg PnL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patterns.map((p, i) => {
+                  const wr = Number(p.win_rate || 0);
+                  const wrColor = wr >= 0.55 ? '#10b981' : wr <= 0.45 ? '#ef4444' : '#6b7280';
+                  return (
+                    <tr key={i} className="border-b border-border/30 hover:bg-surface-hover transition-colors">
+                      <td className="py-2 px-2 font-mono text-text">{String(p.name || p.pattern_id)}</td>
+                      <td className="py-2 px-2 text-right text-text">{String(p.occurrences)}</td>
+                      <td className="py-2 px-2 text-right font-mono" style={{ color: wrColor }}>
+                        {(wr * 100).toFixed(1)}%
+                      </td>
+                      <td className="py-2 px-2 text-right text-text-muted">{Number(p.confidence || 0).toFixed(3)}</td>
+                      <td className="py-2 px-2 text-right font-mono" style={{ color: Number(p.avg_pnl || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                        {Number(p.avg_pnl || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

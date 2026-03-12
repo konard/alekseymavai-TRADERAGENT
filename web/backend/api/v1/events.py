@@ -296,3 +296,117 @@ async def get_transition_matrix(entity_type: str | None = Query(None)):
         "matrix": matrix,
         "total_transitions": sum(transitions.values()),
     }
+
+
+# ── Committee ─────────────────────────────────────────────────────────────
+
+# Global singletons (set by app lifespan)
+_committee = None
+_automation = None
+_predictive_model = None
+_pattern_learner = None
+
+
+def set_committee(committee) -> None:
+    global _committee
+    _committee = committee
+
+
+def set_automation(automation) -> None:
+    global _automation
+    _automation = automation
+
+
+def set_predictive_model(model) -> None:
+    global _predictive_model
+    _predictive_model = model
+
+
+def set_pattern_learner(learner) -> None:
+    global _pattern_learner
+    _pattern_learner = learner
+
+
+@router.get("/committee/status")
+async def get_committee_status():
+    """Get Investment Committee status and history."""
+    if not _committee:
+        return {"error": "Committee not initialized", "experts": [], "total_sessions": 0}
+    return _committee.get_status()
+
+
+@router.get("/committee/history")
+async def get_committee_history(limit: int = Query(20, le=100)):
+    """Get recent committee decisions."""
+    if not _committee:
+        return {"decisions": [], "count": 0}
+    decisions = _committee.history[:limit]
+    return {
+        "decisions": [d.to_dict() for d in decisions],
+        "count": len(decisions),
+    }
+
+
+@router.get("/automation/status")
+async def get_automation_status():
+    """Get automation rules status."""
+    if not _automation:
+        return {"error": "Automation not initialized", "rules": [], "total_rules": 0}
+    return _automation.get_status()
+
+
+@router.get("/automation/history")
+async def get_automation_history(limit: int = Query(20, le=100)):
+    """Get recent automation firing history."""
+    if not _automation:
+        return {"history": [], "count": 0}
+    history = _automation.history[:limit]
+    return {"history": history, "count": len(history)}
+
+
+@router.get("/predictions/status")
+async def get_predictions_status():
+    """Get predictive model status."""
+    if not _predictive_model:
+        return {"error": "Predictive model not initialized", "total_states": 0}
+    return _predictive_model.get_stats()
+
+
+@router.get("/predictions/predict")
+async def predict_next(
+    current_state: str = Query(...),
+    prev_state: str | None = Query(None),
+):
+    """Predict next state from current."""
+    if not _predictive_model:
+        return {"error": "Predictive model not initialized"}
+    pred = _predictive_model.predict_next(current_state, prev_state)
+    return pred.to_dict()
+
+
+@router.get("/predictions/matrix")
+async def get_markov_matrix():
+    """Get Markov transition matrix."""
+    if not _predictive_model:
+        return {"matrix": {}, "stationary": {}}
+    return {
+        "matrix": _predictive_model.get_transition_matrix(),
+        "stationary": _predictive_model.get_stationary_distribution(),
+    }
+
+
+@router.get("/patterns/status")
+async def get_patterns_status():
+    """Get pattern learner status."""
+    if not _pattern_learner:
+        return {"error": "Pattern learner not initialized", "total_patterns": 0}
+    return _pattern_learner.get_stats()
+
+
+@router.get("/patterns/top")
+async def get_top_patterns(n: int = Query(20, le=100)):
+    """Get top patterns by confidence."""
+    if not _pattern_learner:
+        return {"patterns": [], "count": 0}
+    patterns = _pattern_learner.get_top_patterns(n=n)
+    return {"patterns": patterns, "count": len(patterns)}
