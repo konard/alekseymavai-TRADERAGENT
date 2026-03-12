@@ -52,4 +52,29 @@ export const eventsApi = {
   getAllocations: () => client.get('/api/v1/events/allocations'),
   getAnomalies: (limit = 50) =>
     client.get('/api/v1/events/anomalies', { params: { limit } }),
+
+  // Position Sizing
+  calculatePositionSize: (portfolioValue: number, baseRiskPct = 0.02, confidence = 0.5, patternScore = 0.0) =>
+    client.get('/api/v1/events/position-sizing/calculate', {
+      params: { portfolio_value: portfolioValue, base_risk_pct: baseRiskPct, committee_confidence: confidence, pattern_score: patternScore },
+    }),
+  getPositionSizerStatus: () => client.get('/api/v1/events/position-sizing/status'),
+
+  // Correlation
+  getCorrelationMatrix: () => client.get('/api/v1/events/correlation/matrix'),
+  checkCorrelation: (pair: string, direction = 'long') =>
+    client.get('/api/v1/events/correlation/check', { params: { pair, direction } }),
+  getCorrelationStatus: () => client.get('/api/v1/events/correlation/status'),
+
+  // Monte Carlo
+  getMonteCarloStatus: () => client.get('/api/v1/events/monte-carlo/status'),
+  runMonteCarlo: (simulations = 1000, horizon = 252) =>
+    client.post('/api/v1/events/monte-carlo/run', null, { params: { simulations, horizon } }),
+
+  // Replay
+  getReplayStatus: () => client.get('/api/v1/events/replay/status'),
+
+  // Evolution
+  getEvolutionStatus: () => client.get('/api/v1/events/evolution/status'),
+  getEvolutionBest: () => client.get('/api/v1/events/evolution/best'),
 };

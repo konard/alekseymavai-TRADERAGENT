@@ -38,6 +38,8 @@ const TABS = [
   { key: 'predictions', label: 'Predictions' },
   { key: 'patterns', label: 'Patterns' },
   { key: 'leaderboard', label: 'Leaderboard' },
+  { key: 'risk-tools', label: 'Risk Tools' },
+  { key: 'evolution', label: 'Evolution' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -111,6 +113,8 @@ export function EventOntology() {
       {activeTab === 'predictions' && <PredictionsTab />}
       {activeTab === 'patterns' && <PatternsTab />}
       {activeTab === 'leaderboard' && <LeaderboardTab />}
+      {activeTab === 'risk-tools' && <RiskToolsTab />}
+      {activeTab === 'evolution' && <EvolutionTab />}
     </PageTransition>
   );
 }
@@ -1917,6 +1921,413 @@ function LeaderboardTab() {
     </div>
   );
 }
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 10: RISK TOOLS (Position Sizing + Correlation + Monte Carlo + Replay)
+   ═══════════════════════════════════════════════════════════ */
+
+function RiskToolsTab() {
+  const [sizerStatus, setSizerStatus] = useState<Record<string, unknown> | null>(null);
+  const [corrStatus, setCorrStatus] = useState<Record<string, unknown> | null>(null);
+  const [corrMatrix, setCorrMatrix] = useState<Record<string, unknown> | null>(null);
+  const [mcStatus, setMcStatus] = useState<Record<string, unknown> | null>(null);
+  const [mcResult, setMcResult] = useState<Record<string, unknown> | null>(null);
+  const [mcRunning, setMcRunning] = useState(false);
+  const [replayStatus, setReplayStatus] = useState<Record<string, unknown> | null>(null);
+
+  // Position sizing calculator
+  const [portfolio, setPortfolio] = useState(10000);
+  const [riskPct, setRiskPct] = useState(0.02);
+  const [confidence, setConfidence] = useState(0.7);
+  const [sizeResult, setSizeResult] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    eventsApi.getPositionSizerStatus().then(r => setSizerStatus(r.data)).catch(() => {});
+    eventsApi.getCorrelationStatus().then(r => setCorrStatus(r.data)).catch(() => {});
+    eventsApi.getCorrelationMatrix().then(r => setCorrMatrix(r.data)).catch(() => {});
+    eventsApi.getMonteCarloStatus().then(r => setMcStatus(r.data)).catch(() => {});
+    eventsApi.getReplayStatus().then(r => setReplayStatus(r.data)).catch(() => {});
+  }, []);
+
+  const handleCalculateSize = useCallback(() => {
+    eventsApi.calculatePositionSize(portfolio, riskPct, confidence)
+      .then(r => setSizeResult(r.data))
+      .catch(() => {});
+  }, [portfolio, riskPct, confidence]);
+
+  const handleRunMC = useCallback(() => {
+    setMcRunning(true);
+    eventsApi.runMonteCarlo(1000, 252)
+      .then(r => { setMcResult(r.data); setMcRunning(false); })
+      .catch(() => setMcRunning(false));
+  }, []);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Position Sizing Calculator */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Position Sizing (Kelly Criterion)</h4>
+        {sizerStatus?.error ? (
+          <p className="text-xs text-text-muted mb-3">{String(sizerStatus.error)}</p>
+        ) : sizerStatus && (
+          <div className="text-xs text-text-muted mb-3">Mode: <span className="text-text font-mono">{String(sizerStatus.mode || 'default')}</span></div>
+        )}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-muted w-28">Portfolio $:</label>
+            <input
+              type="number" value={portfolio} onChange={e => setPortfolio(Number(e.target.value))}
+              className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-muted w-28">Risk %:</label>
+            <input
+              type="number" step="0.005" value={riskPct} onChange={e => setRiskPct(Number(e.target.value))}
+              className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs text-text font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-text-muted w-28">Confidence:</label>
+            <input
+              type="range" min="0" max="1" step="0.05" value={confidence}
+              onChange={e => setConfidence(Number(e.target.value))}
+              className="flex-1"
+            />
+            <span className="text-xs text-text font-mono w-12 text-right">{(confidence * 100).toFixed(0)}%</span>
+          </div>
+          <button onClick={handleCalculateSize}
+            className="w-full px-3 py-2 bg-primary text-white text-xs rounded hover:bg-primary/80 transition-colors">
+            Calculate Position Size
+          </button>
+          {sizeResult && !sizeResult.error && (
+            <div className="bg-background rounded p-3 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-text-muted">Position Size:</span>
+                <span className="text-text font-mono font-bold">${Number(sizeResult.position_size || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-text-muted">Risk Amount:</span>
+                <span className="text-text font-mono">${Number(sizeResult.risk_amount || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-text-muted">Kelly Fraction:</span>
+                <span className="text-text font-mono">{(Number(sizeResult.kelly_fraction || 0) * 100).toFixed(1)}%</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-text-muted">Confidence Mult:</span>
+                <span className="text-text font-mono">{Number(sizeResult.confidence_multiplier || 1).toFixed(2)}x</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Correlation Guard */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Correlation Guard</h4>
+        {corrStatus?.error ? (
+          <p className="text-xs text-text-muted">{String(corrStatus.error)}</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(corrStatus?.pairs || 0)}</p>
+                <p className="text-[10px] text-text-muted">Pairs</p>
+              </div>
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(corrStatus?.violations || 0)}</p>
+                <p className="text-[10px] text-text-muted">Violations</p>
+              </div>
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{(Number(corrStatus?.max_correlation || 0)).toFixed(2)}</p>
+                <p className="text-[10px] text-text-muted">Max Corr</p>
+              </div>
+            </div>
+            {corrMatrix && typeof corrMatrix === 'object' && corrMatrix.matrix && (
+              <div className="overflow-x-auto">
+                <table className="text-[10px] font-mono w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-left text-text-muted p-1">Pair</th>
+                      {(corrMatrix.pairs as string[] || []).map((p: string) => (
+                        <th key={p} className="text-center text-text-muted p-1 w-12">{p.slice(0, 5)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(corrMatrix.pairs as string[] || []).map((row: string) => (
+                      <tr key={row}>
+                        <td className="text-text-muted p-1">{row.slice(0, 8)}</td>
+                        {(corrMatrix.pairs as string[] || []).map((col: string) => {
+                          const val = ((corrMatrix.matrix as Record<string, Record<string, number>>)?.[row]?.[col]) || 0;
+                          const bg = val > 0.7 ? 'rgba(239,68,68,0.2)' : val > 0.4 ? 'rgba(249,115,22,0.15)' : 'transparent';
+                          return (
+                            <td key={col} className="text-center text-text p-1" style={{ backgroundColor: bg }}>
+                              {val.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Monte Carlo Simulation */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Monte Carlo Simulation</h4>
+        {mcStatus?.error ? (
+          <p className="text-xs text-text-muted mb-3">{String(mcStatus.error)}</p>
+        ) : mcStatus && (
+          <div className="text-xs text-text-muted mb-3">
+            Simulations run: <span className="text-text font-mono">{Number(mcStatus.simulations || 0)}</span>
+          </div>
+        )}
+        <button onClick={handleRunMC} disabled={mcRunning}
+          className="w-full px-3 py-2 bg-primary text-white text-xs rounded hover:bg-primary/80 transition-colors disabled:opacity-50 mb-3">
+          {mcRunning ? 'Running...' : 'Run 1000 Simulations (252 days)'}
+        </button>
+        {mcResult && !mcResult.error && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-background rounded p-2">
+                <p className="text-[10px] text-text-muted">VaR (95%)</p>
+                <p className="text-sm font-bold font-mono" style={{ color: '#ef4444' }}>
+                  {(Number(mcResult.var_95 || 0) * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-background rounded p-2">
+                <p className="text-[10px] text-text-muted">CVaR (95%)</p>
+                <p className="text-sm font-bold font-mono" style={{ color: '#ef4444' }}>
+                  {(Number(mcResult.cvar_95 || 0) * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-background rounded p-2">
+                <p className="text-[10px] text-text-muted">Median Return</p>
+                <p className="text-sm font-bold font-mono text-text">
+                  {(Number(mcResult.median_return || 0) * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-background rounded p-2">
+                <p className="text-[10px] text-text-muted">Max Drawdown (avg)</p>
+                <p className="text-sm font-bold font-mono" style={{ color: '#f97316' }}>
+                  {(Number(mcResult.avg_max_drawdown || 0) * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+            {mcResult.fan_chart && Array.isArray(mcResult.fan_chart) && (
+              <div className="bg-background rounded p-2">
+                <p className="text-[10px] text-text-muted mb-1">Fan Chart Percentiles</p>
+                <div className="flex items-end gap-0.5 h-16">
+                  {(mcResult.fan_chart as { p5: number; p25: number; p50: number; p75: number; p95: number }[])
+                    .filter((_: unknown, i: number) => i % Math.max(1, Math.floor((mcResult.fan_chart as unknown[]).length / 50)) === 0)
+                    .map((d: { p5: number; p25: number; p50: number; p75: number; p95: number }, i: number) => {
+                      const range = Math.max(0.01, d.p95 - d.p5);
+                      const mid = ((d.p50 - d.p5) / range) * 100;
+                      return (
+                        <div key={i} className="flex-1 relative" style={{ height: '100%' }}>
+                          <div className="absolute bottom-0 w-full rounded-t" style={{
+                            height: `${Math.min(100, range * 200)}%`,
+                            background: `linear-gradient(to top, rgba(139,92,246,0.3), rgba(59,130,246,0.3))`,
+                          }} />
+                          <div className="absolute w-full h-[2px] rounded" style={{
+                            bottom: `${Math.min(100, mid)}%`,
+                            backgroundColor: '#8b5cf6',
+                          }} />
+                        </div>
+                      );
+                    })}
+                </div>
+                <div className="flex justify-between text-[9px] text-text-muted mt-1">
+                  <span>Day 1</span>
+                  <span>Day {(mcResult.fan_chart as unknown[]).length}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Event Replay */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Event Replay Debugger</h4>
+        {replayStatus?.error ? (
+          <p className="text-xs text-text-muted">{String(replayStatus.error)}</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(replayStatus?.replays || 0)}</p>
+                <p className="text-[10px] text-text-muted">Replays</p>
+              </div>
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(replayStatus?.total_trades || 0)}</p>
+                <p className="text-[10px] text-text-muted">Trades Analyzed</p>
+              </div>
+            </div>
+            {replayStatus?.last_replay && typeof replayStatus.last_replay === 'object' && (
+              <div className="bg-background rounded p-3 space-y-1">
+                <p className="text-[10px] text-text-muted uppercase">Last Replay Result</p>
+                <div className="flex justify-between text-xs">
+                  <span className="text-text-muted">Original PnL:</span>
+                  <span className="text-text font-mono">${Number((replayStatus.last_replay as Record<string, unknown>).original_pnl || 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-text-muted">Replayed PnL:</span>
+                  <span className="text-text font-mono">${Number((replayStatus.last_replay as Record<string, unknown>).replayed_pnl || 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-text-muted">Delta:</span>
+                  <span className="font-mono font-bold" style={{
+                    color: Number((replayStatus.last_replay as Record<string, unknown>).pnl_delta || 0) >= 0 ? '#10b981' : '#ef4444'
+                  }}>
+                    ${Number((replayStatus.last_replay as Record<string, unknown>).pnl_delta || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+            <p className="text-[10px] text-text-muted">Counterfactual analysis: "What if the committee was active during past trades?"</p>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   TAB 11: EVOLUTION (Genetic Algorithm)
+   ═══════════════════════════════════════════════════════════ */
+
+function EvolutionTab() {
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [best, setBest] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    eventsApi.getEvolutionStatus().then(r => setStatus(r.data)).catch(() => {});
+    eventsApi.getEvolutionBest().then(r => setBest(r.data)).catch(() => {});
+  }, []);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Evolution Status */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Genetic Algorithm Status</h4>
+        {status?.error ? (
+          <p className="text-xs text-text-muted">{String(status.error)}</p>
+        ) : status && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(status.generations || 0)}</p>
+                <p className="text-[10px] text-text-muted">Generations</p>
+              </div>
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-text">{Number(status.population_size || 0)}</p>
+                <p className="text-[10px] text-text-muted">Population</p>
+              </div>
+              <div className="bg-background rounded p-2 text-center">
+                <p className="text-lg font-bold text-profit">{Number(status.best_fitness || 0).toFixed(4)}</p>
+                <p className="text-[10px] text-text-muted">Best Fitness</p>
+              </div>
+            </div>
+
+            {/* Fitness History Chart */}
+            {status.fitness_history && Array.isArray(status.fitness_history) && (status.fitness_history as number[]).length > 1 && (
+              <div className="bg-background rounded p-3">
+                <p className="text-[10px] text-text-muted uppercase mb-2">Fitness Over Generations</p>
+                <div className="flex items-end gap-0.5 h-20">
+                  {(status.fitness_history as number[]).map((f: number, i: number) => {
+                    const max = Math.max(...(status.fitness_history as number[]));
+                    const min = Math.min(...(status.fitness_history as number[]));
+                    const range = max - min || 1;
+                    const pct = ((f - min) / range) * 100;
+                    return (
+                      <div key={i} className="flex-1 rounded-t transition-all"
+                        style={{
+                          height: `${Math.max(2, pct)}%`,
+                          backgroundColor: `rgba(16,185,129,${0.3 + (pct / 100) * 0.7})`,
+                        }}
+                        title={`Gen ${i + 1}: ${f.toFixed(4)}`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between text-[9px] text-text-muted mt-1">
+                  <span>Gen 1</span>
+                  <span>Gen {(status.fitness_history as number[]).length}</span>
+                </div>
+              </div>
+            )}
+
+            {status.mutation_rate !== undefined && (
+              <div className="flex gap-4 text-xs text-text-muted">
+                <span>Mutation: <span className="text-text font-mono">{(Number(status.mutation_rate || 0) * 100).toFixed(1)}%</span></span>
+                <span>Crossover: <span className="text-text font-mono">{(Number(status.crossover_rate || 0) * 100).toFixed(1)}%</span></span>
+                <span>Elite: <span className="text-text font-mono">{Number(status.elite_size || 0)}</span></span>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* Best Genome */}
+      <Card>
+        <h4 className="text-sm font-semibold text-text mb-4">Best Genome</h4>
+        {best?.error ? (
+          <p className="text-xs text-text-muted">{String(best.error)}</p>
+        ) : best?.best && typeof best.best === 'object' ? (
+          <div className="space-y-3">
+            <div className="bg-background rounded p-3">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-text-muted">Fitness Score</span>
+                <span className="text-lg font-bold text-profit font-mono">
+                  {Number((best.best as Record<string, unknown>).fitness || 0).toFixed(4)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-text-muted">Generation</span>
+                <span className="text-sm text-text font-mono">
+                  {Number((best.best as Record<string, unknown>).generation || 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Parameters */}
+            {(best.best as Record<string, unknown>).parameters && typeof (best.best as Record<string, unknown>).parameters === 'object' && (
+              <div>
+                <p className="text-[10px] text-text-muted uppercase mb-2">Optimized Parameters</p>
+                <div className="space-y-1.5">
+                  {Object.entries((best.best as Record<string, unknown>).parameters as Record<string, unknown>)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([key, value]) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <span className="text-xs text-text-muted w-40 truncate font-mono">{key}</span>
+                        <div className="flex-1 h-1.5 bg-background rounded overflow-hidden">
+                          <div className="h-full rounded bg-primary/60" style={{ width: `${Math.min(100, Number(value) * 10)}%` }} />
+                        </div>
+                        <span className="text-xs text-text w-16 text-right font-mono">
+                          {typeof value === 'number' ? value.toFixed(4) : String(value)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-text-muted">No evolution data yet. Run the genetic algorithm to see results.</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 
 /* ─────────────────── shared ─────────────────── */
 

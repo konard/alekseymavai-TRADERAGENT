@@ -540,3 +540,138 @@ async def get_anomalies(limit: int = Query(50, le=200)):
             pass
 
     return {"anomalies": [], "stats": {}, "count": 0}
+
+
+# ── Position Sizer / Correlation / Monte Carlo / Replay / Evolution ──────
+
+_position_sizer = None
+_correlation_guard = None
+_monte_carlo = None
+_replay_debugger = None
+_strategy_evolver = None
+
+
+def set_position_sizer(sizer) -> None:
+    global _position_sizer
+    _position_sizer = sizer
+
+
+def set_correlation_guard(guard) -> None:
+    global _correlation_guard
+    _correlation_guard = guard
+
+
+def set_monte_carlo(mc) -> None:
+    global _monte_carlo
+    _monte_carlo = mc
+
+
+def set_replay_debugger(debugger) -> None:
+    global _replay_debugger
+    _replay_debugger = debugger
+
+
+def set_strategy_evolver(evolver) -> None:
+    global _strategy_evolver
+    _strategy_evolver = evolver
+
+
+@router.get("/position-sizing/calculate")
+async def calculate_position_size(
+    portfolio_value: float = Query(...),
+    base_risk_pct: float = Query(0.02),
+    committee_confidence: float = Query(0.5),
+    pattern_score: float = Query(0.0),
+):
+    """Calculate dynamic position size using Kelly criterion."""
+    if not _position_sizer:
+        return {"error": "Position sizer not initialized"}
+    result = _position_sizer.calculate(
+        portfolio_value=portfolio_value,
+        base_risk_pct=base_risk_pct,
+        committee_confidence=committee_confidence,
+        pattern_score=pattern_score,
+    )
+    return result
+
+
+@router.get("/position-sizing/status")
+async def get_position_sizer_status():
+    """Get position sizer status."""
+    if not _position_sizer:
+        return {"error": "Position sizer not initialized", "mode": "unknown"}
+    return _position_sizer.get_status()
+
+
+@router.get("/correlation/matrix")
+async def get_correlation_matrix():
+    """Get correlation matrix for tracked pairs."""
+    if not _correlation_guard:
+        return {"matrix": {}, "pairs": [], "effective_exposure": {}}
+    return _correlation_guard.get_matrix()
+
+
+@router.get("/correlation/check")
+async def check_correlation(
+    pair: str = Query(...),
+    direction: str = Query("long"),
+):
+    """Check if adding a position violates correlation limits."""
+    if not _correlation_guard:
+        return {"allowed": True, "reason": "Guard not initialized"}
+    return _correlation_guard.check(pair=pair, direction=direction)
+
+
+@router.get("/correlation/status")
+async def get_correlation_status():
+    """Get correlation guard status."""
+    if not _correlation_guard:
+        return {"error": "Correlation guard not initialized", "pairs": 0}
+    return _correlation_guard.get_status()
+
+
+@router.get("/monte-carlo/status")
+async def get_monte_carlo_status():
+    """Get Monte Carlo simulator status."""
+    if not _monte_carlo:
+        return {"error": "Monte Carlo not initialized", "simulations": 0}
+    return _monte_carlo.get_stats()
+
+
+@router.post("/monte-carlo/run")
+async def run_monte_carlo(
+    simulations: int = Query(1000, le=10000),
+    horizon: int = Query(252),
+):
+    """Run Monte Carlo simulation."""
+    if not _monte_carlo:
+        return {"error": "Monte Carlo not initialized"}
+    result = _monte_carlo.simulate(n_simulations=simulations, horizon=horizon)
+    return result.to_dict() if hasattr(result, "to_dict") else result
+
+
+@router.get("/replay/status")
+async def get_replay_status():
+    """Get replay debugger status."""
+    if not _replay_debugger:
+        return {"error": "Replay debugger not initialized", "replays": 0}
+    return _replay_debugger.get_stats()
+
+
+@router.get("/evolution/status")
+async def get_evolution_status():
+    """Get strategy evolution status."""
+    if not _strategy_evolver:
+        return {"error": "Strategy evolver not initialized", "generations": 0}
+    return _strategy_evolver.get_stats()
+
+
+@router.get("/evolution/best")
+async def get_evolution_best():
+    """Get best genome from strategy evolution."""
+    if not _strategy_evolver:
+        return {"error": "Strategy evolver not initialized", "best": None}
+    best = _strategy_evolver.get_best()
+    if best and hasattr(best, "to_dict"):
+        return {"best": best.to_dict()}
+    return {"best": best}
