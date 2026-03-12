@@ -240,9 +240,10 @@ class TrendFollowerStrategy:
             entry_signal=entry_signal, position_size=position_size, position_id=position_id
         )
 
-        # Update risk manager
-        position_value = entry_signal.entry_price * position_size
-        self.risk_manager.position_opened(position_value=position_value)
+        # Update risk manager.
+        # position_size is already in USD (quote currency), so position_value == position_size.
+        # Multiplying by entry_price would be a unit error: price × USD ≠ USD.
+        self.risk_manager.position_opened(position_value=position_size)
 
         logger.info(
             "Position opened",
@@ -334,9 +335,8 @@ class TrendFollowerStrategy:
         # Close position in position manager
         self.position_manager.close_position(position_id, exit_reason)
 
-        # Update risk manager
-        position_value = position.entry_price * position.size
-        self.risk_manager.position_closed(position_value=position_value)
+        # position.size is already in USD — same fix as open_position.
+        self.risk_manager.position_closed(position_value=position.size)
 
         logger.info(
             "Position closed and recorded",

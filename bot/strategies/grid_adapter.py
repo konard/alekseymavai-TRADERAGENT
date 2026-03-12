@@ -197,10 +197,17 @@ class GridAdapter(BaseStrategy):
         alpha = 1.0 / period
 
         def _wilder(arr: np.ndarray) -> np.ndarray:
+            # Proper Wilder's smoothing:
+            #   out[0] = simple mean of first `period` values
+            #   out[i] = out[i-1] * (1 - 1/p) + arr[i] * (1/p)
+            # Using sum instead of mean (or omitting the alpha on arr[i]) inflates
+            # ATR/DM proportionally — the error cancels in the DI ratio — but
+            # ADX = wilder(DX) has no such cancellation, yielding values 14× too
+            # large (median ~430 instead of ~30), which blocks ALL grid signals.
             out = np.empty(len(arr))
-            out[0] = arr[:period].sum()
+            out[0] = arr[:period].mean()
             for i in range(1, len(arr)):
-                out[i] = out[i - 1] * (1.0 - alpha) + arr[i]
+                out[i] = out[i - 1] * (1.0 - alpha) + arr[i] * alpha
             return out
 
         atr_w = _wilder(tr)
