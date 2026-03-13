@@ -737,6 +737,7 @@ def _cfg_from_backtest_yaml(
     grid_cfg = data.get("grid", {})
     dca_cfg = data.get("dca", {})
     tf_cfg = data.get("trend_follower", {})
+    recovery_cfg = data.get("recovery", {})
     smc_cfg = data.get("smc", {})
 
     _ib = (
@@ -833,6 +834,20 @@ def _cfg_from_backtest_yaml(
             _routing_config = RoutingConfig(str(_routing_path))
             logger.info("Loaded custom routing config: %s", _routing_path)
 
+    # Recovery (AdaptiveRecoveryGrid) — opt-in via YAML
+    _enable_recovery = bool(recovery_cfg.get("enabled", False))
+    _recovery_params: dict = {}
+    if _enable_recovery:
+        for _rk in (
+            "tp_target_pct", "max_dca_orders", "dca_step_pct",
+            "dca_volume_multiplier", "timeout_bars", "timeout_action",
+            "fallback_support_pct", "max_recovery_capital_pct",
+            "cooldown_after_recovery_bars",
+        ):
+            if _rk in recovery_cfg:
+                _recovery_params[_rk] = recovery_cfg[_rk]
+        logger.info("Recovery enabled: %s", _recovery_params)
+
     return OrchestratorBacktestConfig(
         symbol=symbol,
         initial_balance=_ib,
@@ -846,6 +861,8 @@ def _cfg_from_backtest_yaml(
         enable_dca=bool(dca_cfg.get("enabled", True)),
         enable_trend_follower=bool(tf_cfg.get("enabled", True)),
         enable_smc=bool(smc_cfg.get("enabled", True)),
+        enable_recovery=_enable_recovery,
+        recovery_params=_recovery_params,
         max_position_size_pct=max_pos_pct,
         max_position_pct=Decimal(str(max_per_trade_pct)),
         max_daily_loss_pct=max_daily_loss_pct,

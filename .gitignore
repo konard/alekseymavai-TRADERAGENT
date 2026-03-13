@@ -69,10 +69,9 @@ Thumbs.db
 
 # Bot specific
 configs/*.yaml
-!configs/trend_follower_production.yaml
-!configs/smc.yaml
 !configs/phase7_demo.yaml
 !configs/backtest_phase1.yaml
+!configs/backtest_phase1_recovery.yaml
 !configs/backtest_phase2.yaml
 !configs/strategy_routing.yaml
 !configs/README.md

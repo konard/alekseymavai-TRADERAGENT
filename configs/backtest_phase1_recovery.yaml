@@ -1,0 +1,130 @@
+# Phase 1 Backtest + AdaptiveRecoveryGrid
+# =========================================
+# Идентичен backtest_phase1.yaml, но с включённым Recovery:
+# Grid пробивает нижнюю границу → DCA-каскад до SMC-поддержки → blended TP +1%
+#
+# Сравнение: results/phase1_recovery vs results/phase1_full
+# Метрика успеха: меньше stop-loss убытков, лучший Sharpe для Grid-пар
+#
+# Запуск:
+#   python scripts/run_backtest_v2.py \
+#     --mode auto \
+#     --config configs/backtest_phase1_recovery.yaml \
+#     --data-dir data/historical \
+#     --max-bars 50000 \
+#     --workers 14 \
+#     --output-dir results/phase1_recovery
+
+# ---------------------------------------------------------------------------
+# Глобальные параметры прогона
+# ---------------------------------------------------------------------------
+
+backtest:
+  initial_balance: 1000
+  warmup_bars: 500
+  max_bars: 50000
+  workers: 14
+  vpm_max_grid_loss_pct: 0.25
+
+  exclude_symbols:
+    - FTTUSDT
+    - LUNAUSDT
+
+# ---------------------------------------------------------------------------
+# Параметры оркестратора
+# ---------------------------------------------------------------------------
+
+orchestrator:
+  enable_strategy_router: true
+  router_cooldown_bars: 2
+  regime_check_every_n: 12
+  analyze_every_n: 1
+  smc_generate_signal_every_n: 12
+
+# ---------------------------------------------------------------------------
+# Risk management
+# ---------------------------------------------------------------------------
+
+risk:
+  max_position_pct: 0.25
+  max_position_pct_per_trade: 0.05
+  max_daily_loss_pct: 0.25
+  min_order_size: 5
+
+# ---------------------------------------------------------------------------
+# Стратегия: Grid
+# ---------------------------------------------------------------------------
+
+grid:
+  enabled: true
+  num_levels: 10
+  profit_per_grid: 0.005
+  grid_range_pct: 0.06
+  recenter_cooldown_bars: 6
+  adx_filter: 25
+
+# ---------------------------------------------------------------------------
+# AdaptiveRecoveryGrid
+# Вместо stop-loss при пробое Grid lower → DCA cascade
+# ---------------------------------------------------------------------------
+
+recovery:
+  enabled: true
+  tp_target_pct: 0.01               # +1% на blended average entry
+  max_dca_orders: 5                  # до 5 DCA safety orders
+  dca_step_pct: 0.015               # 1.5% между уровнями
+  dca_volume_multiplier: 1.3        # мартингейл на каждом уровне
+  timeout_bars: 12                   # 12 × 5min = 1 час таймаут
+  timeout_action: close_all          # закрыть при таймауте
+  fallback_support_pct: 0.05        # 5% ниже цены если нет SMC
+  max_recovery_capital_pct: 0.30    # макс 30% баланса на recovery
+  cooldown_after_recovery_bars: 6   # 30 мин cooldown до рестарта Grid
+
+# ---------------------------------------------------------------------------
+# Стратегия: DCA
+# ---------------------------------------------------------------------------
+
+dca:
+  enabled: true
+  trigger_pct: 0.03
+  max_steps: 3
+  take_profit_pct: 0.06
+  safety_order_size: 50
+  catch_up_enabled: true
+  martingale_multiplier: 1.3
+  hard_stop_loss_pct: 15
+  max_holding_bars: 288
+  trend_filter_adx: 30
+
+# ---------------------------------------------------------------------------
+# Стратегия: TrendFollower
+# ---------------------------------------------------------------------------
+
+trend_follower:
+  enabled: true
+  ema_fast_period: 20
+  ema_slow_period: 50
+  atr_period: 14
+  rsi_period: 14
+  risk_per_trade_pct: 0.01
+  require_volume_confirmation: false
+  tp_atr_multiplier_sideways: 1.2
+  tp_atr_multiplier_weak: 1.8
+  tp_atr_multiplier_strong: 4.0
+  sl_atr_multiplier_sideways: 0.7
+  sl_atr_multiplier_trend: 1.0
+  max_positions: 2
+
+# ---------------------------------------------------------------------------
+# Стратегия: SMC
+# ---------------------------------------------------------------------------
+
+smc:
+  enabled: true
+  swing_length: 10
+  risk_per_trade: 0.01
+  min_risk_reward: 2.0
+  max_positions: 2
+  require_volume_confirmation: false
+  debug_mode: false
+  log_all_signals: false
