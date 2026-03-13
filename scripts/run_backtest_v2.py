@@ -838,6 +838,11 @@ def _cfg_from_backtest_yaml(
     _enable_recovery = bool(recovery_cfg.get("enabled", False))
     _recovery_params: dict = {}
     if _enable_recovery:
+        _decimal_keys = {
+            "tp_target_pct", "dca_step_pct", "dca_volume_multiplier",
+            "fallback_support_pct", "max_recovery_capital_pct",
+        }
+        _int_keys = {"max_dca_orders", "timeout_bars", "cooldown_after_recovery_bars"}
         for _rk in (
             "tp_target_pct", "max_dca_orders", "dca_step_pct",
             "dca_volume_multiplier", "timeout_bars", "timeout_action",
@@ -845,7 +850,12 @@ def _cfg_from_backtest_yaml(
             "cooldown_after_recovery_bars",
         ):
             if _rk in recovery_cfg:
-                _recovery_params[_rk] = recovery_cfg[_rk]
+                _v = recovery_cfg[_rk]
+                if _rk in _decimal_keys:
+                    _v = Decimal(str(_v))
+                elif _rk in _int_keys:
+                    _v = int(_v)
+                _recovery_params[_rk] = _v
         logger.info("Recovery enabled: %s", _recovery_params)
 
     return OrchestratorBacktestConfig(
