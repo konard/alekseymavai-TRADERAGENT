@@ -1,0 +1,149 @@
+# Bear-Market Optimized Strategy Routing
+# ========================================
+# Key principle: SMC is the ONLY strategy that can short.
+# In a bear market, long-only strategies (DCA, Grid, TrendFollower)
+# bleed money. SMC should be primary in ALL regimes.
+#
+# Changes vs default routing:
+#   BEAR_TREND:  DCA(70%)+SMC(30%) → SMC only (shorts)
+#   BULL_TREND:  TF(70%)+SMC(30%) → SMC(60%)+TF(40%) (SMC catches reversals)
+#   TIGHT_RANGE: Grid only → Grid(60%)+SMC(40%) (SMC adds short entries)
+#   WIDE_RANGE:  Grid only → SMC only (range too wide for grid in bear)
+#   Transitions: same (SMC only)
+#   Fallback:    SMC(70%)+Grid(30%) instead of all-equal
+
+rules:
+  # ── Trend regimes ─────────────────────────────────────────────────────────
+
+  # BULL_TREND (bear market rallies) — SMC primary, TF for momentum
+  - name: bull_trend_hybrid_dca
+    conditions:
+      market_regime: bull_trend
+      confluence_high: true
+      adx_high: true
+    strategies:
+      - name: smc
+        params:
+          weight: 0.6
+          priority: 1
+      - name: trend_follower
+        params:
+          weight: 0.4
+          priority: 2
+
+  - name: bull_trend_hybrid_grid
+    conditions:
+      market_regime: bull_trend
+      confluence_high: true
+    strategies:
+      - name: smc
+        params:
+          weight: 0.6
+          priority: 1
+      - name: grid
+        params:
+          weight: 0.4
+          priority: 2
+
+  - name: bull_trend_default
+    conditions:
+      market_regime: bull_trend
+    strategies:
+      - name: smc
+        params:
+          weight: 0.6
+          priority: 1
+      - name: trend_follower
+        params:
+          weight: 0.4
+          priority: 2
+
+  # BEAR_TREND → SMC ONLY (shorts! DCA removed — long-only = guaranteed loss)
+  - name: bear_trend
+    conditions:
+      market_regime: bear_trend
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  # ── Range regimes ──────────────────────────────────────────────────────────
+
+  # TIGHT_RANGE → Grid + SMC (Grid works in tight ranges, SMC adds shorts)
+  - name: tight_range
+    conditions:
+      market_regime: tight_range
+    strategies:
+      - name: grid
+        params:
+          weight: 0.6
+          priority: 1
+      - name: smc
+        params:
+          weight: 0.4
+          priority: 2
+
+  # WIDE_RANGE → SMC only (range too wide for safe grid in bear market)
+  - name: wide_range
+    conditions:
+      market_regime: wide_range
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  # ── Transition regimes ─────────────────────────────────────────────────────
+
+  - name: quiet_transition
+    conditions:
+      market_regime: quiet_transition
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  - name: volatile_transition
+    conditions:
+      market_regime: volatile_transition
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  # ── SMC accumulation / distribution ────────────────────────────────────────
+
+  - name: accumulation
+    conditions:
+      market_regime: accumulation
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  - name: distribution
+    conditions:
+      market_regime: distribution
+    strategies:
+      - name: smc
+        params:
+          weight: 1.0
+          priority: 1
+
+  # ── Fallback ───────────────────────────────────────────────────────────────
+
+  - name: fallback
+    conditions: {}
+    strategies:
+      - name: smc
+        params:
+          weight: 0.7
+          priority: 1
+      - name: grid
+        params:
+          weight: 0.3
+          priority: 2

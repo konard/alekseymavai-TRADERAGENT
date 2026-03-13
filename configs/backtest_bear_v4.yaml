@@ -1,0 +1,53 @@
+# Bear-Market Backtest V4 — Ultra-Selective
+# =============================================
+# V2: R:R 3.0, signal/2h → -7% to -20% (outperforms market by 33-51%)
+# V3: direction filter → no improvement (SMC already does this)
+# V4: ULTRA-SELECTIVE — minimize trades, maximize per-trade profit
+#   - R:R 5.0 (breakeven at 17% win rate — much more forgiving)
+#   - Signal every 4 hours (48 bars) → ~3-4 trades/day max
+#   - max_positions: 1 (full focus on best trade)
+#   - risk_per_trade: 0.02 (2% — larger per-trade size, fewer trades)
+
+backtest:
+  initial_balance: 1000
+  warmup_bars: 500
+  max_bars: 50000
+  workers: 14
+  vpm_max_grid_loss_pct: 0.25
+  routing_yaml: configs/strategy_routing_bear.yaml
+
+  exclude_symbols:
+    - FTTUSDT
+    - LUNAUSDT
+
+orchestrator:
+  enable_strategy_router: true
+  router_cooldown_bars: 2
+  regime_check_every_n: 12
+  analyze_every_n: 1
+  smc_generate_signal_every_n: 48   # Every 4 hours (48 * 5min)
+
+risk:
+  max_position_pct: 0.15
+  max_position_pct_per_trade: 0.15
+  max_daily_loss_pct: 0.10
+  min_order_size: 5
+
+grid:
+  enabled: false
+
+dca:
+  enabled: false
+
+trend_follower:
+  enabled: false
+
+smc:
+  enabled: true
+  swing_length: 15                  # Larger swings = more reliable structure
+  risk_per_trade: 0.02              # 2% risk per trade
+  min_risk_reward: 5.0              # R:R 5:1 — breakeven at 17% win rate
+  max_positions: 1                  # ONE position at a time — full conviction
+  require_volume_confirmation: false
+  debug_mode: false
+  log_all_signals: false

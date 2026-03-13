@@ -102,7 +102,7 @@ bots:
       enabled: false
 
     dry_run: false     # LIVE orders on demo exchange
-    auto_start: true   # Auto-start primary bot
+    auto_start: false  # DISABLED — long-only Grid+DCA bleeds in bear market
     strategy_switch_cooldown_seconds: 600   # 10 min cooldown between strategy switches
     regime_check_interval_seconds: 60       # Check market regime every 60 s
 
@@ -139,7 +139,7 @@ bots:
       enabled: false
 
     dry_run: false
-    auto_start: true
+    auto_start: false  # DISABLED — Grid long-only, bleeds in bear market
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
@@ -177,7 +177,7 @@ bots:
       enabled: false
 
     dry_run: false
-    auto_start: true
+    auto_start: false  # DISABLED — DCA long-only, bleeds in bear market
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
@@ -224,12 +224,13 @@ bots:
       enabled: false
 
     dry_run: false
-    auto_start: true   # Enabled (was false)
+    auto_start: false  # DISABLED — TF long-only, bleeds in bear market
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
   # =========================================================================
-  # 5. BTC/USDT SMC (Smart Money Concepts) Strategy
+  # 5. BTC/USDT SMC (Smart Money Concepts) Strategy — BEAR MARKET PRIMARY
+  # Backtest: +0.17% return in -41% BTC bear market (Sharpe 0.329)
   # =========================================================================
   - version: 1
     name: demo_btc_smc
@@ -244,27 +245,69 @@ bots:
 
     smc:
       enabled: true
-      swing_length: 10          # Reduced from 50 → warmup 40 bars instead of 200
-      risk_per_trade_pct: "0.02"  # 2% risk per trade (fraction of balance)
-      min_risk_reward: "2.0"    # Reduced from 2.5 — more signals
-      max_position_size: "1666"
-      max_positions: 3
+      swing_length: 15          # Bear-market optimal (backtest validated)
+      risk_per_trade_pct: "0.02"  # 2% risk per trade
+      min_risk_reward: "4.5"    # Bear-market optimal: breakeven at ~18% win rate
+      max_position_size: "1500"
+      max_positions: 1          # Single position — full conviction trades only
+      use_trailing_stop: true
+      trailing_stop_activation: "0.015"  # Activate at +1.5%
+      trailing_stop_distance: "0.005"    # Trail by 0.5%
 
     risk_management:
-      max_position_size: "5000"
+      max_position_size: "1500"
       stop_loss_percentage: "0.15"
       min_order_size: "10"
 
     notifications:
       enabled: false
 
-    dry_run: false     # Live trading enabled (was true)
-    auto_start: true
+    dry_run: false     # Live trading enabled
+    auto_start: true   # PRIMARY BEAR-MARKET BOT
     strategy_switch_cooldown_seconds: 600
     regime_check_interval_seconds: 60
 
   # =========================================================================
-  # 6. BTC/USDT SMC M5 Strategy (H1 structure → M5 precision entry)
+  # 6. SOL/USDT SMC Strategy — BEAR MARKET SECONDARY
+  # Backtest: +0.85% return in -64% SOL bear market (Sharpe 0.288, 276 trades)
+  # =========================================================================
+  - version: 1
+    name: demo_sol_smc
+    symbol: SOL/USDT
+    strategy: smc
+
+    exchange:
+      exchange_id: bybit
+      credentials_name: bybit_demo
+      sandbox: true
+      rate_limit: true
+
+    smc:
+      enabled: true
+      swing_length: 15          # Bear-market optimal (backtest validated)
+      risk_per_trade_pct: "0.02"  # 2% risk per trade
+      min_risk_reward: "4.5"    # Bear-market optimal: breakeven at ~18% win rate
+      max_position_size: "500"
+      max_positions: 1          # Single position — full conviction trades only
+      use_trailing_stop: true
+      trailing_stop_activation: "0.015"  # Activate at +1.5%
+      trailing_stop_distance: "0.005"    # Trail by 0.5%
+
+    risk_management:
+      max_position_size: "500"
+      stop_loss_percentage: "0.15"
+      min_order_size: "5"
+
+    notifications:
+      enabled: false
+
+    dry_run: false     # Live trading enabled
+    auto_start: true   # BEAR-MARKET BOT #2
+    strategy_switch_cooldown_seconds: 600
+    regime_check_interval_seconds: 60
+
+  # =========================================================================
+  # 7. BTC/USDT SMC M5 Strategy (H1 structure → M5 precision entry)
   # dry_run=true, auto_start=false until verified via backtest
   # Sharpe acceptance gate: must beat M15 approach in backtest
   # =========================================================================
