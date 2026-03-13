@@ -1,6 +1,6 @@
 # TRADERAGENT — План развития
 
-> Дата: 2026-03-11 · Версия: v2.1.0
+> Дата: 2026-03-13 · Версия: v2.2.0
 > Основан на: [analysis.md](analysis.md) | [SESSION_CONTEXT.md](SESSION_CONTEXT.md)
 > Концепция: «Идеальный криптотрейдер» — SMC + трёхрежимная система + адаптивный риск-менеджмент
 
@@ -8,9 +8,9 @@
 
 ## Исполнительное резюме
 
-TRADERAGENT v2.1 — платформа с 5 живыми ботами (~$102k), BacktestOrchestratorEngine V3.0 (Phase 1: 43/43 пар), и завершёнными P0-фиксами. Ключевая нерешённая задача — расхождение routing (additive live vs exclusive backtest) и отсутствие достоверных данных по TF/SMC стратегиям.
+TRADERAGENT v2.2 — платформа с 6 ботами (~$102k), BacktestOrchestratorEngine V3.0, AdaptiveRecoveryGrid (live + backtest), Event Ontology. Ключевая нерешённая задача — расхождение routing (additive live vs exclusive backtest) и Phase 2 оптимизация.
 
-### Выполненные улучшения (v2.0 → v2.1)
+### Выполненные улучшения (v2.0 → v2.2)
 
 | Улучшение | Компонент | Статус |
 |-----------|-----------|--------|
@@ -22,6 +22,10 @@ TRADERAGENT v2.1 — платформа с 5 живыми ботами (~$102k),
 | «Единый разумный трейдер» (#356-360) | SMCStructureAnalyzer, StrategyConductor и др. | ✅ |
 | UnifiedBacktestEngine | `bot/tests/backtesting/unified_engine.py` | ✅ |
 | VirtualPositionManager + CapitalArbiter | `orchestrator_engine.py` | ✅ |
+| **AdaptiveRecoveryGrid** (6 phases) | `recovery_coordinator.py`, `grid_adapter.py`, live+backtest | ✅ |
+| **Event Ontology System** | `bot/orchestrator/events.py` + Phases 5-9 | ✅ |
+| **GridEngine._open_buys tracking** | Позиции без запроса к exchange | ✅ |
+| **SMCStructureAnalyzer.get_cached_context()** | Кэш без DataFrame | ✅ |
 
 ---
 
@@ -34,7 +38,7 @@ TRADERAGENT v2.1 — платформа с 5 живыми ботами (~$102k),
 | **C** | Live↔Backtest: синхронизация routing | Неделя 1–2 | 🔴 P1 |
 | **D** | Phase 3: Portfolio Backtest | Неделя 4 | 🟡 P2 |
 | **E** | Production Deploy (Phase 8) | Неделя 5 | 🟡 P2 |
-| **F** | AdaptiveRecoveryGrid | Неделя 6+ | 🟠 P3 |
+| **F** | AdaptiveRecoveryGrid | ~~Неделя 6+~~ | ✅ DONE |
 | **G** | Web UI — equity curves, dashboard | Параллельно | 🟠 P3 |
 | **H** | SMC advanced: on-chain, Order Flow | Будущее | 🟠 P3 |
 
@@ -280,17 +284,21 @@ ssh ai-agent@185.233.200.13 "cd ~/TRADERAGENT && tar xzf /tmp/sync.tar.gz && doc
 
 ---
 
-## F. AdaptiveRecoveryGrid (Future) 🟠 P3
+## F. AdaptiveRecoveryGrid ✅ ЗАВЕРШЁН
 
-**Концепция SMK**: Grid достигает нижней границы → DCA cascade до SMC-поддержки → TP при суммарной позиции +1%.
+**Реализовано (v2.2.0, 2026-03-13):**
 
-```
-GridEngine.on_lower_boundary_hit()
-  → SMC.get_nearest_support(current_price)
-  → DCAEngine.start_cascade(smc_support)
-  → CombinedPositionManager.check_combined_tp()
-  → GridEngine.restart(new_range)
-```
+- `bot/strategies/hybrid/recovery_config.py` — RecoveryConfig (10 параметров)
+- `bot/strategies/hybrid/recovery_coordinator.py` — RecoveryCoordinator (стейт-машина IDLE→DCA_ACTIVE→EXITING)
+- `bot/strategies/grid_adapter.py` — recovery-aware path (pause/resume/get_underwater_snapshot)
+- `bot/strategies/hybrid/hybrid_strategy.py` — RECOVERY_ACTIVE mode
+- `bot/orchestrator/bot_orchestrator.py` — live integration (_check_recovery_trigger, _process_recovery_logic, _execute_recovery_exit)
+- `bot/tests/backtesting/orchestrator_engine.py` — backtest integration
+- `bot/core/grid_engine.py` — _open_buys tracker + get_underwater_positions()
+- `bot/core/smc/structure_analyzer.py` — get_cached_context()
+- `bot/config/schemas.py` — RecoveryConfigSchema (Pydantic validation)
+- `configs/phase7_demo.yaml` — recovery section (enabled: false по умолчанию)
+- 54 новых теста: coordinator (37), grid_adapter (9), hybrid (5), backtest integration (3)
 
 ---
 
@@ -334,7 +342,7 @@ GridEngine.on_lower_boundary_hit()
 Неделя 4:  B5-B6 (Phase 2: TF + SMC optimization, 520 прогонов)
 Неделя 5:  D1-D3 (Phase 3 portfolio backtest)
 Неделя 6:  E1-E4 (production deploy: Phase 8 configs)
-Неделя 7+: F, G, H
+Неделя 7+: G, H (F — AdaptiveRecoveryGrid — ✅ ЗАВЕРШЁН)
 ```
 
 ---
@@ -348,7 +356,23 @@ GridEngine.on_lower_boundary_hit()
 | Routing синхронизирован | Live ≈ Backtest маршрутизация | ⏳ Неделя 1–2 |
 | Phase 3 портфель | Portfolio Sharpe > 1.0, drawdown < 20% | ⏳ Неделя 5 |
 | Production deploy | Live ≈ backtest ±30% | ⏳ Неделя 6 |
-| AdaptiveRecoveryGrid | Меньше stop-loss vs чистый Grid | ⏳ Будущее |
+| AdaptiveRecoveryGrid | Меньше stop-loss vs чистый Grid | ✅ Реализован (v2.2) |
+
+---
+
+---
+
+## I. Event Ontology + Agent Infrastructure (v2.2.0) ✅ ЗАВЕРШЁН
+
+Реализовано в ветке `feature/event-ontology` (10 коммитов, Phases 5-9):
+- Event Ontology System — типизированная система событий
+- AI Expert Agents (Tool/Skill system)
+- Advanced Analytics, Execution & Scenario Planning
+- Meta-Intelligence, Adaptive Strategies & Market Tools
+- Autonomous Pipeline, Safety & Market Analysis
+- Self-Learning System (feedback loop, adaptive weights)
+- Investment Committee, Cross-Entity Automation
+- Dashboard: Risk Tools + Evolution tabs
 
 ---
 

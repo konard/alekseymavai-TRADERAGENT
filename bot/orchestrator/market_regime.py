@@ -441,6 +441,10 @@ class MarketRegimeDetector:
             details["smc_trend_bias"] = active_smc_context.trend_bias
             details["smc_confidence"] = active_smc_context.confidence
             details["smc_warmup_complete"] = active_smc_context.warmup_complete
+            # Populate smc_signal for PRE_SWITCH gate (StrategySelector._check_smc_signal)
+            if active_smc_context.last_structure is not None:
+                ls = active_smc_context.last_structure
+                details["smc_signal"] = "CHoCH" if ls.is_choch else "BOS"
 
         analysis = RegimeAnalysis(
             regime=regime,

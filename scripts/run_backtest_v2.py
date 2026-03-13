@@ -132,17 +132,17 @@ def tg_send(text: str) -> None:
 # ---------------------------------------------------------------------------
 ORCHESTRATOR_PARAM_GRID: dict[str, list[Any]] = {
     # Router params
-    "router_cooldown_bars": [60, 120, 240],
-    "regime_check_every_n": [6, 12, 24],
+    "router_cooldown_bars": [2, 6],
+    "regime_check_every_n": [6, 12],
     # Risk params
-    "max_position_size_pct": [0.15, 0.20, 0.25],
+    "max_position_size_pct": [0.15, 0.25],
     # DCA sub-params (forwarded to dca_params dict via "dca_" prefix)
     "dca_trigger_pct": [0.03, 0.05, 0.07],
-    "dca_tp_pct": [0.05, 0.08, 0.10],
+    "dca_tp_pct": [0.05, 0.08],
     # TrendFollower sub-params
-    "tf_ema_fast": [10, 15, 20],
+    "tf_ema_fast": [10, 20],
     # SMC sub-params (forwarded to smc_params dict via "smc_" prefix)
-    "smc_min_risk_reward": [2.0, 2.5, 3.0],
+    "smc_min_risk_reward": [2.0, 3.0],
 }
 
 
@@ -327,6 +327,14 @@ def _load_data(
         # Normalise symbol: "ETH/USDT" → "ETHUSDT" so glob matches filenames
         _sym_clean = symbol.replace("/", "")
         csv_files = [f for f in data_dir.glob(f"*{_sym_clean}*.csv") if f.stem.endswith("_5m")]
+        # Also try underscore-separated format: "ETHUSDT" → "ETH_USDT"
+        if not csv_files:
+            for quote in ("USDT", "BUSD", "USDC"):
+                if _sym_clean.endswith(quote):
+                    _sym_us = _sym_clean[: -len(quote)] + "_" + quote
+                    csv_files = [f for f in data_dir.glob(f"*{_sym_us}*.csv") if f.stem.endswith("_5m")]
+                    if csv_files:
+                        break
         if csv_files:
             try:
                 csv_path = csv_files[0]
@@ -479,7 +487,7 @@ async def phase2_optimize(
     # Dynamic timeout: allow 43% headroom above expected processing time
     # (empirical: ~142 bars/sec per worker on a 16-core machine)
     if max_bars:
-        trial_timeout = max(120.0, max_bars / 70.0)
+        trial_timeout = max(120.0, max_bars / 20.0)  # conservative: ~20 bars/sec with parallel workers
     else:
         trial_timeout = 120.0
     logger.info("[Phase 2] trial_timeout_sec=%.0fs | bars=%d", trial_timeout, len(opt_data.m5))
@@ -813,6 +821,18 @@ def _cfg_from_backtest_yaml(
     # Live default is 10% (too aggressive for a single-pair backtest).
     _vpm_max_grid_loss_pct = float(bt.get("vpm_max_grid_loss_pct", 0.25))
 
+    # Custom routing YAML — allows bear-market or other specialized routing
+    _routing_config = None
+    _routing_yaml = bt.get("routing_yaml")
+    if _routing_yaml:
+        _routing_path = Path(config_path).parent.parent / _routing_yaml
+        if not _routing_path.exists():
+            _routing_path = Path(_routing_yaml)
+        if _routing_path.exists():
+            from bot.orchestrator.routing_config import RoutingConfig
+            _routing_config = RoutingConfig(str(_routing_path))
+            logger.info("Loaded custom routing config: %s", _routing_path)
+
     return OrchestratorBacktestConfig(
         symbol=symbol,
         initial_balance=_ib,
@@ -835,6 +855,7 @@ def _cfg_from_backtest_yaml(
         dca_params=dca_params,
         tf_params=tf_params,
         smc_params=smc_params,
+        routing_config=_routing_config,
     )
 
 

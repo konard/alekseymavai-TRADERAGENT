@@ -17,6 +17,14 @@ from bot.strategies.hybrid.market_regime_detector import (
     StrategyRecommendation,
     VolumeProfile,
 )
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryAction,
+    RecoveryCoordinator,
+    RecoveryPhase,
+    RecoveryState,
+    UnderwaterPosition,
+)
 
 __all__ = [
     # Market Regime Detector
@@ -35,4 +43,11 @@ __all__ = [
     "HybridMode",
     "HybridAction",
     "TransitionEvent",
+    # Recovery
+    "RecoveryConfig",
+    "RecoveryCoordinator",
+    "RecoveryPhase",
+    "RecoveryState",
+    "RecoveryAction",
+    "UnderwaterPosition",
 ]

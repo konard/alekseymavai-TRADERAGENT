@@ -1,7 +1,7 @@
 # TRADERAGENT — Комплексный анализ проекта
 
-> Дата: 2026-03-11 · Версия: v2.1.0
-> Кодовая база: ~120K+ LOC · 2197 тестов · Production: 5 ботов на Bybit Demo
+> Дата: 2026-03-13 · Версия: v2.2.0
+> Кодовая база: ~130K+ LOC · 2531+ тестов · Production: 6 ботов на Bybit Demo
 > Автор: Tech Lead Audit
 
 ---
@@ -25,7 +25,7 @@ TRADERAGENT — платформа алгоритмической торговл
 | Сервер | IP | Роль |
 |--------|----|------|
 | Production | 185.233.200.13 | Live-боты, Docker Compose |
-| Testing | 158.160.215.57 | pytest (2197 тестов), backtest (.venv) |
+| Testing | 158.160.215.57 | pytest (2531+ тестов), backtest (.venv) |
 
 ### Ключевые вехи
 
@@ -36,6 +36,8 @@ TRADERAGENT — платформа алгоритмической торговл
 | P0-фиксы (force_close, trades, cooldown) | ✅ Реализованы |
 | «Единый разумный трейдер» (Issues #356–#360) | ✅ MERGED |
 | Унификация маршрутизации (Issues #368–#371) | ✅ MERGED |
+| AdaptiveRecoveryGrid (Phases 1–6) | ✅ Реализован — live + backtest |
+| Event Ontology System | ✅ Реализована (feature/event-ontology) |
 | Phase 2 оптимизация | 🔴 Не запущена |
 
 ---
@@ -62,10 +64,21 @@ TRADERAGENT — платформа алгоритмической торговл
 | **TrendFollower** | ✅ Полная | EMA/ATR/RSI, partial close, force_close_all ✅ (P0-фикс) |
 | **SMC** | ✅ Полная | H1+M5 multi-TF, BOS/CHoCH, OB, FVG, force_close_all ✅ (P0-фикс) |
 | **Hybrid (Grid+DCA)** | ✅ Полная | HybridCoordinator, ADX-based routing |
+| **AdaptiveRecoveryGrid** | ✅ Реализован | DCA-каскад при пробое Grid lower boundary |
 
-### 2.3 Тестирование и DevOps
+### 2.3 AdaptiveRecoveryGrid (v2.2.0)
 
-- **2197 тестов** — 0 провалов (за исключением 26 pre-existing: web auth, flaky SMC market_structure)
+Grid → Recovery стейт-машина вместо stop-loss:
+- **GRID_ONLY** → цена < grid_lower → **RECOVERY_DCA_ACTIVE** (DCA cascade до SMC-поддержки)
+- Blended TP (+1%) или timeout → **GRID_RESTART** (перезапуск Grid с новым диапазоном)
+- SMC support discovery: bullish OB + swing lows → ближайший с наивысшим score
+- Двойной risk guard: `RiskManager.check_trade()` + `max_recovery_capital_pct` (30% cap)
+- Файлы: `recovery_config.py`, `recovery_coordinator.py`, интеграция в `grid_adapter.py`, `hybrid_strategy.py`, `bot_orchestrator.py`, `orchestrator_engine.py`
+- Тесты: 54 новых теста (coordinator, grid_adapter, hybrid, backtest integration)
+
+### 2.4 Тестирование и DevOps
+
+- **2531+ тестов** — 0 провалов (за исключением ~26 pre-existing: web auth, flaky SMC market_structure)
 - **CI/CD** — GitHub Actions: weekly optimization pipeline (.github/workflows/weekly_optimization.yml)
 - **ProcessPoolExecutor** — параллельная оптимизация параметров в Phase 2 (8 workers)
 - **TimescaleDB** — hypertable для OHLCV данных, WebSocket kline feed
@@ -366,6 +379,7 @@ flowchart LR
 | **Capital** | Реальные ордера | VirtualPositionManager | Нет рыночного impact |
 | **Position tracking** | Order ID + exchange | Виртуальные позиции | Нет частичных заполнений |
 | **HybridCoordinator** | Активен для hybrid-бота | Не реализован | 🟠 Пробел |
+| **AdaptiveRecoveryGrid** | Активен (live integration) | Активен (backtest integration) | ✅ Синхронизировано |
 
 ---
 
@@ -378,15 +392,22 @@ flowchart LR
 3. **Режимная детекция** — 6 режимов с SMC-приоритетом, ADX гистерезис предотвращает флапинг.
 4. **Единый routing через YAML** — критическое улучшение, live и backtest используют одни правила.
 5. **TradingCore** — параметры синхронизированы (fees, cooldown, risk).
-6. **2197 тестов** — стабильное покрытие.
+6. **2531+ тестов** — стабильное покрытие (167 файлов).
+
+### Что реализовано (v2.2)
+
+7. ✅ **AdaptiveRecoveryGrid** — DCA-каскад вместо Grid stop-loss (live + backtest, 54 теста).
+8. ✅ **Event Ontology** — типизированная система событий + AI-агенты (feature/event-ontology).
+9. ✅ **GridEngine._open_buys** — отслеживание позиций без запроса exchange.
+10. ✅ **SMCStructureAnalyzer.get_cached_context()** — кэш без DataFrame.
 
 ### Что требует работы
 
-1. 🔴 **SMC = 0 сделок** — диагностика и фикс (`min_rr`, `max_positions`, CapitalArbiter).
-2. 🔴 **Routing additive vs exclusive** — выбрать стратегию и синхронизировать.
-3. 🔴 **Phase 2 оптимизация** — не запущена (требует $10k balance + P0-фиксы).
-4. 🟡 **DCA daily loss scale** — нужен `initial_balance=$10k` для реалистичного теста.
-5. 🟠 **HybridCoordinator в backtest** — для корректной оценки hybrid-бота.
+1. 🔴 **Routing additive vs exclusive** — выбрать стратегию и синхронизировать.
+2. 🔴 **Phase 2 оптимизация** — не запущена (требует $10k balance + P0-фиксы).
+3. 🟡 **DCA daily loss scale** — нужен `initial_balance=$10k` для реалистичного теста.
+4. 🟠 **HybridCoordinator в backtest** — для корректной оценки hybrid-бота.
+5. 🟠 **RecoveryGrid validation** — backtest с реальными данными (BTC 2022 медвежий рынок).
 
 ---
 

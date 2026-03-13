@@ -81,6 +81,11 @@ class GridAdapter(BaseStrategy):
         self._closed_trades: list[dict[str, Any]] = []
         self._current_price = Decimal("0")
 
+        # Recovery integration
+        self._recovery_enabled: bool = False
+        self._recovery_triggered: bool = False
+        self._paused: bool = False
+
     def get_strategy_name(self) -> str:
         return self._name
 
@@ -224,6 +229,8 @@ class GridAdapter(BaseStrategy):
 
     def generate_signal(self, df: pd.DataFrame, current_balance: Decimal) -> Optional[BaseSignal]:
         """Generate buy signal when price is near a grid buy level."""
+        if self._paused:
+            return None
         if not self._grid_levels or df.empty:
             return None
 
@@ -298,11 +305,18 @@ class GridAdapter(BaseStrategy):
         exits: list[tuple[str, ExitReason]] = []
         self._current_price = current_price
 
-        # If price breaks below the entire grid's lower boundary → close ALL positions
+        # If price breaks below the entire grid's lower boundary
         if self._grid_lower_price > 0 and current_price < self._grid_lower_price:
-            for pos_id in list(self._positions):
-                exits.append((pos_id, ExitReason.STOP_LOSS))
-            return exits
+            if self._recovery_enabled:
+                # Recovery mode: don't close — signal recovery trigger
+                self._recovery_triggered = True
+                self._paused = True
+                return exits  # empty — positions kept alive
+            else:
+                # Default: close ALL positions at STOP_LOSS
+                for pos_id in list(self._positions):
+                    exits.append((pos_id, ExitReason.STOP_LOSS))
+                return exits
 
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
@@ -423,6 +437,67 @@ class GridAdapter(BaseStrategy):
             capital_allocation=directive.capital_allocation,
         )
 
+    # =========================================================================
+    # Recovery Integration
+    # =========================================================================
+
+    def set_recovery_enabled(self, enabled: bool) -> None:
+        """Enable/disable recovery mode (changes stop-loss behaviour)."""
+        self._recovery_enabled = enabled
+
+    @property
+    def recovery_triggered(self) -> bool:
+        """True if price broke grid lower and recovery is requested."""
+        return self._recovery_triggered
+
+    def clear_recovery_trigger(self) -> None:
+        """Clear the recovery trigger flag after coordinator has picked it up."""
+        self._recovery_triggered = False
+
+    def get_underwater_snapshot(self) -> list[dict[str, Any]]:
+        """Return current positions snapshot without closing them.
+
+        Returns list of dicts with pos_id, entry_price, size.
+        """
+        return [
+            {
+                "pos_id": pos_id,
+                "entry_price": pos["entry_price"],
+                "size": pos["size"],
+            }
+            for pos_id, pos in self._positions.items()
+        ]
+
+    @property
+    def grid_lower_price(self) -> Decimal:
+        return self._grid_lower_price
+
+    def pause(self) -> None:
+        """Pause Grid — stops signal generation."""
+        self._paused = True
+
+    def resume(self, new_lower: Decimal, new_upper: Decimal) -> None:
+        """Resume Grid with a new price range."""
+        self._paused = False
+        self._recovery_triggered = False
+        self._grid_engine = GridEngine(
+            symbol=self._symbol,
+            upper_price=new_upper,
+            lower_price=new_lower,
+            grid_levels=self._num_levels,
+            amount_per_grid=self._amount_per_grid,
+            profit_per_grid=self._profit_per_grid,
+        )
+        self._grid_levels = self._grid_engine.calculate_grid_levels()
+        self._grid_lower_price = self._grid_engine.lower_price
+        self._recenter_countdown = self._recenter_cooldown_bars
+        logger.info(
+            "grid_resumed",
+            new_lower=float(new_lower),
+            new_upper=float(new_upper),
+            levels=len(self._grid_levels),
+        )
+
     def reset(self) -> None:
         self._grid_engine = None
         self._grid_levels = []
@@ -432,3 +507,5 @@ class GridAdapter(BaseStrategy):
         self._last_analysis = None
         self._directive = None
         self._current_price = Decimal("0")
+        self._recovery_triggered = False
+        self._paused = False

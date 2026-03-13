@@ -48,6 +48,11 @@ from bot.strategies.dca.dca_signal_generator import MarketState
 from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
 from bot.strategies.grid.grid_risk_manager import GridRiskManager
 from bot.strategies.hybrid.hybrid_config import HybridConfig
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryCoordinator,
+    UnderwaterPosition,
+)
 from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc_adapter import SMCStrategyAdapter
@@ -128,6 +133,8 @@ class BotOrchestrator:
         self.trend_follower_strategy: TrendFollowerStrategy | None = None
         self.smc_strategy: SMCStrategyAdapter | None = None
         self.hybrid_strategy: HybridStrategy | None = None
+        self._recovery_coordinator: RecoveryCoordinator | None = None
+        self._recovery_in_progress: bool = False
         self.risk_manager: RiskManager | None = None
         # Cross-pair portfolio risk (None for single-bot deployments → no overhead)
         self._portfolio_rm: PortfolioRiskManager | None = portfolio_risk_manager
@@ -309,6 +316,30 @@ class BotOrchestrator:
                 dca_engine=None,  # Orchestrator manages DCA directly
             )
             logger.info("hybrid_strategy_initialized")
+
+        # Initialize Recovery Coordinator for hybrid/grid strategy
+        if (
+            self.grid_engine is not None
+            and self.config.recovery is not None
+            and self.config.recovery.enabled
+        ):
+            _rcfg = RecoveryConfig(
+                enabled=True,
+                tp_target_pct=Decimal(str(self.config.recovery.tp_target_pct)),
+                max_dca_orders=self.config.recovery.max_dca_orders,
+                dca_step_pct=Decimal(str(self.config.recovery.dca_step_pct)),
+                dca_volume_multiplier=Decimal(str(self.config.recovery.dca_volume_multiplier)),
+                timeout_bars=self.config.recovery.timeout_bars,
+                timeout_action=self.config.recovery.timeout_action,
+                fallback_support_pct=Decimal(str(self.config.recovery.fallback_support_pct)),
+                max_recovery_capital_pct=Decimal(str(self.config.recovery.max_recovery_capital_pct)),
+                cooldown_after_recovery_bars=self.config.recovery.cooldown_after_recovery_bars,
+            )
+            _rcfg.validate()
+            self._recovery_coordinator = RecoveryCoordinator(_rcfg)
+            if self.hybrid_strategy is not None:
+                self.hybrid_strategy._recovery_coordinator = self._recovery_coordinator
+            logger.info("recovery_coordinator_initialized")
 
         # Initialize Trend-Follower strategy if enabled
         if self.config.strategy == StrategyType.TREND_FOLLOWER and self.config.trend_follower:
@@ -963,7 +994,11 @@ class BotOrchestrator:
                     and _dca_capital_ok
                 )
 
-                if grid_active and dca_active and self.hybrid_strategy:
+                if self._recovery_in_progress:
+                    await self._process_recovery_logic()
+                elif self._recovery_coordinator is not None and await self._check_recovery_trigger():
+                    await self._process_recovery_logic()
+                elif grid_active and dca_active and self.hybrid_strategy:
                     await self._process_hybrid_logic()
                 else:
                     if grid_active:
@@ -1103,6 +1138,223 @@ class BotOrchestrator:
         else:
             # No-op: neither grid nor DCA (shouldn't happen with current coordinator)
             logger.debug("hybrid_no_active_strategy", adx=adx, reason=decision.reason)
+
+    # =========================================================================
+    # Recovery: DCA cascade when Grid hits lower boundary
+    # =========================================================================
+
+    async def _check_recovery_trigger(self) -> bool:
+        """Check if price breached grid lower and trigger recovery.
+
+        Returns True if recovery was triggered (caller should skip normal grid).
+        All data is local — no exchange queries.
+        """
+        if (
+            self._recovery_coordinator is None
+            or self.grid_engine is None
+            or self.current_price is None
+            or self._recovery_in_progress
+        ):
+            return False
+
+        grid_lower = self.grid_engine.lower_price
+        if not self._recovery_coordinator.should_trigger(grid_lower, self.current_price):
+            return False
+
+        # SMC support from cached context (no df needed)
+        smc_support: Decimal | None = None
+        smc_ctx = self.smc_structure_analyzer.get_cached_context(self.config.symbol)
+        if smc_ctx is not None:
+            smc_support = RecoveryCoordinator.find_smc_support(smc_ctx, self.current_price)
+
+        # Underwater positions from local tracker
+        underwater_raw = self.grid_engine.get_underwater_positions(self.current_price)
+        if not underwater_raw:
+            logger.warning("recovery_trigger_no_underwater_positions")
+            return False
+
+        underwater = [
+            UnderwaterPosition(
+                pos_id=p["order_id"],
+                entry_price=p["entry_price"],
+                size=p["size"],
+            )
+            for p in underwater_raw
+        ]
+
+        self._recovery_coordinator.enter_recovery(
+            grid_positions=underwater,
+            current_price=self.current_price,
+            current_bar=0,
+            smc_support=smc_support,
+            base_order_size=self.grid_engine.amount_per_grid,
+        )
+        self._recovery_in_progress = True
+
+        # Cancel all active grid orders on exchange
+        for order_id in list(self.grid_engine.active_orders.keys()):
+            try:
+                await self.exchange.cancel_order(order_id, self.config.symbol)
+                self.grid_engine.cancel_order(order_id)
+            except Exception as e:
+                logger.warning("recovery_cancel_grid_order_failed", order_id=order_id, error=str(e))
+
+        await self._publish_event(EventType.RECOVERY_ENTERED, {
+            "price": str(self.current_price),
+            "grid_lower": str(grid_lower),
+            "underwater_positions": len(underwater),
+            "smc_support": str(smc_support) if smc_support else None,
+        })
+        logger.info(
+            "recovery_entered_live",
+            price=float(self.current_price),
+            grid_lower=float(grid_lower),
+            underwater=len(underwater),
+        )
+        return True
+
+    async def _process_recovery_logic(self) -> None:
+        """Process one tick of recovery DCA cascade."""
+        if (
+            self._recovery_coordinator is None
+            or not self._recovery_coordinator.is_active
+            or self.current_price is None
+        ):
+            return
+
+        recovery_action = self._recovery_coordinator.on_price_update(self.current_price)
+
+        # Place DCA signals as market orders
+        dca_fills: list[UnderwaterPosition] = []
+        balance = self._cached_balance or Decimal("0")
+        state = self._recovery_coordinator.state
+
+        for signal in recovery_action.dca_signals:
+            # Recovery-specific capital cap
+            if state is not None:
+                total_spent = sum(f.entry_price * f.size for f in state.dca_fills)
+                max_capital = balance * self._recovery_coordinator.config.max_recovery_capital_pct
+                mult = Decimal(str(signal.metadata.get("multiplier", 1.0))) if signal.metadata else Decimal("1")
+                next_cost = self.current_price * mult * state.base_order_size / self.current_price
+                if total_spent + (next_cost * self.current_price) > max_capital:
+                    logger.warning("recovery_dca_capital_limit",
+                                   spent=float(total_spent), limit=float(max_capital))
+                    break
+
+            # Standard risk manager gate
+            if self.risk_manager:
+                exposure = self._get_total_open_exposure()
+                order_value = state.base_order_size * mult if state else Decimal("0")
+                risk_check = self.risk_manager.check_trade(
+                    order_value=order_value,
+                    current_position=exposure,
+                    available_balance=balance,
+                )
+                if not risk_check.allowed:
+                    logger.warning("recovery_dca_blocked_by_risk", reason=risk_check.reason)
+                    break
+
+            # Place market buy order
+            try:
+                mult_val = Decimal(str(signal.metadata.get("multiplier", 1.0))) if signal.metadata else Decimal("1")
+                base_amount = (
+                    state.base_order_size * mult_val / self.current_price
+                ).quantize(Decimal("0.000001")) if state else Decimal("0")
+
+                if not self.config.dry_run and base_amount > 0:
+                    result = await self.exchange.create_order(
+                        symbol=self.config.symbol,
+                        order_type="market",
+                        side="buy",
+                        amount=float(base_amount),
+                    )
+                    fill_price = Decimal(str(
+                        result.get("average", result.get("price", self.current_price))
+                    ))
+                else:
+                    fill_price = self.current_price
+
+                fill = UnderwaterPosition(
+                    pos_id=f"recovery_dca_{signal.metadata.get('dca_order_num', 0) if signal.metadata else 0}",
+                    entry_price=fill_price,
+                    size=base_amount,
+                )
+                dca_fills.append(fill)
+
+                await self._publish_event(EventType.RECOVERY_DCA_PLACED, {
+                    "price": str(fill_price),
+                    "dca_level": signal.metadata.get("dca_order_num", 0) if signal.metadata else 0,
+                    "amount": str(base_amount),
+                })
+            except Exception as e:
+                logger.error("recovery_dca_order_failed", error=str(e))
+
+        # Register fills for blended avg recalculation
+        if dca_fills:
+            self._recovery_coordinator.on_price_update(self.current_price, new_fills=dca_fills)
+
+        # Handle exit conditions
+        if recovery_action.should_close_all:
+            await self._execute_recovery_exit(recovery_action)
+
+    async def _execute_recovery_exit(self, recovery_action) -> None:
+        """Close all recovery positions and restart grid."""
+        if self.current_price is None:
+            return
+
+        # Close all open positions for this symbol
+        if not self.config.dry_run:
+            try:
+                positions = await self.exchange.fetch_positions([self.config.symbol])
+                for pos in positions:
+                    contracts = abs(float(pos.get("contracts", 0)))
+                    if contracts > 0:
+                        side = "sell" if pos.get("side") == "long" else "buy"
+                        await self.exchange.create_order(
+                            symbol=self.config.symbol,
+                            order_type="market",
+                            side=side,
+                            amount=contracts,
+                            params={"reduceOnly": True},
+                        )
+            except Exception as e:
+                logger.error("recovery_exit_close_failed", error=str(e))
+
+        event_type = (
+            EventType.RECOVERY_TP_HIT
+            if "tp_hit" in (recovery_action.close_reason or "")
+            else EventType.RECOVERY_TIMEOUT
+        )
+        await self._publish_event(event_type, {
+            "reason": recovery_action.close_reason,
+            "new_grid_range": (
+                [str(x) for x in recovery_action.new_grid_range]
+                if recovery_action.new_grid_range else None
+            ),
+        })
+
+        # Restart grid with new range
+        if recovery_action.new_grid_range and self.grid_engine is not None:
+            new_lower, new_upper = recovery_action.new_grid_range
+            self.grid_engine = GridEngine(
+                symbol=self.config.symbol,
+                upper_price=new_upper,
+                lower_price=new_lower,
+                grid_levels=self.grid_engine.grid_levels,
+                amount_per_grid=self.grid_engine.amount_per_grid,
+                profit_per_grid=self.grid_engine.profit_per_grid,
+                grid_type=self.grid_engine.grid_type,
+            )
+            grid_orders = self.grid_engine.initialize_grid(self.current_price)
+            await self._place_grid_orders(grid_orders)
+
+            await self._publish_event(EventType.RECOVERY_EXITED, {
+                "new_lower": str(new_lower),
+                "new_upper": str(new_upper),
+            })
+
+        self._recovery_in_progress = False
+        logger.info("recovery_exit_complete", reason=recovery_action.close_reason)
 
     async def _process_grid_orders(self) -> None:
         """Process grid order fills and rebalancing."""
@@ -2287,6 +2539,12 @@ class BotOrchestrator:
             "strategies": sorted(self._locked_strategies) if self._locked_strategies else None,
         }
         status["active_strategies"] = sorted(self._active_strategies)
+
+        # Recovery status
+        if self._recovery_coordinator is not None:
+            status["recovery"] = self._recovery_coordinator.get_statistics()
+            if self._recovery_coordinator.state:
+                status["recovery_state"] = self._recovery_coordinator.state.to_dict()
 
         return status
 

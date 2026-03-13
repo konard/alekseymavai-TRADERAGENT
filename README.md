@@ -1,13 +1,13 @@
-# TRADERAGENT v2.1
+# TRADERAGENT v2.2
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Tests: 2197+ passing](https://img.shields.io/badge/tests-2197%20passing-brightgreen.svg)]()
-[![Version: 2.1.0](https://img.shields.io/badge/version-2.1.0-blue.svg)]()
+[![Tests: 2531+ passing](https://img.shields.io/badge/tests-2531%20passing-brightgreen.svg)]()
+[![Version: 2.2.0](https://img.shields.io/badge/version-2.2.0-blue.svg)]()
 
-Платформа алгоритмической торговли криптовалютами с 4 стратегиями, адаптивным переключением по режиму рынка и BacktestOrchestratorEngine V3.0.
+Платформа алгоритмической торговли криптовалютами с 5 стратегиями (Grid, DCA, TrendFollower, SMC, Hybrid+Recovery), адаптивным переключением по режиму рынка, BacktestOrchestratorEngine V3.0 и Event Ontology системой.
 
-Algorithmic cryptocurrency trading platform with 4 strategies, market-regime adaptive switching, and BacktestOrchestratorEngine V3.0.
+Algorithmic cryptocurrency trading platform with 5 strategies (Grid, DCA, TrendFollower, SMC, Hybrid+Recovery), market-regime adaptive switching, BacktestOrchestratorEngine V3.0, and Event Ontology system.
 
 ---
 
@@ -29,18 +29,17 @@ Algorithmic cryptocurrency trading platform with 4 strategies, market-regime ada
 
 | Компонент | Состояние |
 |-----------|-----------|
-| Production боты (5 шт.) | ✅ Running — 185.233.200.13, баланс ~$102k |
+| Production боты (6 шт.) | ✅ Running — 185.233.200.13, баланс ~$102k |
 | BacktestOrchestratorEngine V3.0 | ✅ Phase 1 завершён (43/43 пар, 50k баров) |
 | TradingCore (unified config) | ✅ Завершён — cooldown/fees/risk синхронизированы |
+| AdaptiveRecoveryGrid | ✅ Реализован (v2.2) — live + backtest |
+| Event Ontology System | ✅ Реализована (v2.2) |
 | force_close_all в TF/SMC | ✅ Реализован (v2.1) |
-| strat_trades — закрытые сделки | ✅ Исправлен (v2.1) |
-| router_cooldown_bars=2 | ✅ Синхронизирован с live (v2.1) |
 | Единый strategy_routing.yaml | ✅ Live + Backtest используют один конфиг |
 | Live↔Backtest routing | 🔴 additive vs exclusive (см. [docs/plan.md](docs/plan.md) → C1) |
-| SMC = 0 сделок в backtest | 🔴 Диагностика (см. [docs/plan.md](docs/plan.md) → A1) |
 | Phase 2 оптимизация | ⏳ Не запущена |
 
-**Текущий фокус:** диагностика SMC, синхронизация routing, Phase 2 оптимизация.
+**Текущий фокус:** синхронизация routing, Phase 2 оптимизация, валидация Recovery Grid.
 
 ---
 
@@ -53,6 +52,7 @@ Algorithmic cryptocurrency trading platform with 4 strategies, market-regime ada
 | **Trend Follower** | EMA/ATR/RSI trend-following с trailing stop и partial close | ✅ | ✅ |
 | **SMC** | H1 структура (BOS/CHoCH, OB, FVG) + M5 вход | ✅ | ✅ |
 | **Hybrid (Grid+DCA)** | HybridCoordinator: ADX-based Grid↔DCA переключение | ✅ | 🟡 |
+| **Recovery Grid** | DCA-каскад вместо stop-loss при пробое Grid lower boundary | ✅ | ✅ |
 
 Все стратегии реализуют единый интерфейс `BaseStrategy` и подключаются через адаптер к live-боту и бэктесту.
 
@@ -70,8 +70,11 @@ bot/
 │   └── routing_config.py            # Loads configs/strategy_routing.yaml
 ├── strategies/
 │   ├── base.py                      # Unified BaseStrategy interface
-│   ├── grid/ + grid_adapter.py      # Grid strategy + force_close_all
+│   ├── grid/ + grid_adapter.py      # Grid strategy + force_close_all + recovery hooks
 │   ├── dca/ + dca_adapter.py        # DCA strategy + DCAStartupAnalyzer
+│   ├── hybrid/                      # Hybrid (Grid+DCA) + AdaptiveRecoveryGrid
+│   │   ├── recovery_coordinator.py  # Recovery стейт-машина (DCA cascade)
+│   │   └── recovery_config.py       # RecoveryConfig (10 параметров)
 │   ├── trend_follower/ + adapter    # TrendFollower + force_close_all
 │   └── smc/ + smc_adapter.py        # SMC: H1 structure + M5 entry + force_close_all
 ├── core/
@@ -247,7 +250,7 @@ python -m pytest tests/strategies/smc/ \
   --ignore=tests/strategies/smc/test_market_structure.py -v
 ```
 
-**Статус тестов**: 2197 passing, ~26 pre-existing failures (web auth, flaky SMC market_structure).
+**Статус тестов**: 2531+ passing, ~26 pre-existing failures (web auth, flaky SMC market_structure).
 
 > **Flaky тесты SMC** (`test_uptrend_detection`, `test_downtrend_detection`, `test_order_block_detection_bullish`) — случайные сбои из-за рандомизированных синтетических данных. Pre-existing, не регрессия.
 
@@ -257,10 +260,10 @@ python -m pytest tests/strategies/smc/ \
 
 | Документ | Описание |
 |----------|----------|
-| **[docs/analysis.md](docs/analysis.md)** | Комплексный анализ: сильные/слабые стороны, архитектурные схемы, Live↔Backtest конфликты, параметры |
-| **[docs/plan.md](docs/plan.md)** | Дорожная карта: 8 направлений (A–H), приоритеты P0–P3, таймлайн |
-| **[docs/architecture_v2.md](docs/architecture_v2.md)** | Детальная архитектура v2.2: Mermaid-диаграммы, алгоритмы, Issue #371 |
-| **[docs/bot_architecture_v2.md](docs/bot_architecture_v2.md)** | Алгоритмы живого бота v2.1: HealthMonitor, StrategyRegistry, потоки данных |
+| **[docs/analysis.md](docs/analysis.md)** | Комплексный анализ v2.2: сильные/слабые стороны, Live↔Backtest конфликты, AdaptiveRecoveryGrid |
+| **[docs/plan.md](docs/plan.md)** | Дорожная карта: 9 направлений (A–I), приоритеты P0–P3, таймлайн |
+| **[docs/architecture_v2.md](docs/architecture_v2.md)** | Детальная архитектура v2.2: Mermaid-диаграммы, алгоритмы |
+| **[docs/bot_architecture_v2.md](docs/bot_architecture_v2.md)** | Алгоритмы живого бота: HealthMonitor, StrategyRegistry, потоки данных |
 | **[docs/SESSION_CONTEXT.md](docs/SESSION_CONTEXT.md)** | История разработки по сессиям, текущий фокус |
 
 ---

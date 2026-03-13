@@ -67,6 +67,13 @@ class EventType(str, Enum):
     HYBRID_MODE_ACTIVATED = "hybrid_mode_activated"
     HYBRID_TRANSITION = "hybrid_transition"
 
+    # Recovery events (v2.2) — DCA cascade when Grid hits lower boundary
+    RECOVERY_ENTERED = "recovery_entered"
+    RECOVERY_DCA_PLACED = "recovery_dca_placed"
+    RECOVERY_TP_HIT = "recovery_tp_hit"
+    RECOVERY_TIMEOUT = "recovery_timeout"
+    RECOVERY_EXITED = "recovery_exited"
+
     # Price events
     PRICE_UPDATED = "price_updated"
 

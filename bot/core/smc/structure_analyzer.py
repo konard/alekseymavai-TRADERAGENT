@@ -103,6 +103,18 @@ class SMCStructureAnalyzer:
         )
         return context
 
+    def get_cached_context(self, symbol: str) -> SMCContext | None:
+        """
+        Return cached SMCContext if fresh, otherwise None.
+
+        Unlike get_context(), does NOT require a DataFrame and never triggers
+        re-analysis.  Use this when you need the latest context without I/O.
+        """
+        entry = self._cache.get(symbol)
+        if entry is not None and not entry.is_stale(self.ttl_seconds):
+            return entry.context
+        return None
+
     def get_structural_levels(self, symbol: str) -> list[float]:
         """
         Return the break-prices of all cached structural events for *symbol*.

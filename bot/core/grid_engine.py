@@ -106,6 +106,10 @@ class GridEngine:
         self.active_orders: dict[str, GridOrder] = {}  # order_id -> GridOrder
         self.filled_orders: list[GridOrder] = []
 
+        # Position tracker: filled buy orders that haven't been paired with a sell yet.
+        # Updated in handle_order_filled() — buy fill adds, sell fill removes the pair.
+        self._open_buys: dict[str, GridOrder] = {}  # order_id -> filled buy GridOrder
+
         # Statistics
         self.total_profit = Decimal("0")
         self.buy_count = 0
@@ -239,14 +243,24 @@ class GridEngine:
         filled_order.filled = True
         self.filled_orders.append(filled_order)
 
-        # Update statistics
+        # Update statistics and position tracker
         if filled_order.side == "buy":
             self.buy_count += 1
+            # Track this buy as an open position
+            self._open_buys[order_id] = filled_order
         else:
             self.sell_count += 1
             # Calculate profit for sell orders
             profit = (filled_price - filled_order.price) * filled_amount
             self.total_profit += profit
+            # Remove the paired buy position (same grid level)
+            paired_buy_id = None
+            for buy_id, buy_order in self._open_buys.items():
+                if buy_order.level == filled_order.level:
+                    paired_buy_id = buy_id
+                    break
+            if paired_buy_id:
+                self._open_buys.pop(paired_buy_id, None)
 
         logger.info(
             "Order filled",
@@ -371,6 +385,7 @@ class GridEngine:
         """
         if order_id in self.active_orders:
             order = self.active_orders.pop(order_id)
+            self._open_buys.pop(order_id, None)
             logger.info(
                 "Order cancelled",
                 order_id=order_id,
@@ -381,6 +396,23 @@ class GridEngine:
 
         logger.warning("Order not found for cancellation", order_id=order_id)
         return False
+
+    def get_underwater_positions(self, current_price: Decimal) -> list[dict]:
+        """Return filled buy positions where entry_price > current_price.
+
+        No exchange queries — uses local ``_open_buys`` tracker.
+
+        Returns list of dicts: order_id, entry_price, size (base amount).
+        """
+        return [
+            {
+                "order_id": oid,
+                "entry_price": o.price,
+                "size": o.amount,
+            }
+            for oid, o in self._open_buys.items()
+            if o.price > current_price
+        ]
 
     def get_open_positions(self) -> list[dict]:
         """

@@ -8,7 +8,7 @@ Defines operating modes and parameters for Grid↔DCA transitions:
 - Transition cooldowns and minimum durations
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -19,6 +19,10 @@ class HybridMode(str, Enum):
     TRANSITIONING = "transitioning"  # Mid-transition between modes
     DCA_ACTIVE = "dca_active"  # DCA active after grid breakout
     BOTH_ACTIVE = "both_active"  # Both active (intermediate)
+    RECOVERY_ACTIVE = "recovery_active"  # Grid paused, DCA recovery cascade
+
+
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
 
 
 @dataclass
@@ -60,6 +64,9 @@ class HybridConfig:
     # Transition protection
     transition_cooldown_seconds: int = 120  # 2 min between transitions
     max_transition_history: int = 50  # Max history records
+
+    # Recovery (DCA cascade when Grid hits lower boundary)
+    recovery: RecoveryConfig = field(default_factory=RecoveryConfig)
 
     def validate(self) -> None:
         """Validate configuration values."""

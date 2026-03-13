@@ -33,6 +33,7 @@ from typing import Any
 
 from bot.core.capital_arbiter import CapitalArbiter
 from bot.core.risk_manager import RiskManager
+from bot.core.smc.analyzer import SMCAnalyzer
 from bot.core.virtual_position_manager import VirtualPosition, VirtualPositionManager
 from bot.orchestrator.market_regime import (
     MarketRegimeDetector,
@@ -46,6 +47,12 @@ from bot.tests.backtesting.market_simulator import MarketSimulator
 from bot.tests.backtesting.multi_tf_data_loader import (
     MultiTimeframeData,
     MultiTimeframeDataLoader,
+)
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryCoordinator,
+    RecoveryPhase,
+    UnderwaterPosition,
 )
 from bot.tests.backtesting.strategy_router import StrategyRouter
 
@@ -93,6 +100,10 @@ class OrchestratorBacktestConfig:
     # override — but default must mirror live to ensure signal count parity.
     smc_generate_signal_every_n: int = 1  # SMC signal check every M5 bar (live parity)
 
+    # Recovery (DCA cascade when Grid hits lower boundary)
+    enable_recovery: bool = False  # opt-in; requires grid enabled
+    recovery_params: dict[str, Any] = field(default_factory=dict)
+
     # Strategies to include
     enable_grid: bool = True
     enable_dca: bool = True
@@ -109,6 +120,14 @@ class OrchestratorBacktestConfig:
     # truth), mirroring the live StrategySelector.  When None, a default RoutingConfig is
     # loaded from "configs/strategy_routing.yaml" at engine startup.
     routing_config: RoutingConfig | None = None
+
+    # Two-phase PRE_SWITCH gate — mirrors StrategySelector (issue #360 / C1 parity fix).
+    # When enabled, regime transitions require a timer + optional SMC signal before
+    # strategies are switched.  Eliminates live-vs-backtest routing divergence.
+    enable_pre_switch_gate: bool = True
+    # When True (default), transitions to/from trend regimes also require a BOS/CHoCH
+    # structural signal from SMCAnalyzer before the gate confirms.
+    pre_switch_require_smc: bool = True
 
     # StrategyConductor: when enabled, pushes StrategyDirective (capital allocation,
     # price range, key levels, restrictions) to active strategies on regime change,
@@ -513,6 +532,11 @@ class BacktestOrchestratorEngine:
         # Regime detector
         regime_detector = MarketRegimeDetector()
 
+        # SMC analyzer — provides structural context (BOS/CHoCH) to regime detector
+        # and PRE_SWITCH gate, mirroring the live bot's SMCStructureAnalyzer usage.
+        # swing_length=10 matches the live SMCConfig default for H1 analysis.
+        smc_analyzer = SMCAnalyzer(swing_strength=10)
+
         # Strategy router — uses RoutingConfig as single source of truth to mirror
         # the live StrategySelector.  Fall back to loading the default YAML when
         # no explicit routing_config was supplied.
@@ -533,6 +557,8 @@ class BacktestOrchestratorEngine:
         router = StrategyRouter(
             routing_config=_routing_config,
             cooldown_bars=config.router_cooldown_bars,
+            enable_pre_switch_gate=config.enable_pre_switch_gate,
+            require_smc_confirmation=config.pre_switch_require_smc,
         )
 
         # Strategy conductor — pushes directives (capital allocation, price range,
@@ -566,6 +592,19 @@ class BacktestOrchestratorEngine:
             vpm = VirtualPositionManager(max_grid_loss_pct=config.vpm_max_grid_loss_pct)
         if config.enable_capital_arbiter and vpm is not None:
             capital_arbiter = CapitalArbiter(vpm)
+
+        # Recovery coordinator — opt-in DCA cascade when Grid hits lower boundary
+        recovery_coordinator: RecoveryCoordinator | None = None
+        if config.enable_recovery and config.enable_grid and "grid" in strategies:
+            from bot.strategies.grid_adapter import GridAdapter
+
+            _grid_strat = strategies["grid"]
+            if isinstance(_grid_strat, GridAdapter):
+                _rcfg = RecoveryConfig(enabled=True, **config.recovery_params)
+                _rcfg.validate()
+                recovery_coordinator = RecoveryCoordinator(_rcfg)
+                _grid_strat.set_recovery_enabled(True)
+                logger.info("Recovery coordinator enabled for Grid strategy")
 
         # Per-strategy state tracking
         position_amounts: dict[str, dict[str, Decimal]] = {name: {} for name in strategies}
@@ -662,9 +701,30 @@ class BacktestOrchestratorEngine:
                     except Exception:
                         pass
 
-            # 1. Regime detection
+            # Extract bar timestamp for PRE_SWITCH gate timer evaluation.
+            # The DataFrame uses timestamp as its index (set_index("timestamp") in loader),
+            # so we read from base_df.index[i], not from a column.
+            bar_timestamp: datetime | None = None
+            try:
+                _idx_val = base_df.index[i]
+                if hasattr(_idx_val, "to_pydatetime"):
+                    bar_timestamp = _idx_val.to_pydatetime()
+                elif isinstance(_idx_val, (int, float)):
+                    from datetime import timezone as _tz
+                    bar_timestamp = datetime.fromtimestamp(_idx_val / 1000, tz=_tz.utc)
+            except Exception:
+                pass
+
+            # 1. Regime detection (with SMC structural context for smc_signal population)
             if bars_since_warmup % config.regime_check_every_n == 0 and len(df_h1) >= 60:
-                current_regime = regime_detector.analyze(df_h1)
+                # Compute SMC context from H1 data — populates smc_signal in
+                # analysis_details so the PRE_SWITCH gate can check BOS/CHoCH.
+                # Mirrors live bot: SMCStructureAnalyzer.get_context() → analyze_with_smc()
+                try:
+                    smc_ctx = smc_analyzer.analyze(df_h1)
+                except Exception:
+                    smc_ctx = None  # degrade gracefully if H1 data is insufficient
+                current_regime = regime_detector.analyze(df_h1, smc_context=smc_ctx)
                 regime_key = current_regime.regime.value
                 regime_routing_stats[regime_key] = regime_routing_stats.get(regime_key, 0) + 1
 
@@ -681,7 +741,7 @@ class BacktestOrchestratorEngine:
             # This makes Grid/DCA mutually exclusive as in the live bot.
             regime_weights: dict[str, float] = {}
             if config.enable_strategy_router:
-                router_event = router.on_bar(current_regime, i)
+                router_event = router.on_bar(current_regime, i, current_timestamp=bar_timestamp)
                 if router_event.cooldown_remaining > 0:
                     cooldown_events += 1
                 regime_weights = {
@@ -862,6 +922,108 @@ class BacktestOrchestratorEngine:
                     if len(exits) > 0:
                         per_trade = pnl_delta / len(exits)
                         strat_trade_pnls[strat_name].extend([float(per_trade)] * len(exits))
+
+            # 4b. Recovery handling — check if Grid triggered recovery
+            if recovery_coordinator is not None and "grid" in strategies:
+                from bot.strategies.grid_adapter import GridAdapter as _GA
+
+                _grid = strategies["grid"]
+                if isinstance(_grid, _GA) and _grid.recovery_triggered:
+                    _grid.clear_recovery_trigger()
+                    # Enter recovery: snapshot underwater Grid positions
+                    _snap = _grid.get_underwater_snapshot()
+                    _underwater = [
+                        UnderwaterPosition(
+                            pos_id=p["pos_id"],
+                            entry_price=p["entry_price"],
+                            size=p["size"],
+                        )
+                        for p in _snap
+                    ]
+                    # Try to find SMC support from analyzer
+                    _smc_support = None
+                    if smc_analyzer is not None:
+                        try:
+                            _ctx = smc_analyzer.context
+                            _smc_support = RecoveryCoordinator.find_smc_support(
+                                _ctx, current_price
+                            )
+                        except Exception:
+                            pass
+                    _base_size = _grid._amount_per_grid
+                    recovery_coordinator.enter_recovery(
+                        grid_positions=_underwater,
+                        current_price=current_price,
+                        current_bar=i,
+                        smc_support=_smc_support,
+                        base_order_size=_base_size,
+                    )
+                elif recovery_coordinator.is_active:
+                    # Update recovery state — DCA signals are auto-tracked
+                    # by RecoveryCoordinator via price levels.
+                    # First collect fills from signals that trigger this bar.
+                    recovery_action = recovery_coordinator.on_price_update(current_price)
+                    _dca_fills: list[UnderwaterPosition] = []
+                    # Process DCA signals from recovery
+                    for _rsig in recovery_action.dca_signals:
+                        await self._handle_signal(
+                            strat_name="grid",
+                            strategy=_grid,
+                            signal=_rsig,
+                            current_price=current_price,
+                            simulator=simulator,
+                            position_amounts=position_amounts["grid"],
+                            position_directions=position_directions["grid"],
+                            position_entry_prices=position_entry_prices["grid"],
+                            risk_manager=risk_manager,
+                            config=config,
+                            position_weight=1.0,
+                            signal_stats=signal_stats["grid"],
+                            vpm=vpm,
+                            vpm_pos_ids=vpm_pos_ids["grid"],
+                        )
+                        # Track the fill for blended avg recalculation
+                        _mult = Decimal(
+                            str(_rsig.metadata.get("multiplier", 1.0))
+                        ) if _rsig.metadata else Decimal("1")
+                        _dca_fills.append(
+                            UnderwaterPosition(
+                                pos_id=f"rdca_{i}_{len(_dca_fills)}",
+                                entry_price=current_price,
+                                size=_mult * _grid._amount_per_grid,
+                            )
+                        )
+                    # Register DCA fills for blended avg tracking
+                    if _dca_fills:
+                        recovery_coordinator.on_price_update(
+                            current_price, new_fills=_dca_fills
+                        )
+
+                    if recovery_action.should_close_all:
+                        # Close all Grid positions
+                        _all_grid_pos = list(position_amounts["grid"].keys())
+                        if _all_grid_pos:
+                            _force_exits = [
+                                (pid, ExitReason.MANUAL) for pid in _all_grid_pos
+                            ]
+                            _pnl = await self._handle_exits(
+                                strat_name="grid",
+                                strategy=_grid,
+                                exits=_force_exits,
+                                current_price=current_price,
+                                simulator=simulator,
+                                position_amounts=position_amounts["grid"],
+                                position_directions=position_directions["grid"],
+                                position_entry_prices=position_entry_prices["grid"],
+                                vpm=vpm,
+                                vpm_pos_ids=vpm_pos_ids["grid"],
+                            )
+                            per_strategy_pnl["grid"] += _pnl
+                            strat_trades["grid"] += len(_all_grid_pos)
+                        # Resume Grid with new range
+                        if recovery_action.new_grid_range:
+                            _new_lo, _new_hi = recovery_action.new_grid_range
+                            _grid.resume(_new_lo, _new_hi)
 
             # 5. Record equity
             # simulator.get_portfolio_value() = quote + base * current_price

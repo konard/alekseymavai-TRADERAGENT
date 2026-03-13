@@ -38,6 +38,11 @@ from bot.strategies.grid.grid_risk_manager import (
     RiskCheckResult,
 )
 from bot.strategies.hybrid.hybrid_config import HybridConfig, HybridMode
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryAction,
+    RecoveryCoordinator,
+    RecoveryState,
+)
 from bot.strategies.hybrid.market_regime_detector import (
     MarketIndicators,
     MarketRegimeDetectorV2,
@@ -136,6 +141,7 @@ class HybridStrategy:
         grid_risk_manager: GridRiskManager | None = None,
         dca_engine: DCAEngine | None = None,
         regime_detector: MarketRegimeDetectorV2 | None = None,
+        recovery_coordinator: RecoveryCoordinator | None = None,
     ):
         self._config = config or HybridConfig()
         self._config.validate()
@@ -143,6 +149,8 @@ class HybridStrategy:
         self._grid_risk = grid_risk_manager or GridRiskManager()
         self._dca_engine = dca_engine
         self._regime_detector = regime_detector or MarketRegimeDetectorV2()
+        self._recovery_coordinator = recovery_coordinator
+        self._recovery_state: RecoveryState | None = None
 
         # State
         self._mode = HybridMode.GRID_ONLY
@@ -154,12 +162,14 @@ class HybridStrategy:
         self._total_transitions = 0
         self._grid_to_dca_count = 0
         self._dca_to_grid_count = 0
+        self._recovery_count = 0
 
         logger.info(
             "HybridStrategy initialized",
             mode=self._mode.value,
             grid_capital_pct=self._config.grid_capital_pct,
             dca_capital_pct=self._config.dca_capital_pct,
+            recovery_enabled=self._config.recovery.enabled,
         )
 
     # =========================================================================
@@ -233,6 +243,8 @@ class HybridStrategy:
             self._evaluate_grid_mode(action, atr, price_move, adx, regime_result)
         elif self._mode == HybridMode.DCA_ACTIVE:
             self._evaluate_dca_mode(action, market_state, adx, regime_result)
+        elif self._mode == HybridMode.RECOVERY_ACTIVE:
+            self._evaluate_recovery_mode(action, market_state.current_price)
 
         return action
 
@@ -309,6 +321,96 @@ class HybridStrategy:
                 adx=adx,
                 regime=regime_result.regime.value if regime_result else None,
             )
+
+    # =========================================================================
+    # Recovery Mode
+    # =========================================================================
+
+    def enter_recovery(
+        self,
+        grid_positions: list,
+        current_price: Decimal,
+        current_bar: int,
+        smc_support: Decimal | None = None,
+        base_order_size: Decimal = Decimal("150"),
+    ) -> None:
+        """Transition to RECOVERY_ACTIVE mode."""
+        if self._recovery_coordinator is None:
+            return
+        from bot.strategies.hybrid.recovery_coordinator import UnderwaterPosition
+
+        underwater = [
+            UnderwaterPosition(
+                pos_id=p["pos_id"],
+                entry_price=p["entry_price"],
+                size=p["size"],
+            )
+            for p in grid_positions
+        ]
+        self._recovery_state = self._recovery_coordinator.enter_recovery(
+            grid_positions=underwater,
+            current_price=current_price,
+            current_bar=current_bar,
+            smc_support=smc_support,
+            base_order_size=base_order_size,
+        )
+        event = self._execute_transition(
+            to_mode=HybridMode.RECOVERY_ACTIVE,
+            reason="Grid lower boundary breached — DCA recovery started",
+        )
+        self._recovery_count += 1
+        logger.info(
+            "hybrid_grid_to_recovery",
+            grid_positions=len(underwater),
+            smc_support=float(smc_support) if smc_support else None,
+        )
+
+    def _evaluate_recovery_mode(
+        self,
+        action: HybridAction,
+        current_price: Decimal,
+    ) -> None:
+        """Evaluate while in RECOVERY_ACTIVE mode."""
+        if self._recovery_coordinator is None or self._recovery_state is None:
+            # Shouldn't happen — fallback to GRID_ONLY
+            self._execute_transition(
+                to_mode=HybridMode.GRID_ONLY,
+                reason="Recovery state lost — fallback",
+            )
+            action.mode = self._mode
+            return
+
+        recovery_action = self._recovery_coordinator.on_price_update(
+            current_price=current_price,
+        )
+
+        if recovery_action.should_close_all:
+            # Recovery finished — transition back to GRID_ONLY
+            event = self._execute_transition(
+                to_mode=HybridMode.GRID_ONLY,
+                reason=recovery_action.close_reason,
+            )
+            action.transition_triggered = True
+            action.transition_event = event
+            action.mode = self._mode
+            self._recovery_state = None
+
+            logger.info(
+                "hybrid_recovery_to_grid",
+                reason=recovery_action.close_reason,
+                new_range=recovery_action.new_grid_range,
+            )
+
+        # Store recovery action in HybridAction metadata for orchestrator
+        action.warnings.append(f"recovery_dca_signals={len(recovery_action.dca_signals)}")
+
+    @property
+    def recovery_coordinator(self) -> RecoveryCoordinator | None:
+        return self._recovery_coordinator
+
+    @property
+    def recovery_state(self) -> RecoveryState | None:
+        return self._recovery_state
 
     # =========================================================================
     # Transition Checks
@@ -447,10 +549,14 @@ class HybridStrategy:
 
     def get_statistics(self) -> dict[str, Any]:
         """Get transition statistics."""
-        return {
+        stats: dict[str, Any] = {
             "total_transitions": self._total_transitions,
             "grid_to_dca_count": self._grid_to_dca_count,
             "dca_to_grid_count": self._dca_to_grid_count,
+            "recovery_count": self._recovery_count,
             "history_count": len(self._transition_history),
             "current_mode": self._mode.value,
         }
+        if self._recovery_coordinator:
+            stats["recovery"] = self._recovery_coordinator.get_statistics()
+        return stats

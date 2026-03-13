@@ -8,12 +8,13 @@ Tests cover:
 - Activated/deactivated tracking
 - Switch history recording
 - Reset behaviour
+- Two-phase PRE_SWITCH gate (issue #360 / C1 parity fix)
 """
 
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bot.orchestrator.market_regime import (
     MarketRegime,
@@ -38,7 +39,26 @@ def _make_routing_config() -> RoutingConfig:
 
 
 def _make_router(cooldown_bars: int = 0) -> StrategyRouter:
-    return StrategyRouter(routing_config=_make_routing_config(), cooldown_bars=cooldown_bars)
+    """Router without PRE_SWITCH gate — for cooldown / routing tests."""
+    return StrategyRouter(
+        routing_config=_make_routing_config(),
+        cooldown_bars=cooldown_bars,
+        enable_pre_switch_gate=False,
+    )
+
+
+def _make_router_with_gate(
+    require_smc: bool = True,
+    timer_override: float = 0.0,
+) -> StrategyRouter:
+    """Router with PRE_SWITCH gate enabled, zero timer by default for instant confirmation."""
+    return StrategyRouter(
+        routing_config=_make_routing_config(),
+        cooldown_bars=0,
+        enable_pre_switch_gate=True,
+        require_smc_confirmation=require_smc,
+        pre_switch_duration_override=timer_override,
+    )
 
 
 def _make_regime(
@@ -46,7 +66,11 @@ def _make_regime(
     recommended: RecommendedStrategy = RecommendedStrategy.GRID,
     confidence: float = 0.8,
     confluence_score: float = 0.5,
+    smc_signal: str | None = None,
 ) -> RegimeAnalysis:
+    details: dict = {}
+    if smc_signal is not None:
+        details["smc_signal"] = smc_signal
     return RegimeAnalysis(
         regime=regime,
         confidence=confidence,
@@ -63,8 +87,14 @@ def _make_regime(
         regime_duration_seconds=3600,
         previous_regime=None,
         timestamp=datetime.now(timezone.utc),
-        analysis_details={},
+        analysis_details=details,
     )
+
+
+def _ts(offset_seconds: float = 0.0) -> datetime:
+    """Return a UTC datetime offset from a fixed base (for timer tests)."""
+    base = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    return base + timedelta(seconds=offset_seconds)
 
 
 class TestStrategyRouterBasicRouting:
@@ -243,3 +273,171 @@ class TestStrategyRouterTracking:
         router.reset()
         assert router.switch_history == []
         assert "grid" in router._active_strategies  # reset to initial set
+
+
+class TestStrategyRouterPreSwitchGate:
+    """Tests for the two-phase PRE_SWITCH gate (mirrors StrategySelector behaviour)."""
+
+    def test_first_transition_bypasses_gate(self) -> None:
+        """On startup (_current_regime=None), the gate is skipped — first regime fires immediately."""
+        router = _make_router_with_gate(require_smc=True, timer_override=3600.0)
+        regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
+        event = router.on_bar(regime, current_bar=0, current_timestamp=_ts(0))
+        # First transition: gate bypassed, switch immediate
+        assert "grid" in event.active_strategies
+        assert event.pre_switch_active is False
+
+    def test_pre_switch_entered_on_regime_change(self) -> None:
+        """Second transition enters PRE_SWITCH and blocks immediately."""
+        router = _make_router_with_gate(require_smc=True, timer_override=3600.0)
+        # Establish initial regime
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        # Regime changes to BEAR_TREND → should enter PRE_SWITCH
+        event = router.on_bar(
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            current_bar=1, current_timestamp=_ts(60),
+        )
+        assert event.pre_switch_active is True
+        assert "grid" in event.active_strategies  # old strategies kept
+        assert "dca" not in event.active_strategies
+
+    def test_pre_switch_blocks_until_timer_expires(self) -> None:
+        """Gate holds for timer duration, then fires when timer clears (no SMC required)."""
+        # 600s timer, no SMC requirement
+        router = _make_router_with_gate(require_smc=False, timer_override=600.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+
+        # Enter PRE_SWITCH at t=60s
+        e1 = router.on_bar(bear, current_bar=1, current_timestamp=_ts(60))
+        assert e1.pre_switch_active is True
+
+        # Still in PRE_SWITCH at t=500s (< 600s)
+        e2 = router.on_bar(bear, current_bar=2, current_timestamp=_ts(500))
+        assert e2.pre_switch_active is True
+        assert "grid" in e2.active_strategies
+
+        # Timer expires at t=661s (≥ 660s = 60 + 600)
+        e3 = router.on_bar(bear, current_bar=3, current_timestamp=_ts(661))
+        assert e3.pre_switch_active is False
+        assert "dca" in e3.active_strategies
+        assert "grid" not in e3.active_strategies
+
+    def test_pre_switch_requires_smc_signal(self) -> None:
+        """When require_smc=True, transition only fires after timer + BOS/CHoCH signal."""
+        router = _make_router_with_gate(require_smc=True, timer_override=0.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        # TIGHT_RANGE → BULL_TREND requires "BOS" (per TRANSITION_SMC_REQUIREMENTS)
+        bull_no_smc = _make_regime(
+            MarketRegime.BULL_TREND, RecommendedStrategy.DCA, smc_signal=None
+        )
+        # Timer=0 but no SMC → still blocked
+        e1 = router.on_bar(bull_no_smc, current_bar=1, current_timestamp=_ts(1))
+        assert e1.pre_switch_active is True
+
+        # BOS signal arrives → gate clears
+        bull_with_bos = _make_regime(
+            MarketRegime.BULL_TREND, RecommendedStrategy.DCA, smc_signal="BOS"
+        )
+        e2 = router.on_bar(bull_with_bos, current_bar=2, current_timestamp=_ts(2))
+        assert e2.pre_switch_active is False
+        assert "trend_follower" in e2.active_strategies  # bull_trend_default
+
+    def test_pre_switch_cancelled_on_regime_return(self) -> None:
+        """If regime returns to current, PRE_SWITCH is cancelled."""
+        router = _make_router_with_gate(require_smc=True, timer_override=3600.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        # Enter PRE_SWITCH for BEAR_TREND
+        router.on_bar(
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            current_bar=1, current_timestamp=_ts(60),
+        )
+        assert router._transition_phase.value == "pre_switch"
+
+        # Regime returns to TIGHT_RANGE → PRE_SWITCH cancelled
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=2, current_timestamp=_ts(120),
+        )
+        assert router._transition_phase.value == "stable"
+
+    def test_pre_switch_restarted_on_target_change(self) -> None:
+        """If the target regime changes during PRE_SWITCH, it restarts for the new target."""
+        router = _make_router_with_gate(require_smc=True, timer_override=3600.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        # PRE_SWITCH for BEAR_TREND
+        router.on_bar(
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            current_bar=1, current_timestamp=_ts(60),
+        )
+        assert router._pre_switch_target_regime == MarketRegime.BEAR_TREND
+
+        # Target changes to BULL_TREND → PRE_SWITCH restarted
+        router.on_bar(
+            _make_regime(MarketRegime.BULL_TREND, RecommendedStrategy.DCA),
+            current_bar=2, current_timestamp=_ts(120),
+        )
+        assert router._pre_switch_target_regime == MarketRegime.BULL_TREND
+        # PRE_SWITCH started fresh (elapsed reset)
+        assert router._pre_switch_smc_confirmed is False
+
+    def test_gate_disabled_switches_immediately(self) -> None:
+        """With enable_pre_switch_gate=False, second transition fires immediately (old behaviour)."""
+        router = _make_router(cooldown_bars=0)  # gate disabled
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0,
+        )
+        event = router.on_bar(
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            current_bar=1,
+        )
+        assert event.pre_switch_active is False
+        assert "dca" in event.active_strategies
+
+    def test_pre_switch_elapsed_reported(self) -> None:
+        """pre_switch_elapsed_s in the event reflects time since PRE_SWITCH started."""
+        router = _make_router_with_gate(require_smc=False, timer_override=3600.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Enter PRE_SWITCH at t=0
+        router.on_bar(bear, current_bar=1, current_timestamp=_ts(0))
+        # 500s later
+        e = router.on_bar(bear, current_bar=2, current_timestamp=_ts(500))
+        assert e.pre_switch_active is True
+        assert abs(e.pre_switch_elapsed_s - 500.0) < 1.0
+
+    def test_reset_clears_gate_state(self) -> None:
+        """reset() returns gate to STABLE with no pending PRE_SWITCH."""
+        router = _make_router_with_gate(require_smc=True, timer_override=3600.0)
+        router.on_bar(
+            _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
+            current_bar=0, current_timestamp=_ts(0),
+        )
+        router.on_bar(
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            current_bar=1, current_timestamp=_ts(60),
+        )
+        assert router._transition_phase.value == "pre_switch"
+        router.reset()
+        assert router._transition_phase.value == "stable"
+        assert router._current_regime is None
+        assert router._pre_switch_target_regime is None
