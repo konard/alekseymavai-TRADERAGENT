@@ -715,7 +715,7 @@ class MarketRegimeDetector:
             return RecommendedStrategy.DCA
 
         if regime == MarketRegime.BEAR_TREND:
-            return RecommendedStrategy.DCA
+            return RecommendedStrategy.SMC
 
         if regime in (MarketRegime.ACCUMULATION, MarketRegime.DISTRIBUTION):
             return RecommendedStrategy.SMC

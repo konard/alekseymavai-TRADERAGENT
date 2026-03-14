@@ -121,11 +121,13 @@ class TestStrategyRouterBasicRouting:
         assert "grid" in event.active_strategies
         assert "dca" not in event.active_strategies
 
-    def test_bear_trend_selects_dca(self) -> None:
+    def test_bear_trend_selects_smc_and_tf(self) -> None:
         router = _make_router()
-        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=0)
-        assert "dca" in event.active_strategies
+        assert "smc" in event.active_strategies
+        assert "trend_follower" in event.active_strategies
+        assert "dca" not in event.active_strategies
         assert "grid" not in event.active_strategies
 
     def test_bull_trend_default_selects_trend_follower_and_smc(self) -> None:
@@ -195,10 +197,10 @@ class TestStrategyRouterSpecialCases:
 
     def test_regime_value_and_recommendation_in_event(self) -> None:
         router = _make_router()
-        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=0)
         assert event.regime_value == "bear_trend"
-        assert event.recommendation == "dca"
+        assert event.recommendation == "smc"
 
 
 class TestStrategyRouterCooldown:
@@ -206,8 +208,8 @@ class TestStrategyRouterCooldown:
         router = _make_router(cooldown_bars=10)
         # Establish initial state (grid only)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
-        # Try to switch to DCA 5 bars later — cooldown should block
-        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Try to switch to SMC+TF 5 bars later — cooldown should block
+        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=5)
         assert event.cooldown_remaining > 0
         # Strategy set should NOT have changed
@@ -217,19 +219,19 @@ class TestStrategyRouterCooldown:
         router = _make_router(cooldown_bars=5)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         # 6 bars later — cooldown should have expired
-        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=6)
         assert event.cooldown_remaining == 0
-        assert "dca" in event.active_strategies
+        assert "smc" in event.active_strategies
         assert "grid" not in event.active_strategies
 
     def test_no_cooldown_on_zero_cooldown_bars(self) -> None:
         router = _make_router(cooldown_bars=0)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
-        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         event = router.on_bar(regime, current_bar=1)
         assert event.cooldown_remaining == 0
-        assert "dca" in event.active_strategies
+        assert "smc" in event.active_strategies
 
 
 class TestStrategyRouterTracking:
@@ -237,22 +239,22 @@ class TestStrategyRouterTracking:
         router = _make_router()
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
         event = router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), current_bar=1
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC), current_bar=1
         )
-        assert "dca" in event.activated
+        assert "smc" in event.activated
         assert "grid" in event.deactivated
 
     def test_switch_history_recorded(self) -> None:
         router = _make_router()
         # Bar 0: bootstrap → GRID (switch #1)
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
-        # Bar 1: GRID → DCA (switch #2)
-        router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), 1)
+        # Bar 1: GRID → SMC+TF (switch #2)
+        router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC), 1)
         assert len(router.switch_history) == 2
-        # The last switch (bar 1) should show DCA in the "to" field
+        # The last switch (bar 1) should show smc in the "to" field
         last_switch = router.switch_history[-1]
         assert last_switch["bar"] == 1
-        assert "dca" in last_switch["to"]
+        assert "smc" in last_switch["to"]
 
     def test_no_switch_if_same_regime(self) -> None:
         router = _make_router()
@@ -269,7 +271,7 @@ class TestStrategyRouterTracking:
     def test_reset_clears_history(self) -> None:
         router = _make_router()
         router.on_bar(_make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID), 0)
-        router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA), 1)
+        router.on_bar(_make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC), 1)
         router.reset()
         assert router.switch_history == []
         assert "grid" in router._active_strategies  # reset to initial set
@@ -297,12 +299,12 @@ class TestStrategyRouterPreSwitchGate:
         )
         # Regime changes to BEAR_TREND → should enter PRE_SWITCH
         event = router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC),
             current_bar=1, current_timestamp=_ts(60),
         )
         assert event.pre_switch_active is True
         assert "grid" in event.active_strategies  # old strategies kept
-        assert "dca" not in event.active_strategies
+        assert "smc" not in event.active_strategies
 
     def test_pre_switch_blocks_until_timer_expires(self) -> None:
         """Gate holds for timer duration, then fires when timer clears (no SMC required)."""
@@ -312,7 +314,7 @@ class TestStrategyRouterPreSwitchGate:
             _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
             current_bar=0, current_timestamp=_ts(0),
         )
-        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
 
         # Enter PRE_SWITCH at t=60s
         e1 = router.on_bar(bear, current_bar=1, current_timestamp=_ts(60))
@@ -326,7 +328,7 @@ class TestStrategyRouterPreSwitchGate:
         # Timer expires at t=661s (≥ 660s = 60 + 600)
         e3 = router.on_bar(bear, current_bar=3, current_timestamp=_ts(661))
         assert e3.pre_switch_active is False
-        assert "dca" in e3.active_strategies
+        assert "smc" in e3.active_strategies
         assert "grid" not in e3.active_strategies
 
     def test_pre_switch_requires_smc_signal(self) -> None:
@@ -361,7 +363,7 @@ class TestStrategyRouterPreSwitchGate:
         )
         # Enter PRE_SWITCH for BEAR_TREND
         router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC),
             current_bar=1, current_timestamp=_ts(60),
         )
         assert router._transition_phase.value == "pre_switch"
@@ -382,7 +384,7 @@ class TestStrategyRouterPreSwitchGate:
         )
         # PRE_SWITCH for BEAR_TREND
         router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC),
             current_bar=1, current_timestamp=_ts(60),
         )
         assert router._pre_switch_target_regime == MarketRegime.BEAR_TREND
@@ -404,11 +406,11 @@ class TestStrategyRouterPreSwitchGate:
             current_bar=0,
         )
         event = router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC),
             current_bar=1,
         )
         assert event.pre_switch_active is False
-        assert "dca" in event.active_strategies
+        assert "smc" in event.active_strategies
 
     def test_pre_switch_elapsed_reported(self) -> None:
         """pre_switch_elapsed_s in the event reflects time since PRE_SWITCH started."""
@@ -417,7 +419,7 @@ class TestStrategyRouterPreSwitchGate:
             _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID),
             current_bar=0, current_timestamp=_ts(0),
         )
-        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        bear = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         # Enter PRE_SWITCH at t=0
         router.on_bar(bear, current_bar=1, current_timestamp=_ts(0))
         # 500s later
@@ -433,7 +435,7 @@ class TestStrategyRouterPreSwitchGate:
             current_bar=0, current_timestamp=_ts(0),
         )
         router.on_bar(
-            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA),
+            _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC),
             current_bar=1, current_timestamp=_ts(60),
         )
         assert router._transition_phase.value == "pre_switch"

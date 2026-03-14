@@ -137,7 +137,7 @@ class TestRegimeFilterBlocksWrongStrategy:
 
 
 class TestRegimeFilterAllowsMatchingStrategy:
-    """DCA strategy should be allowed in BEAR_TREND."""
+    """SMC strategy should be allowed in BEAR_TREND."""
 
     async def test_allows_matching_type(self, data_30days):
         config = MultiTFBacktestConfig(
@@ -147,20 +147,20 @@ class TestRegimeFilterAllowsMatchingStrategy:
         )
         engine = MultiTimeframeBacktestEngine(config=config)
 
-        # Create a strategy that reports type="dca"
+        # Create a strategy that reports type="smc"
         strategy = ConcreteStrategy()
-        strategy.get_strategy_type = lambda: "dca"  # type: ignore[assignment]
+        strategy.get_strategy_type = lambda: "smc"  # type: ignore[assignment]
 
-        # Force BEAR_TREND (allowed: dca, trend_follower)
+        # Force BEAR_TREND (allowed: smc, trend_follower)
         forced_regime = _make_regime_analysis(
-            MarketRegime.BEAR_TREND, RecommendedStrategy.DCA
+            MarketRegime.BEAR_TREND, RecommendedStrategy.SMC
         )
         with patch.object(
             MarketRegimeDetector, "analyze", return_value=forced_regime
         ):
             result = await engine.run(strategy, data_30days)
 
-        # dca IS allowed in BEAR_TREND — no regime blocks expected
+        # smc IS allowed in BEAR_TREND — no regime blocks expected
         assert result.regime_filter_blocks == 0
 
 
@@ -432,9 +432,11 @@ class TestRegimeAllowedStrategyTypes:
         assert "smc" in allowed
         assert "dca" not in allowed  # DCA removed: arbiter blocks DCA in _UPTREND
 
-    def test_bear_trend_allows_dca(self):
+    def test_bear_trend_allows_smc_and_trend_follower(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.BEAR_TREND]
-        assert "dca" in allowed
+        assert "smc" in allowed
+        assert "trend_follower" in allowed
+        assert "dca" not in allowed
 
     def test_tight_range_allows_grid(self):
         allowed = REGIME_ALLOWED_STRATEGY_TYPES[MarketRegime.TIGHT_RANGE]

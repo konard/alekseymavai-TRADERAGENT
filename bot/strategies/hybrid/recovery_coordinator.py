@@ -57,7 +57,7 @@ class RecoveryState:
     phase: RecoveryPhase
     entered_bar: int
     grid_positions: list[UnderwaterPosition]
-    smc_support: Decimal
+    smc_support: Decimal  # support (LONG) or resistance (SHORT) boundary
     dca_levels: list[Decimal]  # planned DCA price levels
     dca_fills: list[UnderwaterPosition] = field(default_factory=list)
     blended_avg_entry: Decimal = Decimal("0")
@@ -66,6 +66,7 @@ class RecoveryState:
     bars_elapsed: int = 0
     next_dca_index: int = 0  # index into dca_levels for next pending order
     base_order_size: Decimal = Decimal("0")  # size of first DCA order
+    direction: SignalDirection = SignalDirection.LONG  # recovery direction
 
     def to_dict(self) -> dict:
         return {
@@ -80,6 +81,7 @@ class RecoveryState:
             "tp_target": float(self.tp_target),
             "bars_elapsed": self.bars_elapsed,
             "next_dca_index": self.next_dca_index,
+            "direction": self.direction.value,
         }
 
 
@@ -150,6 +152,7 @@ class RecoveryCoordinator:
         current_bar: int,
         smc_support: Decimal | None = None,
         base_order_size: Decimal = Decimal("150"),
+        direction: SignalDirection = SignalDirection.LONG,
     ) -> RecoveryState:
         """
         Initialize a recovery session.
@@ -158,21 +161,39 @@ class RecoveryCoordinator:
             grid_positions: Currently open Grid positions (underwater).
             current_price: Price that triggered recovery.
             current_bar: Current bar index.
-            smc_support: Nearest SMC support level, or None for fallback.
+            smc_support: Nearest SMC support/resistance level, or None for fallback.
             base_order_size: Quote-currency size for the first DCA order.
+            direction: LONG (price broke below grid) or SHORT (price broke above grid).
 
         Returns:
             New RecoveryState.
         """
-        # Determine support level
-        if smc_support is None or smc_support >= current_price:
-            smc_support = current_price * (Decimal("1") - self._config.fallback_support_pct)
-
-        # Build DCA cascade levels from current_price down to smc_support
-        dca_levels = self._build_dca_levels(current_price, smc_support)
+        if direction == SignalDirection.LONG:
+            # LONG recovery: support level below current price
+            if smc_support is None or smc_support >= current_price:
+                smc_support = current_price * (Decimal("1") - self._config.fallback_support_pct)
+            dca_levels = self._build_dca_levels(current_price, smc_support)
+        else:
+            # SHORT recovery: resistance level above current price
+            if smc_support is None or smc_support <= current_price:
+                smc_support = current_price * (Decimal("1") + self._config.fallback_support_pct)
+            dca_levels = self._build_dca_levels_short(current_price, smc_support)
 
         # Compute initial blended entry from Grid positions
         blended_avg, total_size = self._compute_blended(grid_positions, [])
+
+        if direction == SignalDirection.LONG:
+            tp = (
+                blended_avg * (Decimal("1") + self._config.tp_target_pct)
+                if blended_avg > 0
+                else current_price * (Decimal("1") + self._config.tp_target_pct)
+            )
+        else:
+            tp = (
+                blended_avg * (Decimal("1") - self._config.tp_target_pct)
+                if blended_avg > 0
+                else current_price * (Decimal("1") - self._config.tp_target_pct)
+            )
 
         state = RecoveryState(
             phase=RecoveryPhase.DCA_ACTIVE,
@@ -182,10 +203,9 @@ class RecoveryCoordinator:
             dca_levels=dca_levels,
             blended_avg_entry=blended_avg,
             blended_total_size=total_size,
-            tp_target=blended_avg * (Decimal("1") + self._config.tp_target_pct)
-            if blended_avg > 0
-            else current_price * (Decimal("1") + self._config.tp_target_pct),
+            tp_target=tp,
             base_order_size=base_order_size,
+            direction=direction,
         )
 
         self._state = state
@@ -234,14 +254,25 @@ class RecoveryCoordinator:
             state.blended_avg_entry, state.blended_total_size = self._compute_blended(
                 state.grid_positions, state.dca_fills
             )
-            state.tp_target = state.blended_avg_entry * (
-                Decimal("1") + self._config.tp_target_pct
-            )
+            if state.direction == SignalDirection.LONG:
+                state.tp_target = state.blended_avg_entry * (
+                    Decimal("1") + self._config.tp_target_pct
+                )
+            else:
+                state.tp_target = state.blended_avg_entry * (
+                    Decimal("1") - self._config.tp_target_pct
+                )
 
         action = RecoveryAction()
 
-        # Check TP hit
-        if state.blended_total_size > 0 and current_price >= state.tp_target:
+        # Check TP hit (direction-aware)
+        _tp_hit = False
+        if state.blended_total_size > 0:
+            if state.direction == SignalDirection.LONG:
+                _tp_hit = current_price >= state.tp_target
+            else:
+                _tp_hit = current_price <= state.tp_target
+        if _tp_hit:
             action.should_close_all = True
             action.close_reason = (
                 f"recovery_tp_hit: blended_avg={state.blended_avg_entry:.2f}, "
@@ -316,6 +347,47 @@ class RecoveryCoordinator:
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[0][0]
 
+    @staticmethod
+    def find_smc_resistance(
+        market_structure: SMCContext | None,
+        current_price: Decimal,
+    ) -> Decimal | None:
+        """
+        Find nearest SMC resistance level above current_price (mirror of find_smc_support).
+
+        Looks at:
+        1. Bearish Order Blocks (supply zones) above price
+        2. Swing highs above price
+        Returns the closest one, or None if nothing found.
+        """
+        if market_structure is None:
+            return None
+
+        candidates: list[tuple[Decimal, float]] = []
+
+        # 1. Bearish OBs above current price
+        for ob in market_structure.order_blocks:
+            if ob.ob_type.value == "bear" and not ob.invalidated:
+                ob_low = Decimal(str(ob.low))
+                if ob_low > current_price:
+                    distance = float(ob_low - current_price)
+                    score = 1.0 / (distance + 0.01)
+                    candidates.append((ob_low, score))
+
+        # 2. Swing highs above current price
+        for sw in market_structure.swing_highs:
+            sw_price = Decimal(str(sw.price))
+            if sw_price > current_price:
+                distance = float(sw_price - current_price)
+                score = 0.8 / (distance + 0.01)
+                candidates.append((sw_price, score))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[0][0]
+
     # =========================================================================
     # Statistics
     # =========================================================================
@@ -340,7 +412,7 @@ class RecoveryCoordinator:
     def _build_dca_levels(
         self, current_price: Decimal, support: Decimal
     ) -> list[Decimal]:
-        """Build DCA cascade price levels from current_price down to support."""
+        """Build DCA cascade price levels from current_price down to support (LONG recovery)."""
         levels: list[Decimal] = []
         step = self._config.dca_step_pct
         price = current_price * (Decimal("1") - step)
@@ -353,6 +425,24 @@ class RecoveryCoordinator:
                 break
             levels.append(price)
             price = price * (Decimal("1") - step)
+
+        return levels
+
+    def _build_dca_levels_short(
+        self, current_price: Decimal, resistance: Decimal
+    ) -> list[Decimal]:
+        """Build DCA cascade price levels from current_price UP to resistance (SHORT recovery)."""
+        levels: list[Decimal] = []
+        step = self._config.dca_step_pct
+        price = current_price * (Decimal("1") + step)
+
+        for _ in range(self._config.max_dca_orders):
+            if price > resistance:
+                if not levels or levels[-1] != resistance:
+                    levels.append(resistance)
+                break
+            levels.append(price)
+            price = price * (Decimal("1") + step)
 
         return levels
 
@@ -377,13 +467,21 @@ class RecoveryCoordinator:
     def _generate_dca_signals(
         self, state: RecoveryState, current_price: Decimal
     ) -> list[BaseSignal]:
-        """Generate DCA buy signals for levels that current_price has reached."""
+        """Generate DCA signals for levels that current_price has reached."""
         signals: list[BaseSignal] = []
 
         while state.next_dca_index < len(state.dca_levels):
             level = state.dca_levels[state.next_dca_index]
-            if current_price <= level:
-                # Calculate order size with martingale multiplier
+
+            # LONG: trigger when price drops to level; SHORT: trigger when price rises to level
+            if state.direction == SignalDirection.LONG:
+                _triggered = current_price <= level
+                _sl = state.smc_support * Decimal("0.98")  # 2% below support
+            else:
+                _triggered = current_price >= level
+                _sl = state.smc_support * Decimal("1.02")  # 2% above resistance
+
+            if _triggered:
                 order_num = state.next_dca_index
                 multiplier = self._config.dca_volume_multiplier ** order_num
                 size = state.base_order_size * multiplier
@@ -391,9 +489,9 @@ class RecoveryCoordinator:
                 from datetime import datetime, timezone
 
                 signal = BaseSignal(
-                    direction=SignalDirection.LONG,
+                    direction=state.direction,
                     entry_price=current_price,
-                    stop_loss=state.smc_support * Decimal("0.98"),  # 2% below support
+                    stop_loss=_sl,
                     take_profit=state.tp_target,
                     confidence=0.7,
                     timestamp=datetime.now(timezone.utc),

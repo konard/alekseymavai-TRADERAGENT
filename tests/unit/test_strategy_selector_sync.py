@@ -117,7 +117,7 @@ _REGIME_SCENARIOS: list[tuple[MarketRegime, RecommendedStrategy, float]] = [
     (MarketRegime.VOLATILE_TRANSITION, RecommendedStrategy.SMC, 0.5),
     (MarketRegime.BULL_TREND, RecommendedStrategy.DCA, 0.5),  # low confluence
     (MarketRegime.BULL_TREND, RecommendedStrategy.HYBRID, 0.8),  # high confluence
-    (MarketRegime.BEAR_TREND, RecommendedStrategy.DCA, 0.5),
+    (MarketRegime.BEAR_TREND, RecommendedStrategy.SMC, 0.5),
 ]
 
 

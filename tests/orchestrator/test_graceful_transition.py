@@ -129,9 +129,9 @@ class TestGracefulTransitionOrderCancellation:
         assert "grid" in orch._active_strategies
         orch.exchange.cancel_all_orders.reset_mock()  # clear setup call counts
 
-        # Step 2: Switch to DCA regime — two-phase gate: tick 1 enters PRE_SWITCH,
+        # Step 2: Switch to SMC+TF regime — two-phase gate: tick 1 enters PRE_SWITCH,
         # tick 2 exits PRE_SWITCH → CONFIRMED → transition executed.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
@@ -149,8 +149,8 @@ class TestGracefulTransitionOrderCancellation:
         await orch._update_active_strategies()
         assert "grid" in orch._active_strategies
 
-        # Switch to DCA — in dry_run, no exchange calls
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Switch to SMC+TF — in dry_run, no exchange calls
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
 
         orch.exchange.cancel_all_orders.assert_not_awaited()
@@ -166,8 +166,8 @@ class TestGracefulTransitionOrderCancellation:
         await orch._update_active_strategies()
         assert "grid" in orch._active_strategies
 
-        # Switch to DCA — no grid_engine so no cancel called
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Switch to SMC+TF — no grid_engine so no cancel called
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
 
         orch.exchange.cancel_all_orders.assert_not_awaited()
@@ -186,14 +186,14 @@ class TestGracefulTransitionOrderCancellation:
         # Now make cancel fail
         orch.exchange.cancel_all_orders = AsyncMock(side_effect=Exception("Exchange error"))
 
-        # Switch to DCA — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
+        # Switch to SMC+TF — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
         # Cancel fails but transition completes.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
         # Transition should complete despite error
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
 
@@ -208,12 +208,12 @@ class TestGracefulTransitionPositionHandling:
         orch.dca_engine.position = MagicMock()  # has open position
         orch.dca_engine.position.amount = Decimal("500")
 
-        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Establish smc+trend_follower as active via StrategySelector (BEAR_TREND)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
 
-        # Switch to TIGHT_RANGE (deactivates dca+trend_follower, activates grid)
+        # Switch to TIGHT_RANGE (deactivates smc+trend_follower, activates grid)
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
 
@@ -222,16 +222,16 @@ class TestGracefulTransitionPositionHandling:
 
     @pytest.mark.asyncio
     async def test_dca_position_closed_when_configured(self) -> None:
-        """With close_positions_on_switch=True, DCA position is closed."""
+        """With close_positions_on_switch=True, DCA position is closed when DCA is deactivated."""
         orch = _make_orchestrator_with_exchange(close_positions_on_switch=True)
         orch.dca_engine = MagicMock()
         orch.dca_engine.position = MagicMock()
         orch.dca_engine.position.amount = Decimal("500")
 
-        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
-        await orch._update_active_strategies()
-        assert "dca" in orch._active_strategies
+        # Start DCA active in the registry so the selector sees it as currently active.
+        await orch.strategy_selector._registry.start_strategy("dca-1")
+        orch._active_strategies = {"dca"}
+        orch.strategy_selector._current_regime = MarketRegime.BEAR_TREND  # prior regime
 
         # Patch _close_dca_position to verify it's called
         orch._close_dca_position = AsyncMock()
@@ -251,10 +251,10 @@ class TestGracefulTransitionPositionHandling:
         orch.dca_engine.position = MagicMock()
         orch.dca_engine.position.amount = Decimal("500")
 
-        # Establish dca+trend_follower as active via StrategySelector (BEAR_TREND)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Establish smc+trend_follower as active via StrategySelector (BEAR_TREND)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
 
         # Switch to TIGHT_RANGE — in dry_run, no position close calls
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
@@ -278,8 +278,8 @@ class TestGracefulTransitionEvents:
         assert "grid" in orch._active_strategies
         orch._publish_event.reset_mock()  # clear setup call history
 
-        # Switch to DCA — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Switch to SMC+TF — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → transition executed + events
 
@@ -300,8 +300,8 @@ class TestGracefulTransitionEvents:
         assert "grid" in orch._active_strategies
         orch._publish_event.reset_mock()  # clear setup call history
 
-        # Switch to DCA — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Switch to SMC+TF — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → transition executed
 
@@ -333,8 +333,8 @@ class TestGracefulTransitionIntegration:
     """Integration-style tests: regime change → orders cleaned up."""
 
     @pytest.mark.asyncio
-    async def test_full_regime_switch_grid_to_dca(self) -> None:
-        """Full flow: grid active → regime change to bear → grid orders cancelled → DCA active."""
+    async def test_full_regime_switch_grid_to_smc_tf(self) -> None:
+        """Full flow: grid active → regime change to bear → grid orders cancelled → SMC+TF active."""
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
         orch.dca_engine = MagicMock()
@@ -344,29 +344,29 @@ class TestGracefulTransitionIntegration:
         await orch._update_active_strategies()
         assert orch._active_strategies == {"grid"}
 
-        # Step 2: Regime changes to bear trend → DCA
+        # Step 2: Regime changes to bear trend → SMC+TF
         # Two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms → executes.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
         # Grid orders cancelled
         orch.exchange.cancel_all_orders.assert_awaited_once_with("BTC/USDT")
-        # DCA is now active, grid is not
-        assert "dca" in orch._active_strategies
+        # SMC+TF is now active, grid is not
+        assert "smc" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio
-    async def test_full_regime_switch_dca_to_hold(self) -> None:
+    async def test_full_regime_switch_bear_to_hold(self) -> None:
         """Regime → HOLD: strategies are kept (HOLD means no-change per StrategySelector)."""
         orch = _make_orchestrator_with_exchange()
         orch.grid_engine = MagicMock()
         orch.dca_engine = MagicMock()
 
-        # Start with DCA + trend_follower active (BEAR_TREND)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Start with SMC + trend_follower active (BEAR_TREND)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
 
         # Regime transitions to QUIET_TRANSITION with HOLD recommendation
         # HOLD means "keep current" — no strategies are deactivated
@@ -376,7 +376,7 @@ class TestGracefulTransitionIntegration:
         await orch._update_active_strategies()
 
         # HOLD preserves current strategies (no change in active set)
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
 
     @pytest.mark.asyncio
     async def test_no_fund_loss_on_cancel_failure(self) -> None:
@@ -392,13 +392,13 @@ class TestGracefulTransitionIntegration:
         await orch._update_active_strategies()
         assert "grid" in orch._active_strategies
 
-        # Switch to DCA — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
+        # Switch to SMC+TF — two-phase gate: tick 1 enters PRE_SWITCH, tick 2 confirms.
         # Cancel fails but transition completes.
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
         # Transition events still published
         event_types = [call.args[0] for call in orch._publish_event.call_args_list]
         assert EventType.STRATEGY_TRANSITION_COMPLETED in event_types
@@ -414,7 +414,7 @@ class TestGracefulTransitionIntegration:
         await orch._update_active_strategies()
 
         # Try to switch — blocked by cooldown
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         await orch._update_active_strategies()
 
         # No orders cancelled (switch was blocked)

@@ -153,14 +153,14 @@ class TestMarketRegimeDetector:
         if result.regime in (MarketRegime.TIGHT_RANGE, MarketRegime.WIDE_RANGE):
             assert result.recommended_strategy == RecommendedStrategy.GRID
 
-    def test_strategy_recommendation_dca_for_bear_trend(self):
-        """Bear trend should recommend DCA."""
+    def test_strategy_recommendation_smc_for_bear_trend(self):
+        """Bear trend should recommend SMC (can SHORT; DCA is LONG-only)."""
         detector = MarketRegimeDetector(trend_threshold=0.3)
         df = _make_trending_down(n=100, step=15)
         result = detector.analyze(df)
 
         if result.regime == MarketRegime.BEAR_TREND:
-            assert result.recommended_strategy == RecommendedStrategy.DCA
+            assert result.recommended_strategy == RecommendedStrategy.SMC
 
     def test_strategy_recommendation_reduce_for_volatile_transition(self):
         """Volatile transition should recommend reducing exposure."""
@@ -550,14 +550,14 @@ class TestEnhancedClassification:
             if result.confluence_score >= 0.3:
                 assert result.recommended_strategy == RecommendedStrategy.HYBRID
 
-    def test_bear_trend_always_dca(self):
-        """Bear trend should always recommend DCA regardless of confluence."""
+    def test_bear_trend_always_smc(self):
+        """Bear trend should always recommend SMC (can SHORT; DCA is LONG-only)."""
         detector = MarketRegimeDetector(trend_threshold=0.3)
         df = _make_trending_down(n=100, step=15)
         result = detector.analyze(df)
 
         if result.regime == MarketRegime.BEAR_TREND:
-            assert result.recommended_strategy == RecommendedStrategy.DCA
+            assert result.recommended_strategy == RecommendedStrategy.SMC
 
 
 class TestClassifyRegimeUnit:

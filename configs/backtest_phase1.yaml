@@ -6,8 +6,8 @@
 # Архитектура: одна пара = один прогон со всеми 4 стратегиями.
 # Роутер активирует нужную стратегию по режиму рынка:
 #   TIGHT_RANGE  → Grid
-#   BULL_TREND   → TrendFollower
-#   BEAR_TREND   → DCA
+#   BULL_TREND   → TrendFollower + SMC
+#   BEAR_TREND   → SMC + TrendFollower (can SHORT; DCA removed — LONG-only)
 #   BREAKOUT     → SMC
 #
 # Результат: strategy_score_matrix.json — Sharpe/Return/Trades по каждой стратегии

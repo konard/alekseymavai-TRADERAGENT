@@ -81,6 +81,10 @@ class GridAdapter(BaseStrategy):
         self._closed_trades: list[dict[str, Any]] = []
         self._current_price = Decimal("0")
 
+        # Direction support (LONG for bull/range, SHORT for bear)
+        self._direction: SignalDirection = SignalDirection.LONG
+        self._grid_upper_price: Decimal = Decimal("0")  # upper boundary of the entire grid
+
         # Recovery integration
         self._recovery_enabled: bool = False
         self._recovery_triggered: bool = False
@@ -91,6 +95,32 @@ class GridAdapter(BaseStrategy):
 
     def get_strategy_type(self) -> str:
         return "grid"
+
+    @property
+    def direction(self) -> SignalDirection:
+        return self._direction
+
+    def set_direction(self, direction: SignalDirection) -> list[tuple[str, "ExitReason"]]:
+        """Switch grid direction. Force-closes existing positions and resets grid.
+
+        Returns list of (pos_id, ExitReason.MANUAL) for positions that need closing.
+        """
+        if direction == self._direction:
+            return []
+        forced = self.force_close_all()
+        self._grid_engine = None
+        self._grid_levels = []
+        self._grid_lower_price = Decimal("0")
+        self._grid_upper_price = Decimal("0")
+        self._direction = direction
+        self._recovery_triggered = False
+        self._paused = False
+        logger.info(
+            "grid_direction_switched",
+            new_direction=direction.value,
+            closed_positions=len(forced),
+        )
+        return forced
 
     def analyze_market(self, *dfs: pd.DataFrame) -> BaseMarketAnalysis:
         """Analyze market to set up grid bounds from recent price action."""
@@ -151,6 +181,7 @@ class GridAdapter(BaseStrategy):
             )
             self._grid_levels = self._grid_engine.calculate_grid_levels()
             self._grid_lower_price = self._grid_engine.lower_price
+            self._grid_upper_price = self._grid_engine.upper_price
             self._recenter_countdown = self._recenter_cooldown_bars
 
         # Trend: grid works best in sideways
@@ -243,47 +274,62 @@ class GridAdapter(BaseStrategy):
             if not (adx_val != adx_val) and adx_val > self._adx_filter:  # NaN-safe check
                 return None
 
-        # Find nearest buy level below current price
-        buy_levels = [lvl for lvl in self._grid_levels if lvl < close]
-        if not buy_levels:
-            return None
+        if self._direction == SignalDirection.LONG:
+            # LONG: find nearest buy level below current price
+            candidate_levels = [lvl for lvl in self._grid_levels if lvl < close]
+            if not candidate_levels:
+                return None
+            nearest = max(candidate_levels)
+        else:
+            # SHORT: find nearest sell level above current price
+            candidate_levels = [lvl for lvl in self._grid_levels if lvl > close]
+            if not candidate_levels:
+                return None
+            nearest = min(candidate_levels)
 
-        nearest_buy = max(buy_levels)
-        distance = abs(close - nearest_buy) / close
+        distance = abs(close - nearest) / close
 
-        # Only signal if price is very close to a buy level (within 0.5%)
+        # Only signal if price is very close to a level (within 0.5%)
         if distance > Decimal("0.005"):
             return None
 
         # Check we don't already have a position at this level
         for pos in self._positions.values():
-            if abs(pos["entry_price"] - nearest_buy) / nearest_buy < Decimal("0.003"):
+            if abs(pos["entry_price"] - nearest) / nearest < Decimal("0.003"):
                 return None
 
         # Cost check
         if current_balance < self._amount_per_grid:
             return None
 
-        sell_target = nearest_buy * (Decimal("1") + self._profit_per_grid)
-        # SL = lower boundary of the entire grid (not per-position -5%).
-        # Real grid trading: close ALL positions only when price exits the grid range.
-        stop_loss = (
-            self._grid_lower_price
-            if self._grid_lower_price > 0
-            else nearest_buy * (Decimal("1") - self._grid_range_pct)
-        )
+        if self._direction == SignalDirection.LONG:
+            take_profit = nearest * (Decimal("1") + self._profit_per_grid)
+            stop_loss = (
+                self._grid_lower_price
+                if self._grid_lower_price > 0
+                else nearest * (Decimal("1") - self._grid_range_pct)
+            )
+            signal_reason = "grid_buy_level"
+        else:
+            take_profit = nearest * (Decimal("1") - self._profit_per_grid)
+            stop_loss = (
+                self._grid_upper_price
+                if self._grid_upper_price > 0
+                else nearest * (Decimal("1") + self._grid_range_pct)
+            )
+            signal_reason = "grid_sell_level"
 
         return BaseSignal(
-            direction=SignalDirection.LONG,
+            direction=self._direction,
             entry_price=close,
             stop_loss=stop_loss,
-            take_profit=sell_target,
+            take_profit=take_profit,
             confidence=0.6,
             timestamp=datetime.now(timezone.utc),
             strategy_type="grid",
-            signal_reason="grid_buy_level",
+            signal_reason=signal_reason,
             risk_reward_ratio=float(self._profit_per_grid / self._grid_range_pct),
-            metadata={"grid_level": float(nearest_buy)},
+            metadata={"grid_level": float(nearest)},
         )
 
     def open_position(self, signal: BaseSignal, position_size: Decimal) -> str:
@@ -305,8 +351,16 @@ class GridAdapter(BaseStrategy):
         exits: list[tuple[str, ExitReason]] = []
         self._current_price = current_price
 
-        # If price breaks below the entire grid's lower boundary
-        if self._grid_lower_price > 0 and current_price < self._grid_lower_price:
+        # Boundary check: price exits grid range
+        _boundary_breach = False
+        if self._direction == SignalDirection.LONG:
+            if self._grid_lower_price > 0 and current_price < self._grid_lower_price:
+                _boundary_breach = True
+        else:  # SHORT
+            if self._grid_upper_price > 0 and current_price > self._grid_upper_price:
+                _boundary_breach = True
+
+        if _boundary_breach:
             if self._recovery_enabled:
                 # Recovery mode: don't close — signal recovery trigger
                 self._recovery_triggered = True
@@ -320,7 +374,10 @@ class GridAdapter(BaseStrategy):
 
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
-            if current_price >= pos["take_profit"]:
+            # TP check: direction-aware
+            if pos["direction"] == SignalDirection.LONG and current_price >= pos["take_profit"]:
+                exits.append((pos_id, ExitReason.TAKE_PROFIT))
+            elif pos["direction"] == SignalDirection.SHORT and current_price <= pos["take_profit"]:
                 exits.append((pos_id, ExitReason.TAKE_PROFIT))
             elif pos.get("stop_loss"):
                 sl = pos["stop_loss"]
@@ -342,7 +399,10 @@ class GridAdapter(BaseStrategy):
         if not pos:
             return
 
-        pnl = (exit_price - pos["entry_price"]) * pos["size"] / pos["entry_price"]
+        if pos["direction"] == SignalDirection.SHORT:
+            pnl = (pos["entry_price"] - exit_price) * pos["size"] / pos["entry_price"]
+        else:
+            pnl = (exit_price - pos["entry_price"]) * pos["size"] / pos["entry_price"]
         self._closed_trades.append(
             {
                 "position_id": position_id,
@@ -359,11 +419,13 @@ class GridAdapter(BaseStrategy):
     def get_active_positions(self) -> list[PositionInfo]:
         result = []
         for pos_id, pos in self._positions.items():
-            pnl = (
-                (pos["current_price"] - pos["entry_price"]) * pos["size"] / pos["entry_price"]
-                if pos["entry_price"] > 0
-                else Decimal("0")
-            )
+            if pos["entry_price"] > 0:
+                if pos["direction"] == SignalDirection.SHORT:
+                    pnl = (pos["entry_price"] - pos["current_price"]) * pos["size"] / pos["entry_price"]
+                else:
+                    pnl = (pos["current_price"] - pos["entry_price"]) * pos["size"] / pos["entry_price"]
+            else:
+                pnl = Decimal("0")
             result.append(
                 PositionInfo(
                     position_id=pos_id,
@@ -472,6 +534,10 @@ class GridAdapter(BaseStrategy):
     def grid_lower_price(self) -> Decimal:
         return self._grid_lower_price
 
+    @property
+    def grid_upper_price(self) -> Decimal:
+        return self._grid_upper_price
+
     def pause(self) -> None:
         """Pause Grid — stops signal generation."""
         self._paused = True
@@ -490,6 +556,7 @@ class GridAdapter(BaseStrategy):
         )
         self._grid_levels = self._grid_engine.calculate_grid_levels()
         self._grid_lower_price = self._grid_engine.lower_price
+        self._grid_upper_price = self._grid_engine.upper_price
         self._recenter_countdown = self._recenter_cooldown_bars
         logger.info(
             "grid_resumed",
@@ -502,6 +569,7 @@ class GridAdapter(BaseStrategy):
         self._grid_engine = None
         self._grid_levels = []
         self._grid_lower_price = Decimal("0")
+        self._grid_upper_price = Decimal("0")
         self._positions.clear()
         self._closed_trades.clear()
         self._last_analysis = None
@@ -509,3 +577,4 @@ class GridAdapter(BaseStrategy):
         self._current_price = Decimal("0")
         self._recovery_triggered = False
         self._paused = False
+        self._direction = SignalDirection.LONG

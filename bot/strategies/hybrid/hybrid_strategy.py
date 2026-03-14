@@ -333,11 +333,16 @@ class HybridStrategy:
         current_bar: int,
         smc_support: Decimal | None = None,
         base_order_size: Decimal = Decimal("150"),
+        direction: "SignalDirection | None" = None,
     ) -> None:
         """Transition to RECOVERY_ACTIVE mode."""
         if self._recovery_coordinator is None:
             return
+        from bot.strategies.base import SignalDirection as _SD
         from bot.strategies.hybrid.recovery_coordinator import UnderwaterPosition
+
+        if direction is None:
+            direction = _SD.LONG
 
         underwater = [
             UnderwaterPosition(
@@ -353,6 +358,7 @@ class HybridStrategy:
             current_bar=current_bar,
             smc_support=smc_support,
             base_order_size=base_order_size,
+            direction=direction,
         )
         event = self._execute_transition(
             to_mode=HybridMode.RECOVERY_ACTIVE,

@@ -135,7 +135,7 @@ class TestMainLoopThrottle:
         orch._last_active_strategies_update_at = recent
 
         # Change regime — but throttle should prevent update
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
 
         await _run_main_loop_throttle(orch)
 
@@ -166,17 +166,17 @@ class TestRegimeChangeCausesStrategyChange:
     """Verify that a regime change propagates to _active_strategies when not throttled."""
 
     @pytest.mark.asyncio
-    async def test_tight_range_to_dca_only(self):
-        """Switching from TIGHT_RANGE (GRID) to BEAR_TREND (DCA) clears grid, adds dca."""
+    async def test_tight_range_to_smc_tf(self):
+        """Switching from TIGHT_RANGE (GRID) to BEAR_TREND (SMC+TF) clears grid, adds smc+tf."""
         orch = _make_stub(cooldown=0.0, regime_check_interval=60.0)
         # First tick: tight range → grid
         orch._current_regime = _make_regime(MarketRegime.TIGHT_RANGE, RecommendedStrategy.GRID)
         await orch._update_active_strategies()
         assert "grid" in orch._active_strategies
-        assert "dca" not in orch._active_strategies
+        assert "smc" not in orch._active_strategies
 
-        # Regime changes to bear trend → dca (+ trend_follower via strategy augmentation)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        # Regime changes to bear trend → smc + trend_follower (can SHORT)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         orch._last_strategy_switch_at = 0.0  # no cooldown
 
         # Two-phase gate: first call enters PRE_SWITCH (timer=0, no SMC),
@@ -184,7 +184,8 @@ class TestRegimeChangeCausesStrategyChange:
         await orch._update_active_strategies()  # PRE_SWITCH entered
         await orch._update_active_strategies()  # CONFIRMED → switch executed
 
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
+        assert "trend_follower" in orch._active_strategies
         assert "grid" not in orch._active_strategies
 
     @pytest.mark.asyncio
@@ -216,7 +217,7 @@ class TestRegimeChangeCausesStrategyChange:
         orch._last_active_strategies_update_at = time.monotonic()
 
         # Regime changes
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
 
         # _run_main_loop_throttle simulates _main_loop logic
         await _run_main_loop_throttle(orch)
@@ -236,7 +237,7 @@ class TestRegimeChangeCausesStrategyChange:
         orch._last_active_strategies_update_at = time.monotonic() - 120.0
 
         # New regime — first run_main_loop enters PRE_SWITCH (timer=0, no SMC needed)
-        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.DCA)
+        orch._current_regime = _make_regime(MarketRegime.BEAR_TREND, RecommendedStrategy.SMC)
         orch._last_strategy_switch_at = 0.0
         await _run_main_loop_throttle(orch)  # PRE_SWITCH entered; update_at advances
 
@@ -245,5 +246,5 @@ class TestRegimeChangeCausesStrategyChange:
         await _run_main_loop_throttle(orch)
 
         # Strategies must have updated
-        assert "dca" in orch._active_strategies
+        assert "smc" in orch._active_strategies
         assert "grid" not in orch._active_strategies

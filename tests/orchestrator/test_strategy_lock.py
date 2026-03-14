@@ -164,6 +164,7 @@ class TestGetStatusLock:
             "get_health_summary": lambda self: {"status": "healthy"}
         })()
 
+        orch._recovery_coordinator = None
         orch.lock_strategy({"smc", "grid"})
         status = await orch.get_status()
 
@@ -191,6 +192,7 @@ class TestGetStatusLock:
             "get_health_summary": lambda self: {"status": "healthy"}
         })()
 
+        orch._recovery_coordinator = None
         status = await orch.get_status()
 
         assert status["strategy_lock"]["locked"] is False

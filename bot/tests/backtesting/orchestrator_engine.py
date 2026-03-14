@@ -778,6 +778,37 @@ class BacktestOrchestratorEngine:
                                         [float(per_trade)] * len(forced)
                                     )
 
+            # 2b. Grid direction switching based on regime
+            # BEAR_TREND / DISTRIBUTION → SHORT grid, everything else → LONG
+            if "grid" in strategies and current_regime is not None:
+                from bot.strategies.grid_adapter import GridAdapter as _GridDir
+
+                _grid_dir = strategies["grid"]
+                if isinstance(_grid_dir, _GridDir):
+                    _regime_val = current_regime.regime.value
+                    _desired_dir = (
+                        SignalDirection.SHORT
+                        if _regime_val in ("bear_trend", "distribution")
+                        else SignalDirection.LONG
+                    )
+                    if _desired_dir != _grid_dir.direction:
+                        _dir_forced = _grid_dir.set_direction(_desired_dir)
+                        if _dir_forced:
+                            _dir_pnl = await self._handle_exits(
+                                strat_name="grid",
+                                strategy=_grid_dir,
+                                exits=_dir_forced,
+                                current_price=current_price,
+                                simulator=simulator,
+                                position_amounts=position_amounts["grid"],
+                                position_directions=position_directions["grid"],
+                                position_entry_prices=position_entry_prices["grid"],
+                                vpm=vpm,
+                                vpm_pos_ids=vpm_pos_ids["grid"],
+                            )
+                            per_strategy_pnl["grid"] += _dir_pnl
+                            strat_trades["grid"] += len(_dir_forced)
+
             # 3. Per-strategy signal generation and execution (ALL strategies, always)
             # Mirrors live BotOrchestrator: every strategy runs every bar,
             # router only adjusts position size via weight.
@@ -940,14 +971,20 @@ class BacktestOrchestratorEngine:
                         )
                         for p in _snap
                     ]
-                    # Try to find SMC support from analyzer
+                    # Try to find SMC support/resistance from analyzer
+                    _recovery_dir = _grid.direction
                     _smc_support = None
                     if smc_analyzer is not None:
                         try:
                             _ctx = smc_analyzer.context
-                            _smc_support = RecoveryCoordinator.find_smc_support(
-                                _ctx, current_price
-                            )
+                            if _recovery_dir == SignalDirection.SHORT:
+                                _smc_support = RecoveryCoordinator.find_smc_resistance(
+                                    _ctx, current_price
+                                )
+                            else:
+                                _smc_support = RecoveryCoordinator.find_smc_support(
+                                    _ctx, current_price
+                                )
                         except Exception:
                             pass
                     _base_size = _grid._amount_per_grid
@@ -957,6 +994,7 @@ class BacktestOrchestratorEngine:
                         current_bar=i,
                         smc_support=_smc_support,
                         base_order_size=_base_size,
+                        direction=_recovery_dir,
                     )
                 elif recovery_coordinator.is_active:
                     # Update recovery state — DCA signals are auto-tracked
