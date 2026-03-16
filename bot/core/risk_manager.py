@@ -175,14 +175,26 @@ class RiskManager:
         return RiskCheckResult(True)
 
     def check_position_limit(
-        self, current_position: Decimal, additional_size: Decimal
+        self,
+        current_position: Decimal,
+        additional_size: Decimal,
+        direction: str = "long",
     ) -> RiskCheckResult:
         """
-        Check if adding to position would exceed limits.
+        Check if adding to position would exceed the net exposure limit.
+
+        ``current_position`` is the **signed** net exposure of the portfolio
+        (positive = net long, negative = net short).  ``additional_size`` is
+        always positive (the magnitude of the new trade).  ``direction``
+        determines whether the trade adds to long or short exposure.
+
+        Hedged portfolios benefit from this: LONG $1000 + SHORT $800 = $200
+        net long exposure, not $1800 gross.
 
         Args:
-            current_position: Current position value
-            additional_size: Additional size to add
+            current_position: Signed net portfolio exposure (positive=long).
+            additional_size: Size of the new order (always positive).
+            direction: ``"long"`` or ``"short"`` for the new trade.
 
         Returns:
             RiskCheckResult indicating if addition is allowed
@@ -190,13 +202,18 @@ class RiskManager:
         if self.is_halted:
             return RiskCheckResult(False, self.halt_reason or "System halted")
 
-        new_position = current_position + additional_size
+        if direction == "short":
+            new_position = current_position - additional_size
+        else:
+            new_position = current_position + additional_size
 
-        if new_position > self.max_position_size:
+        # Use absolute net exposure for the limit check so both directions
+        # are bounded symmetrically by max_position_size.
+        if abs(new_position) > self.max_position_size:
             self.rejected_trades += 1
             return RiskCheckResult(
                 False,
-                f"Position {new_position} would exceed max {self.max_position_size}",
+                f"Net position {new_position} would exceed max {self.max_position_size}",
             )
 
         if self.max_position_size_per_trade is not None:
@@ -239,14 +256,16 @@ class RiskManager:
         order_value: Decimal,
         current_position: Decimal,
         available_balance: Decimal,
+        direction: str = "long",
     ) -> RiskCheckResult:
         """
         Comprehensive trade check combining all risk validations.
 
         Args:
             order_value: Value of the proposed order
-            current_position: Current position value
+            current_position: Signed net portfolio exposure (positive=long)
             available_balance: Available balance
+            direction: ``"long"`` or ``"short"`` for the new trade
 
         Returns:
             RiskCheckResult indicating if trade is allowed
@@ -260,8 +279,8 @@ class RiskManager:
         if not size_check:
             return size_check
 
-        # Check position limit
-        position_check = self.check_position_limit(current_position, order_value)
+        # Check position limit (direction-aware net exposure check)
+        position_check = self.check_position_limit(current_position, order_value, direction)
         if not position_check:
             return position_check
 

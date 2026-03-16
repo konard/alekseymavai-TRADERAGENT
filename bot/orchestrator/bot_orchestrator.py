@@ -1779,37 +1779,50 @@ class BotOrchestrator:
         return result.approved
 
     def _get_total_open_exposure(self) -> Decimal:
-        """Return total capital currently exposed across all active strategies.
+        """Return signed net portfolio exposure across all active strategies.
 
-        Sums buy-side notional for Grid, invested capital for DCA, and
-        position sizes for TrendFollower and SMC.  Used as ``current_position``
-        in :meth:`~bot.core.risk_manager.RiskManager.check_trade` so that every
-        strategy sees combined cross-strategy exposure before opening new trades.
+        Positive = net long, negative = net short.  Used as ``current_position``
+        in :meth:`~bot.core.risk_manager.RiskManager.check_trade` so that hedged
+        positions (e.g. SHORT grid + LONG SMC) reduce measured exposure instead
+        of stacking it.
         """
-        exposure = Decimal("0")
+        long_exp = Decimal("0")
+        short_exp = Decimal("0")
 
-        # Grid: all active buy-side filled positions (open buy orders represent
-        # capital already committed / earmarked for the position)
+        # Grid: direction-aware exposure
         if self.grid_engine:
-            for order in self.grid_engine.active_orders.values():
-                if order.side == "buy":
-                    exposure += order.price * order.amount
+            if self.grid_engine.direction == GridDirection.LONG:
+                # Long grid: active buy orders represent committed long capital
+                for order in self.grid_engine.active_orders.values():
+                    if order.side == "buy":
+                        long_exp += order.price * order.amount
+            else:
+                # Short grid: filled sell positions (_open_sells) are the short exposure
+                for order in self.grid_engine._open_sells.values():
+                    short_exp += order.price * order.amount
 
-        # DCA: total capital in the current open position
+        # DCA: always long
         if self.dca_engine:
-            exposure += self.dca_engine.get_total_invested()
+            long_exp += self.dca_engine.get_total_invested()
 
-        # TrendFollower: sum of all active position sizes (quote currency)
+        # TrendFollower: direction per position
         if self.trend_follower_strategy:
             for pos in self.trend_follower_strategy.position_manager.active_positions.values():
-                exposure += pos.size
+                if getattr(pos, "signal_type", None) and pos.signal_type.value == "short":
+                    short_exp += pos.size
+                else:
+                    long_exp += pos.size
 
-        # SMC: sum of all active position sizes (quote currency)
+        # SMC: direction per position
         if self.smc_strategy:
+            from bot.strategies.base import SignalDirection as _SD
             for pos in self.smc_strategy.get_active_positions():
-                exposure += pos.size
+                if getattr(pos, "direction", None) == _SD.SHORT:
+                    short_exp += pos.size
+                else:
+                    long_exp += pos.size
 
-        return exposure
+        return long_exp - short_exp  # signed net: positive=long, negative=short
 
     async def _ensure_hedge_mode(self) -> None:
         """Enable hedge mode (both-side) on Bybit for the grid symbol.
@@ -2015,11 +2028,13 @@ class BotOrchestrator:
             if entry_data and self.state == BotState.RUNNING:
                 signal, metrics, position_size = entry_data
 
-                # Risk check (uses cross-strategy exposure)
+                # Risk check (uses cross-strategy net exposure)
                 if self.risk_manager:
                     current_position_value = self._get_total_open_exposure()
+                    tf_direction = getattr(signal, "signal_type", None)
+                    tf_dir_str = tf_direction.value if tf_direction else "long"
                     risk_check = self.risk_manager.check_trade(
-                        position_size, current_position_value, balance
+                        position_size, current_position_value, balance, direction=tf_dir_str
                     )
                     if not risk_check.allowed:
                         logger.warning(
@@ -2267,11 +2282,13 @@ class BotOrchestrator:
                         ),
                     )
 
-                    # Risk check (uses cross-strategy exposure)
+                    # Risk check (uses cross-strategy net exposure)
                     if self.risk_manager:
                         current_position_value = self._get_total_open_exposure()
+                        smc_dir = getattr(signal, "direction", None)
+                        smc_dir_str = smc_dir.value if smc_dir else "long"
                         risk_check = self.risk_manager.check_trade(
-                            position_size, current_position_value, balance
+                            position_size, current_position_value, balance, direction=smc_dir_str
                         )
                         if not risk_check.allowed:
                             logger.warning(
