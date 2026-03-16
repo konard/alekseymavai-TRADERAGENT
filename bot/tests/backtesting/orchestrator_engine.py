@@ -31,7 +31,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from bot.core.capital_arbiter import CapitalArbiter
+from bot.core.capital_arbiter import (
+    ALLOCATION as _ARBITER_ALLOCATION,
+    CapitalArbiter,
+    _REGIME_FAMILY as _ARBITER_REGIME_FAMILY,
+    _UNKNOWN as _ARBITER_UNKNOWN,
+    _normalise_strategy as _arbiter_norm,
+)
 from bot.core.risk_manager import RiskManager
 from bot.core.smc.analyzer import SMCAnalyzer
 from bot.core.virtual_position_manager import VirtualPosition, VirtualPositionManager
@@ -120,6 +126,13 @@ class OrchestratorBacktestConfig:
     # truth), mirroring the live StrategySelector.  When None, a default RoutingConfig is
     # loaded from "configs/strategy_routing.yaml" at engine startup.
     routing_config: RoutingConfig | None = None
+
+    # Additive routing (mirrors live CapitalArbiter model).
+    # True (default): multiple strategies active simultaneously per CapitalArbiter
+    #   ALLOCATION matrix — each non-zero allocation strategy runs at full position
+    #   size with the allocation as a capital ceiling.
+    # False (legacy): exclusive binary routing from StrategyRouter (one winner per regime).
+    use_additive_routing: bool = True
 
     # Two-phase PRE_SWITCH gate — mirrors StrategySelector (issue #360 / C1 parity fix).
     # When enabled, regime transitions require a timer + optional SMC signal before
@@ -735,24 +748,55 @@ class BacktestOrchestratorEngine:
                         current_regime, strategy_instances=strategies
                     )
 
-            # 2. Strategy routing — mirrors live HybridCoordinator behaviour:
-            # active strategies → weight 1.0 (trade normally)
-            # inactive strategies → weight 0.0 (skip entirely, no signal generation)
-            # This makes Grid/DCA mutually exclusive as in the live bot.
+            # 2. Strategy routing
+            # Two modes controlled by config.use_additive_routing:
+            #
+            # ADDITIVE (default, mirrors live CapitalArbiter):
+            #   Multiple strategies active simultaneously.  Weights (0/1) derived
+            #   from CapitalArbiter.ALLOCATION matrix — any strategy with non-zero
+            #   allocation in the current regime is active at full position size.
+            #
+            # EXCLUSIVE (legacy):
+            #   Binary on/off from StrategyRouter (one winner per regime).
             regime_weights: dict[str, float] = {}
             if config.enable_strategy_router:
                 router_event = router.on_bar(current_regime, i, current_timestamp=bar_timestamp)
                 if router_event.cooldown_remaining > 0:
                     cooldown_events += 1
-                regime_weights = {
-                    name: (1.0 if name in router_event.active_strategies else 0.0)
-                    for name in strategies
-                }
+
+                if config.use_additive_routing and current_regime is not None:
+                    # Additive: activity determined by CapitalArbiter allocation fractions.
+                    _regime_str = current_regime.regime.value
+                    _family = _ARBITER_REGIME_FAMILY.get(_regime_str, _ARBITER_UNKNOWN)
+                    _alloc = _ARBITER_ALLOCATION[_family]
+                    regime_weights = {
+                        name: (
+                            1.0
+                            if _alloc.get(_arbiter_norm(name), Decimal("0")) > Decimal("0")
+                            else 0.0
+                        )
+                        for name in strategies
+                    }
+                    # Deactivated: previously weight>0, now weight=0 (for force_close)
+                    _deactivated_additive = {
+                        name
+                        for name in strategies
+                        if regime_weights.get(name, 0.0) == 0.0
+                        and name in router_event.active_strategies
+                    }
+                else:
+                    # Exclusive: binary weights from StrategyRouter
+                    regime_weights = {
+                        name: (1.0 if name in router_event.active_strategies else 0.0)
+                        for name in strategies
+                    }
+                    _deactivated_additive = router_event.deactivated
+
                 # Handle deactivated strategies — mirrors live bot graceful_transition:
                 # close_positions_on_switch=False (default) → keep positions open
                 # close_positions_on_switch=True → force_close_all positions
                 if config.force_close_on_deactivation:
-                    for deact_name in router_event.deactivated:
+                    for deact_name in _deactivated_additive:
                         deact_strat = strategies.get(deact_name)
                         if deact_strat is not None and hasattr(deact_strat, "force_close_all"):
                             forced = deact_strat.force_close_all()
