@@ -24,6 +24,13 @@ class GridType(str, Enum):
     DYNAMIC = "dynamic"
 
 
+class GridDirection(str, Enum):
+    """Grid direction: LONG accumulates on dips; SHORT accumulates on rallies."""
+
+    LONG = "long"
+    SHORT = "short"
+
+
 class GridOrder:
     """Represents a grid order"""
 
@@ -71,6 +78,7 @@ class GridEngine:
         amount_per_grid: Decimal,
         profit_per_grid: Decimal,
         grid_type: GridType = GridType.STATIC,
+        direction: GridDirection = GridDirection.LONG,
     ):
         """
         Initialize Grid Engine.
@@ -83,6 +91,7 @@ class GridEngine:
             amount_per_grid: Amount to trade per grid level
             profit_per_grid: Profit percentage per grid (0.01 = 1%)
             grid_type: Type of grid (static or dynamic)
+            direction: LONG (buy dips / sell rallies) or SHORT (sell rallies / buy dips)
         """
         if upper_price <= lower_price:
             raise ValueError("upper_price must be greater than lower_price")
@@ -100,15 +109,18 @@ class GridEngine:
         self.amount_per_grid = amount_per_grid
         self.profit_per_grid = profit_per_grid
         self.grid_type = grid_type
+        self.direction = direction
 
         # Grid state
         self.grid_orders: list[GridOrder] = []
         self.active_orders: dict[str, GridOrder] = {}  # order_id -> GridOrder
         self.filled_orders: list[GridOrder] = []
 
-        # Position tracker: filled buy orders that haven't been paired with a sell yet.
-        # Updated in handle_order_filled() — buy fill adds, sell fill removes the pair.
-        self._open_buys: dict[str, GridOrder] = {}  # order_id -> filled buy GridOrder
+        # Position trackers.
+        # LONG: filled buy orders awaiting a paired sell (TP).
+        # SHORT: filled sell orders awaiting a paired buy (TP).
+        self._open_buys: dict[str, GridOrder] = {}   # order_id -> filled buy GridOrder
+        self._open_sells: dict[str, GridOrder] = {}  # order_id -> filled sell GridOrder (SHORT)
 
         # Statistics
         self.total_profit = Decimal("0")
@@ -122,6 +134,7 @@ class GridEngine:
             lower_price=float(lower_price),
             grid_levels=grid_levels,
             grid_type=grid_type,
+            direction=direction,
         )
 
     def calculate_grid_levels(self) -> list[Decimal]:
@@ -162,35 +175,33 @@ class GridEngine:
         orders_to_place = []
 
         for level_idx, price in enumerate(levels):
-            # Convert amount from quote currency (USD) to base currency (BTC)
-            # amount_per_grid is in USDT, but exchange expects BTC quantity
+            # Convert amount from quote currency (USD) to base currency
             base_amount = (self.amount_per_grid / price).quantize(Decimal("0.000001"))
 
-            # Create buy orders below current price
-            if price < current_price:
-                order = GridOrder(
-                    level=level_idx,
-                    price=price,
-                    amount=base_amount,
-                    side="buy",
-                )
-                self.grid_orders.append(order)
-                orders_to_place.append(order)
-
-            # Create sell orders above current price
-            elif price > current_price:
-                # Calculate sell price with profit margin
-                sell_price = price * (Decimal("1") + self.profit_per_grid)
-                # Convert amount at sell price
-                sell_base_amount = (self.amount_per_grid / sell_price).quantize(Decimal("0.000001"))
-                order = GridOrder(
-                    level=level_idx,
-                    price=sell_price,
-                    amount=sell_base_amount,
-                    side="sell",
-                )
-                self.grid_orders.append(order)
-                orders_to_place.append(order)
+            if self.direction == GridDirection.LONG:
+                # LONG: buy below current price, sell above
+                if price < current_price:
+                    order = GridOrder(level=level_idx, price=price, amount=base_amount, side="buy")
+                    self.grid_orders.append(order)
+                    orders_to_place.append(order)
+                elif price > current_price:
+                    sell_price = price * (Decimal("1") + self.profit_per_grid)
+                    sell_amount = (self.amount_per_grid / sell_price).quantize(Decimal("0.000001"))
+                    order = GridOrder(level=level_idx, price=sell_price, amount=sell_amount, side="sell")
+                    self.grid_orders.append(order)
+                    orders_to_place.append(order)
+            else:
+                # SHORT: sell above current price (open short), buy below (TP)
+                if price > current_price:
+                    order = GridOrder(level=level_idx, price=price, amount=base_amount, side="sell")
+                    self.grid_orders.append(order)
+                    orders_to_place.append(order)
+                elif price < current_price:
+                    buy_price = price * (Decimal("1") - self.profit_per_grid)
+                    buy_amount = (self.amount_per_grid / buy_price).quantize(Decimal("0.000001"))
+                    order = GridOrder(level=level_idx, price=buy_price, amount=buy_amount, side="buy")
+                    self.grid_orders.append(order)
+                    orders_to_place.append(order)
 
         logger.info(
             "Grid initialized",
@@ -244,23 +255,37 @@ class GridEngine:
         self.filled_orders.append(filled_order)
 
         # Update statistics and position tracker
-        if filled_order.side == "buy":
-            self.buy_count += 1
-            # Track this buy as an open position
-            self._open_buys[order_id] = filled_order
+        if self.direction == GridDirection.LONG:
+            if filled_order.side == "buy":
+                self.buy_count += 1
+                self._open_buys[order_id] = filled_order
+            else:
+                self.sell_count += 1
+                profit = (filled_price - filled_order.price) * filled_amount
+                self.total_profit += profit
+                # Remove paired open buy (same grid level)
+                paired_id = next(
+                    (bid for bid, bo in self._open_buys.items() if bo.level == filled_order.level),
+                    None,
+                )
+                if paired_id:
+                    self._open_buys.pop(paired_id, None)
         else:
-            self.sell_count += 1
-            # Calculate profit for sell orders
-            profit = (filled_price - filled_order.price) * filled_amount
-            self.total_profit += profit
-            # Remove the paired buy position (same grid level)
-            paired_buy_id = None
-            for buy_id, buy_order in self._open_buys.items():
-                if buy_order.level == filled_order.level:
-                    paired_buy_id = buy_id
-                    break
-            if paired_buy_id:
-                self._open_buys.pop(paired_buy_id, None)
+            # SHORT direction
+            if filled_order.side == "sell":
+                self.sell_count += 1
+                self._open_sells[order_id] = filled_order
+            else:
+                self.buy_count += 1
+                # TP buy closes a short: profit = sell_price - buy_price
+                paired_id = next(
+                    (sid for sid, so in self._open_sells.items() if so.level == filled_order.level),
+                    None,
+                )
+                if paired_id:
+                    sell_order = self._open_sells.pop(paired_id)
+                    profit = (sell_order.price - filled_price) * filled_amount
+                    self.total_profit += profit
 
         logger.info(
             "Order filled",
@@ -287,14 +312,24 @@ class GridEngine:
         Returns:
             New GridOrder for rebalancing
         """
-        if filled_order.side == "buy":
-            # After buying, place a sell order above
-            new_price = filled_price * (Decimal("1") + self.profit_per_grid)
-            new_side = "sell"
+        if self.direction == GridDirection.LONG:
+            if filled_order.side == "buy":
+                # After buying long, place TP sell above
+                new_price = filled_price * (Decimal("1") + self.profit_per_grid)
+                new_side = "sell"
+            else:
+                # After selling TP, re-enter buy below
+                new_price = filled_price * (Decimal("1") - self.profit_per_grid)
+                new_side = "buy"
         else:
-            # After selling, place a buy order below
-            new_price = filled_price * (Decimal("1") - self.profit_per_grid)
-            new_side = "buy"
+            if filled_order.side == "sell":
+                # After selling short, place TP buy below
+                new_price = filled_price * (Decimal("1") - self.profit_per_grid)
+                new_side = "buy"
+            else:
+                # After TP buy, re-enter sell above
+                new_price = filled_price * (Decimal("1") + self.profit_per_grid)
+                new_side = "sell"
 
         # Convert amount from quote currency (USD) to base currency (BTC)
         base_amount = (self.amount_per_grid / new_price).quantize(Decimal("0.000001"))
@@ -353,6 +388,35 @@ class GridEngine:
 
         return (orders_to_cancel, new_orders)
 
+    def set_direction(self, new_direction: GridDirection) -> list[str]:
+        """Switch grid direction.  Returns all active order_ids to cancel on exchange.
+
+        Caller is responsible for:
+        1. Cancelling returned order IDs on the exchange.
+        2. Calling initialize_grid(current_price) to rebuild grid in new direction.
+        """
+        if new_direction == self.direction:
+            return []
+
+        logger.info(
+            "grid_direction_switch",
+            symbol=self.symbol,
+            old=self.direction,
+            new=new_direction,
+        )
+
+        order_ids_to_cancel = list(self.active_orders.keys())
+
+        # Reset all state
+        self.direction = new_direction
+        self.grid_orders.clear()
+        self.active_orders.clear()
+        self.filled_orders.clear()
+        self._open_buys.clear()
+        self._open_sells.clear()
+
+        return order_ids_to_cancel
+
     def get_grid_status(self) -> dict:
         """
         Get current grid status and statistics.
@@ -363,6 +427,7 @@ class GridEngine:
         return {
             "symbol": self.symbol,
             "grid_type": self.grid_type,
+            "direction": self.direction,
             "upper_price": float(self.upper_price),
             "lower_price": float(self.lower_price),
             "grid_levels": self.grid_levels,
@@ -386,6 +451,7 @@ class GridEngine:
         if order_id in self.active_orders:
             order = self.active_orders.pop(order_id)
             self._open_buys.pop(order_id, None)
+            self._open_sells.pop(order_id, None)
             logger.info(
                 "Order cancelled",
                 order_id=order_id,
@@ -398,21 +464,25 @@ class GridEngine:
         return False
 
     def get_underwater_positions(self, current_price: Decimal) -> list[dict]:
-        """Return filled buy positions where entry_price > current_price.
+        """Return positions that are currently losing.
 
-        No exchange queries — uses local ``_open_buys`` tracker.
+        LONG: filled buys where entry_price > current_price (loss if closed now).
+        SHORT: filled sells where entry_price < current_price (price moved against short).
 
-        Returns list of dicts: order_id, entry_price, size (base amount).
+        No exchange queries — uses local position trackers.
         """
-        return [
-            {
-                "order_id": oid,
-                "entry_price": o.price,
-                "size": o.amount,
-            }
-            for oid, o in self._open_buys.items()
-            if o.price > current_price
-        ]
+        if self.direction == GridDirection.LONG:
+            return [
+                {"order_id": oid, "entry_price": o.price, "size": o.amount}
+                for oid, o in self._open_buys.items()
+                if o.price > current_price
+            ]
+        else:
+            return [
+                {"order_id": oid, "entry_price": o.price, "size": o.amount}
+                for oid, o in self._open_sells.items()
+                if o.price < current_price
+            ]
 
     def get_open_positions(self) -> list[dict]:
         """

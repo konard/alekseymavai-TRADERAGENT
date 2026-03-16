@@ -18,7 +18,7 @@ import redis.asyncio as redis
 from bot.config.schemas import BotConfig, StrategyType
 from bot.core.capital_arbiter import CapitalArbiter
 from bot.core.dca_engine import DCAEngine
-from bot.core.grid_engine import GridEngine, GridType
+from bot.core.grid_engine import GridDirection, GridEngine, GridType
 from bot.core.portfolio_risk_manager import PortfolioRiskManager
 from bot.core.price_zone_allocator import PriceZoneAllocator
 from bot.core.risk_manager import RiskManager
@@ -152,6 +152,10 @@ class BotOrchestrator:
         self._state_loaded = False
         self._last_state_save: float = 0.0
         self._state_save_interval: float = 30.0  # seconds
+
+        # Grid direction (bidirectional support)
+        self._grid_direction: GridDirection = GridDirection.LONG
+        self._hedge_mode_enabled: bool = False  # set True after set_position_mode succeeds
 
         # SMC analysis throttle (entry timeframe is M15 → analyze every 5 min)
         self._smc_last_analysis: float = 0.0
@@ -474,6 +478,10 @@ class BotOrchestrator:
                 self.current_price = Decimal(str(ticker["last"]))
                 logger.info("current_price_fetched", price=str(self.current_price))
 
+                # Enable hedge mode on Bybit so LONG and SHORT can coexist
+                if self.grid_engine:
+                    await self._ensure_hedge_mode()
+
                 if self._state_loaded:
                     # State was loaded from DB — reconcile with exchange
                     await self.reconcile_with_exchange()
@@ -788,6 +796,20 @@ class BotOrchestrator:
             )
             self._last_strategy_switch_at = time.monotonic()
             self._active_strategies = intended
+
+        # Switch grid direction based on regime (bear/distribution → SHORT, else → LONG).
+        # Only affects the grid engine; other strategies handle directionality internally.
+        # Guard with getattr for backward-compatibility with test stubs.
+        grid_engine = getattr(self, "grid_engine", None)
+        if grid_engine:
+            from bot.orchestrator.market_regime import MarketRegime
+            bear_regimes = {MarketRegime.BEAR_TREND, MarketRegime.DISTRIBUTION}
+            target_direction = (
+                GridDirection.SHORT if analysis.regime in bear_regimes else GridDirection.LONG
+            )
+            current_direction = getattr(self, "_grid_direction", GridDirection.LONG)
+            if target_direction != current_direction:
+                await self._switch_grid_direction(target_direction)
 
         # Dispatch shared SMC context (key levels, liquidity zones, price range)
         # to every active strategy via StrategyConductor regardless of whether a
@@ -1789,6 +1811,66 @@ class BotOrchestrator:
 
         return exposure
 
+    async def _ensure_hedge_mode(self) -> None:
+        """Enable hedge mode (both-side) on Bybit for the grid symbol.
+
+        Called once during bot start.  Idempotent — Bybit returns retCode=0
+        if the mode is already set.  Failures are logged but non-fatal.
+        """
+        if not self.grid_engine:
+            return
+        try:
+            if hasattr(self.exchange, "set_position_mode"):
+                await self.exchange.set_position_mode(self.config.symbol, mode=3)
+                self._hedge_mode_enabled = True
+                logger.info("hedge_mode_enabled", symbol=self.config.symbol)
+            else:
+                logger.warning("exchange_no_set_position_mode", exchange=type(self.exchange).__name__)
+        except Exception as e:
+            logger.warning("hedge_mode_enable_failed", error=str(e))
+
+    async def _switch_grid_direction(self, new_direction: GridDirection) -> None:
+        """Switch grid direction on regime change.
+
+        1. Gets order IDs to cancel from GridEngine.set_direction().
+        2. Cancels them on exchange.
+        3. Reinitializes grid in new direction.
+        """
+        grid_engine = getattr(self, "grid_engine", None)
+        current_price = getattr(self, "current_price", None)
+        if not grid_engine or not current_price:
+            return
+        current_direction = getattr(self, "_grid_direction", GridDirection.LONG)
+        if new_direction == current_direction:
+            return
+
+        logger.info(
+            "grid_direction_switch_start",
+            old=current_direction,
+            new=new_direction,
+            symbol=self.config.symbol,
+        )
+
+        cancel_ids = grid_engine.set_direction(new_direction)
+        self._grid_direction = new_direction
+
+        # Cancel all existing grid orders on exchange
+        for order_id in cancel_ids:
+            try:
+                await self.exchange.cancel_order(order_id, self.config.symbol)
+            except Exception as e:
+                logger.warning("grid_cancel_failed_on_switch", order_id=order_id, error=str(e))
+
+        # Rebuild grid in new direction
+        new_orders = grid_engine.initialize_grid(current_price)
+        await self._place_grid_orders(new_orders)
+
+        logger.info(
+            "grid_direction_switch_complete",
+            direction=new_direction,
+            orders_placed=len(new_orders),
+        )
+
     async def _place_grid_orders(self, orders: list) -> None:
         """Place grid orders on exchange.
 
@@ -1796,7 +1878,7 @@ class BotOrchestrator:
         checked against the shared capital pool so a halted portfolio
         (e.g. global drawdown > stop-loss) prevents new grid deployments.
         """
-        if self._portfolio_rm is not None:
+        if getattr(self, "_portfolio_rm", None) is not None:
             buy_notional = sum(
                 o.amount * o.price for o in orders if getattr(o, "side", "") == "buy"
             )
@@ -1813,12 +1895,24 @@ class BotOrchestrator:
     async def _place_single_order(self, order: Any) -> None:
         """Place a single order on exchange."""
         try:
+            # Determine positionIdx for hedge mode:
+            # 1 = Buy/Long side, 2 = Sell/Short side (hedge mode only)
+            position_idx = 0
+            if self._hedge_mode_enabled:
+                if self._grid_direction == GridDirection.SHORT:
+                    # SHORT grid: sell opens short (idx=2), buy closes short (idx=2)
+                    position_idx = 2
+                else:
+                    # LONG grid: buy opens long (idx=1), sell closes long (idx=1)
+                    position_idx = 1
+
             result = await self.exchange.create_order(
                 symbol=self.config.symbol,
                 order_type="limit",
                 side=order.side,
                 amount=float(order.amount),
                 price=float(order.price),
+                position_idx=position_idx,
             )
             order_id = result["id"]
             if self.grid_engine:

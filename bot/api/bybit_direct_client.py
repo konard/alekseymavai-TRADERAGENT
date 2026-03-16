@@ -537,6 +537,26 @@ class ByBitDirectClient:
         rounded = Decimal(str(amount)).quantize(quantizer, rounding="ROUND_DOWN")
         return str(rounded)
 
+    async def set_position_mode(self, symbol: str, mode: int = 3) -> dict[str, Any]:
+        """Switch position mode for a symbol.
+
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            mode: 0 = one-way, 3 = hedge (both-side)
+
+        Returns:
+            API response dict
+        """
+        normalized_symbol = symbol.replace("/", "")
+        params = {
+            "category": self.category,
+            "symbol": normalized_symbol,
+            "mode": mode,
+        }
+        data = await self._request("POST", "/v5/position/switch-mode", params, authenticated=True)
+        logger.info("set_position_mode", symbol=symbol, mode=mode, result=data)
+        return data
+
     async def create_limit_order(
         self,
         symbol: str,
@@ -544,6 +564,7 @@ class ByBitDirectClient:
         amount: Decimal,
         price: Decimal,
         params: dict[str, Any] | None = None,
+        position_idx: int = 0,
     ) -> dict[str, Any]:
         """
         Create a limit order.
@@ -572,7 +593,7 @@ class ByBitDirectClient:
             "qty": qty_str,
             "price": price_str,
             "timeInForce": "GTC",  # Good Till Cancel
-            "positionIdx": 0,  # One-way mode for futures
+            "positionIdx": position_idx,
             **params,
         }
 
@@ -608,6 +629,7 @@ class ByBitDirectClient:
         side: str,
         amount: Decimal,
         params: dict[str, Any] | None = None,
+        position_idx: int = 0,
     ) -> dict[str, Any]:
         """
         Create a market order.
@@ -617,6 +639,7 @@ class ByBitDirectClient:
             side: 'buy' or 'sell'
             amount: Order amount in base currency
             params: Additional parameters
+            position_idx: 0=one-way, 1=hedge-buy/long, 2=hedge-sell/short
 
         Returns:
             Order information
@@ -632,6 +655,7 @@ class ByBitDirectClient:
             "side": "Buy" if side.lower() == "buy" else "Sell",
             "orderType": "Market",
             "qty": qty_str,
+            "positionIdx": position_idx,
             **params,
         }
 
@@ -662,14 +686,15 @@ class ByBitDirectClient:
         amount: float,
         price: float | None = None,
         params: dict | None = None,
+        position_idx: int = 0,
     ) -> dict[str, Any]:
         """Create an order wrapper for compatibility."""
         if order_type.lower() == "limit":
             if price is None:
                 raise ValueError("Price required for limit orders")
-            return await self.create_limit_order(symbol, side, amount, price, params)
+            return await self.create_limit_order(symbol, side, amount, price, params, position_idx)
         elif order_type.lower() == "market":
-            return await self.create_market_order(symbol, side, amount, params)
+            return await self.create_market_order(symbol, side, amount, params, position_idx)
         else:
             raise ValueError(f"Unknown order type: {order_type}")
 
