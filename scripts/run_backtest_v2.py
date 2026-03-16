@@ -970,6 +970,10 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
     Sync worker for ProcessPoolExecutor.
     Runs Phase 1 for a single pair in a subprocess worker.
     Returns (symbol, result_dict | None, error_msg | None, elapsed_sec).
+
+    Progress reporting (runs inside subprocess):
+    - Telegram every 5 minutes
+    - JSON checkpoint saved every 15% of bars processed
     """
     (
         sym,
@@ -979,6 +983,7 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
         initial_balance,
         live_config_str,
         backtest_config_str,
+        output_dir_str,
     ) = args_tuple
     t0 = time.perf_counter()
 
@@ -1024,7 +1029,44 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
                 tf_params=cfg.tf_params,
                 smc_params=cfg.smc_params,
             )
-            result = await phase1_baseline(sym, data, cfg, factories)
+
+            # ── Progress callback: TG every 5 min + checkpoint every 15% ──
+            _last_tg = [t0]
+            _last_ckpt_pct = [0.0]  # last % at which checkpoint was saved
+            _ckpt_interval = 15.0   # save checkpoint every 15%
+            _out_dir = Path(output_dir_str)
+
+            async def _progress_cb(pct: float, bars_done: int, total_bars: int, pv: float) -> None:
+                now = time.perf_counter()
+                elapsed_min = (now - t0) / 60.0
+                eta_min = (elapsed_min / max(pct, 0.1)) * (100.0 - pct) if pct > 0 else 0
+
+                # Telegram: every 5 minutes
+                if now - _last_tg[0] >= 300.0:
+                    _last_tg[0] = now
+                    tg_send(
+                        f"📊 <b>{sym}</b> — {pct:.0f}% завершено\n"
+                        f"Баров: {bars_done:,}/{total_bars:,}\n"
+                        f"Portfolio: <b>${pv:,.0f}</b>\n"
+                        f"Прошло: {elapsed_min:.1f} мин | Осталось: ~{eta_min:.1f} мин"
+                    )
+
+                # Checkpoint: every 15% boundary (15, 30, 45, 60, 75, 90)
+                if pct - _last_ckpt_pct[0] >= _ckpt_interval:
+                    _last_ckpt_pct[0] = (pct // _ckpt_interval) * _ckpt_interval
+                    ckpt = {
+                        "symbol": sym,
+                        "phase": "phase1_in_progress",
+                        "pct_complete": round(pct, 1),
+                        "bars_done": bars_done,
+                        "total_bars": total_bars,
+                        "portfolio_value": round(pv, 2),
+                        "elapsed_min": round(elapsed_min, 2),
+                        "eta_min": round(eta_min, 2),
+                    }
+                    _save_results(_out_dir, f"phase1_{sym}_checkpoint", ckpt)
+
+            result = await phase1_baseline(sym, data, cfg, factories, progress_callback=_progress_cb)
             return result.to_dict()
 
         result_dict = asyncio.run(_inner())
@@ -1232,7 +1274,7 @@ async def run_multi(args: argparse.Namespace) -> None:
         f"⏳ Обрабатываю..."
     )
 
-    # Build args for each worker
+    # Build args for each worker (output_dir passed so worker can save checkpoints)
     worker_args = [
         (
             sym,
@@ -1242,6 +1284,7 @@ async def run_multi(args: argparse.Namespace) -> None:
             args.initial_balance,
             args.live_config,
             args.config,
+            str(output_dir),
         )
         for sym in symbols
     ]
