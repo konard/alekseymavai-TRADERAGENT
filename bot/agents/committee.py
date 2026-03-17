@@ -89,9 +89,7 @@ class InvestmentCommittee:
                 all_arguments.append(argument)
                 await expert._publish_argument(argument, session_id)
             except Exception as e:
-                logger.warning(
-                    "expert_analyze_failed", expert=expert.name, error=str(e)
-                )
+                logger.warning("expert_analyze_failed", expert=expert.name, error=str(e))
 
         # Phase 2: Cross-challenge round
         for expert in self._experts:
@@ -104,16 +102,12 @@ class InvestmentCommittee:
                         all_arguments.append(challenge)
                         await expert._publish_argument(challenge, session_id)
                 except Exception as e:
-                    logger.warning(
-                        "expert_challenge_failed", expert=expert.name, error=str(e)
-                    )
+                    logger.warning("expert_challenge_failed", expert=expert.name, error=str(e))
 
         # Phase 3: Detect contradictions
         contradictions = self._detect_contradictions(all_arguments)
         for contradiction in contradictions:
-            await self._publish_session_event(
-                session_id, "CONTRADICTION_FOUND", contradiction
-            )
+            await self._publish_session_event(session_id, "CONTRADICTION_FOUND", contradiction)
 
         # Phase 4: Voting round
         for expert in self._experts:
@@ -122,9 +116,7 @@ class InvestmentCommittee:
                 all_votes.append(vote)
                 await expert._publish_vote(vote, session_id)
             except Exception as e:
-                logger.warning(
-                    "expert_vote_failed", expert=expert.name, error=str(e)
-                )
+                logger.warning("expert_vote_failed", expert=expert.name, error=str(e))
 
         # Phase 5: Aggregate decision
         decision = self._aggregate_decision(
@@ -135,9 +127,7 @@ class InvestmentCommittee:
         )
 
         # Publish decision
-        await self._publish_session_event(
-            session_id, "DECISION_MADE", decision.to_dict()
-        )
+        await self._publish_session_event(session_id, "DECISION_MADE", decision.to_dict())
 
         # Store in history
         self._history.insert(0, decision)
@@ -172,17 +162,13 @@ class InvestmentCommittee:
                             "expert_b": b.expert_name,
                             "thesis_a": a.thesis,
                             "thesis_b": b.thesis,
-                            "confidence_delta": round(
-                                abs(a.confidence - b.confidence), 3
-                            ),
+                            "confidence_delta": round(abs(a.confidence - b.confidence), 3),
                             "argument_ids": [a.argument_id, b.argument_id],
                         }
                     )
 
         # Also count challenges as contradictions
-        challenges = [
-            a for a in arguments if a.argument_type == ArgumentType.CHALLENGED
-        ]
+        challenges = [a for a in arguments if a.argument_type == ArgumentType.CHALLENGED]
         for c in challenges:
             contradictions.append(
                 {
@@ -262,9 +248,7 @@ class InvestmentCommittee:
             session_id=session_id,
         )
 
-    async def _publish_session_event(
-        self, session_id: str, event_type: str, data: dict
-    ) -> None:
+    async def _publish_session_event(self, session_id: str, event_type: str, data: dict) -> None:
         """Publish session event to EventBus."""
         if self._bus:
             from bot.core.event_bus import DomainEvent
@@ -283,8 +267,7 @@ class InvestmentCommittee:
         last = self._history[0] if self._history else None
         return {
             "experts": [
-                {"name": e.name, "role": e.role, "weight": e.weight}
-                for e in self._experts
+                {"name": e.name, "role": e.role, "weight": e.weight} for e in self._experts
             ],
             "total_sessions": len(self._history),
             "last_decision": last.to_dict() if last else None,

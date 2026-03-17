@@ -301,9 +301,7 @@ class TestCriticalRegimeSync:
 
         assert live_types == backtest_types
         expected = frozenset({"dca", "trend_follower", "smc"})
-        assert (
-            live_types == expected
-        ), f"Expected {sorted(expected)}, got live={sorted(live_types)}"
+        assert live_types == expected, f"Expected {sorted(expected)}, got live={sorted(live_types)}"
 
     def test_bear_trend_dca_smc(self, routing_cfg: RoutingConfig) -> None:
         self._check_sync(

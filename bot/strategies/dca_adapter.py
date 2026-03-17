@@ -355,9 +355,7 @@ class DCAAdapter(BaseStrategy):
                     pos["avg_price"] = new_total / new_qty if new_qty > 0 else pos["avg_price"]
                     pos["safety_orders_filled"] = safety_filled + 1
                     # Update TP: price needs to fall back to avg × (1 - tp_pct)
-                    pos["take_profit"] = pos["avg_price"] * (
-                        Decimal("1") - self._take_profit_pct
-                    )
+                    pos["take_profit"] = pos["avg_price"] * (Decimal("1") - self._take_profit_pct)
 
         return exits
 

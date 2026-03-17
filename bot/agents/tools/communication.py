@@ -21,6 +21,7 @@ from bot.agents.tools.market_data import BaseTool, ToolResult
 # DebateProtocol
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _Question:
     question_id: str
@@ -162,6 +163,7 @@ class DebateProtocol:
 # ConsensusSkill
 # ---------------------------------------------------------------------------
 
+
 class ConsensusSkill(BaseTool):
     """Forms coalitions between experts who agree on a position."""
 
@@ -198,11 +200,13 @@ class ConsensusSkill(BaseTool):
         dissent: list[dict[str, Any]] = []
         for exp in experts:
             if exp["name"] not in coalition_names:
-                dissent.append({
-                    "name": exp["name"],
-                    "position": exp.get("position", "neutral"),
-                    "confidence": exp.get("confidence", 0.0),
-                })
+                dissent.append(
+                    {
+                        "name": exp["name"],
+                        "position": exp.get("position", "neutral"),
+                        "confidence": exp.get("confidence", 0.0),
+                    }
+                )
 
         consensus = best_position if agreement_ratio >= 0.5 else "none"
 
@@ -221,6 +225,7 @@ class ConsensusSkill(BaseTool):
 # ---------------------------------------------------------------------------
 # EscalationSkill
 # ---------------------------------------------------------------------------
+
 
 class EscalationSkill(BaseTool):
     """Triggers escalation when experts strongly disagree."""
@@ -277,6 +282,7 @@ class EscalationSkill(BaseTool):
 # ---------------------------------------------------------------------------
 # MessageBus
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _Message:
@@ -336,14 +342,16 @@ class MessageBus:
             msg = self._messages.get(msg_id)
             if msg is None or msg.read:
                 continue
-            result.append({
-                "message_id": msg.message_id,
-                "from": msg.from_agent,
-                "to": msg.to_agent,
-                "type": msg.message_type,
-                "payload": msg.payload,
-                "created_at": msg.created_at,
-            })
+            result.append(
+                {
+                    "message_id": msg.message_id,
+                    "from": msg.from_agent,
+                    "to": msg.to_agent,
+                    "type": msg.message_type,
+                    "payload": msg.payload,
+                    "created_at": msg.created_at,
+                }
+            )
         return result
 
     def mark_read(self, message_id: str) -> None:

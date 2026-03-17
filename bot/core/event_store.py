@@ -59,9 +59,7 @@ class EventStore:
                 event_type=event.event_type,
             )
 
-    async def load_timeline(
-        self, entity_type: str, entity_id: str
-    ) -> list[DomainEvent]:
+    async def load_timeline(self, entity_type: str, entity_id: str) -> list[DomainEvent]:
         """Load all events for a specific entity from its timeline file."""
         entity_file = self._storage_dir / entity_type / f"{entity_id}.jsonl"
         return self._load_file(entity_file)

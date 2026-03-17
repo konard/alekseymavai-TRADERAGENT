@@ -93,7 +93,7 @@ class StrategyLifecycleManager:
     # ------------------------------------------------------------------
 
     def _rolling_window(self, rec: _StrategyRecord) -> list[tuple[float, float]]:
-        return rec.trades[-self.ROLLING_WINDOW:]
+        return rec.trades[-self.ROLLING_WINDOW :]
 
     @staticmethod
     def _compute_metrics(window: list[tuple[float, float]]) -> tuple[float, float]:

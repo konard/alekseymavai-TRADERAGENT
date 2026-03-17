@@ -174,8 +174,14 @@ class StrategyRouter:
         if target != prev:
             # -------------------------------------------------------
             # Two-phase PRE_SWITCH gate (only after first regime seen)
+            # REDUCE_EXPOSURE bypasses the gate — close positions immediately.
             # -------------------------------------------------------
-            if self._enable_pre_switch_gate and self._current_regime is not None:
+            is_reduce_exposure = regime.recommended_strategy == RecommendedStrategy.REDUCE_EXPOSURE
+            if (
+                self._enable_pre_switch_gate
+                and self._current_regime is not None
+                and not is_reduce_exposure
+            ):
                 ts = current_timestamp or datetime.now(timezone.utc)
                 gate_result = self._apply_two_phase_gate(
                     regime=regime,
@@ -408,9 +414,7 @@ class StrategyRouter:
             extra={
                 "reason": reason,
                 "target": (
-                    self._pre_switch_target_regime.value
-                    if self._pre_switch_target_regime
-                    else None
+                    self._pre_switch_target_regime.value if self._pre_switch_target_regime else None
                 ),
             },
         )

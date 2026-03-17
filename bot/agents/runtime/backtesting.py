@@ -189,9 +189,7 @@ class WalkForwardValidator:
         self._runs: int = 0
         self._total_windows_processed: int = 0
 
-    def generate_windows(
-        self, start_ts: float, end_ts: float
-    ) -> list[WalkForwardWindow]:
+    def generate_windows(self, start_ts: float, end_ts: float) -> list[WalkForwardWindow]:
         total = end_ts - start_ts
         window_size = total / self.n_windows
         windows: list[WalkForwardWindow] = []

@@ -424,7 +424,11 @@ class RiskManager:
             "stop_loss_triggers": self.stop_loss_triggers,
             "max_position_size": float(self.max_position_size),
             "min_order_size": float(self.min_order_size),
-            "max_position_size_per_trade": float(self.max_position_size_per_trade) if self.max_position_size_per_trade is not None else None,
+            "max_position_size_per_trade": (
+                float(self.max_position_size_per_trade)
+                if self.max_position_size_per_trade is not None
+                else None
+            ),
         }
 
     def update_position_value(self, value: Decimal) -> None:

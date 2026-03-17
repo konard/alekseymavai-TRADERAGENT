@@ -26,8 +26,7 @@ class BaseTool(ABC):
     description: str = ""
 
     @abstractmethod
-    async def execute(self, params: dict[str, Any]) -> ToolResult:
-        ...
+    async def execute(self, params: dict[str, Any]) -> ToolResult: ...
 
 
 # ---------------------------------------------------------------------------
@@ -278,43 +277,51 @@ class LiquidationMapTool(BaseTool):
             density = 0.8 if pct == 0.02 else 0.5
             if lvl >= recent_low:
                 density = min(density + 0.15, 1.0)
-            zones.append({
-                "price": round(lvl, 2),
-                "side": "long",
-                "estimated_density": round(density, 2),
-                "reason": f"{pct*100:.0f}% below current price",
-            })
+            zones.append(
+                {
+                    "price": round(lvl, 2),
+                    "side": "long",
+                    "estimated_density": round(density, 2),
+                    "reason": f"{pct*100:.0f}% below current price",
+                }
+            )
 
             # Above price: short liquidations
             lvl = current_price * (1 + pct)
             density = 0.8 if pct == 0.02 else 0.5
             if lvl <= recent_high:
                 density = min(density + 0.15, 1.0)
-            zones.append({
-                "price": round(lvl, 2),
-                "side": "short",
-                "estimated_density": round(density, 2),
-                "reason": f"{pct*100:.0f}% above current price",
-            })
+            zones.append(
+                {
+                    "price": round(lvl, 2),
+                    "side": "short",
+                    "estimated_density": round(density, 2),
+                    "reason": f"{pct*100:.0f}% above current price",
+                }
+            )
 
         # Round number zones
         magnitude = 10 ** (len(str(int(current_price))) - 2)
         round_below = (int(current_price) // magnitude) * magnitude
         round_above = round_below + magnitude
         if round_below > 0 and round_below != current_price:
-            zones.append({
-                "price": float(round_below),
-                "side": "long",
-                "estimated_density": 0.7,
-                "reason": "round number support",
-            })
+            zones.append(
+                {
+                    "price": float(round_below),
+                    "side": "long",
+                    "estimated_density": 0.7,
+                    "reason": "round number support",
+                }
+            )
         if round_above != current_price:
-            zones.append({
-                "price": float(round_above),
-                "side": "short",
-                "estimated_density": 0.7,
-                "reason": "round number resistance",
-            })
+            zones.append(
+                {
+                    "price": float(round_above),
+                    "side": "short",
+                    "estimated_density": 0.7,
+                    "reason": "round number resistance",
+                }
+            )
 
         zones.sort(key=lambda z: z["price"])
         return zones

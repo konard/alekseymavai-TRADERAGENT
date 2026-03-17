@@ -110,7 +110,9 @@ class TelegramDashboard:
     def _register_builtins(self) -> None:
         builtins = [
             TelegramCommand("/status", "Bot mode, uptime, positions, daily PnL", self._cmd_status),
-            TelegramCommand("/portfolio", "Portfolio value, positions, exposure", self._cmd_portfolio),
+            TelegramCommand(
+                "/portfolio", "Portfolio value, positions, exposure", self._cmd_portfolio
+            ),
             TelegramCommand("/committee", "Last committee decision summary", self._cmd_committee),
             TelegramCommand("/heatmap", "ASCII heatmap of portfolio exposure", self._cmd_heatmap),
             TelegramCommand("/scenarios", "Active scenarios list", self._cmd_scenarios),
@@ -322,7 +324,12 @@ class AlertManager:
         }
 
         sections: list[str] = []
-        for prio in (AlertPriority.CRITICAL, AlertPriority.HIGH, AlertPriority.MEDIUM, AlertPriority.LOW):
+        for prio in (
+            AlertPriority.CRITICAL,
+            AlertPriority.HIGH,
+            AlertPriority.MEDIUM,
+            AlertPriority.LOW,
+        ):
             alerts_in_prio = by_priority.get(prio)
             if not alerts_in_prio:
                 continue

@@ -89,7 +89,11 @@ class ContrarianExpert(BaseExpert):
 
         traps = self._last_analysis.get("traps", 0)
         # Challenge if we found traps but expert is very confident
-        if traps >= 2 and argument.confidence > 0.7 and argument.argument_type == ArgumentType.RAISED:
+        if (
+            traps >= 2
+            and argument.confidence > 0.7
+            and argument.argument_type == ArgumentType.RAISED
+        ):
             return Argument(
                 expert_name=self.name,
                 argument_type=ArgumentType.CHALLENGED,

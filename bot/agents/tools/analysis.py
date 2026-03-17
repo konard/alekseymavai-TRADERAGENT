@@ -25,7 +25,11 @@ class BacktestSkill(BaseTool):
 
         # --- deterministic single-path simulation ---
         result, pnl, bars_to_exit = self._simulate_path(
-            strategy, entry_price, stop_loss, take_profit, historical_prices,
+            strategy,
+            entry_price,
+            stop_loss,
+            take_profit,
+            historical_prices,
         )
 
         # --- risk / reward ---
@@ -44,7 +48,11 @@ class BacktestSkill(BaseTool):
             shuffled = list(historical_prices)
             random.shuffle(shuffled)
             r, _, _ = self._simulate_path(
-                strategy, entry_price, stop_loss, take_profit, shuffled,
+                strategy,
+                entry_price,
+                stop_loss,
+                take_profit,
+                shuffled,
             )
             if r == "win":
                 mc_wins += 1
@@ -116,9 +124,7 @@ class CorrelationSkill(BaseTool):
 
         regime = self._classify_regime(abs(corr))
 
-        interpretation = (
-            f"{label_a} and {label_b} show {regime} correlation ({corr:.2f})"
-        )
+        interpretation = f"{label_a} and {label_b} show {regime} correlation ({corr:.2f})"
 
         return ToolResult(
             success=True,
@@ -172,7 +178,7 @@ class VolatilityForecastSkill(BaseTool):
         # EWMA variance
         var = returns[0] ** 2
         for r in returns[1:]:
-            var = lam * var + (1 - lam) * r ** 2
+            var = lam * var + (1 - lam) * r**2
 
         current_vol = math.sqrt(var)
 

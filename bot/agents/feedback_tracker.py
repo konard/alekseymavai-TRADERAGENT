@@ -65,9 +65,7 @@ class ExpertFeedbackTracker:
             "market_data": market_data or {},
         }
 
-    def record_outcome(
-        self, position_id: str, pnl: float
-    ) -> list[tuple[str, bool]]:
+    def record_outcome(self, position_id: str, pnl: float) -> list[tuple[str, bool]]:
         """Score each expert's vote against the actual trade outcome.
 
         Returns list of (expert_name, was_correct) tuples.
@@ -153,12 +151,8 @@ class ExpertFeedbackTracker:
         """Subscribe to DECISION_MADE and POSITION_CLOSED on EventBus."""
         if self._bus is None:
             return
-        self._unsub_decision = self._bus.subscribe(
-            "DECISION_MADE", self._on_decision_made
-        )
-        self._unsub_position = self._bus.subscribe(
-            "POSITION_CLOSED", self._on_position_closed
-        )
+        self._unsub_decision = self._bus.subscribe("DECISION_MADE", self._on_decision_made)
+        self._unsub_position = self._bus.subscribe("POSITION_CLOSED", self._on_position_closed)
 
     async def stop(self) -> None:
         """Unsubscribe from EventBus events."""
@@ -173,7 +167,5 @@ class ExpertFeedbackTracker:
         return {
             "pending_decisions": len(self._pending_decisions),
             "experts_tracked": len(self._scorecards),
-            "scorecards": {
-                name: sc.to_dict() for name, sc in self._scorecards.items()
-            },
+            "scorecards": {name: sc.to_dict() for name, sc in self._scorecards.items()},
         }

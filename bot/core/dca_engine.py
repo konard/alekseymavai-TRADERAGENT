@@ -573,9 +573,7 @@ class DCAEngine:
         For each LONG level we bought at *level.price* and now the price
         is *current_price*, so PnL = (current_price - level.price) × amount.
         """
-        return sum(
-            (current_price - lvl.price) * lvl.amount for lvl in self._long_levels
-        )
+        return sum((current_price - lvl.price) * lvl.amount for lvl in self._long_levels)
 
     def _short_pnl(self, current_price: Decimal) -> Decimal:
         """
@@ -584,9 +582,7 @@ class DCAEngine:
         For each SHORT level we sold at *level.price* and the price is now
         *current_price*, so PnL = (level.price - current_price) × amount.
         """
-        return sum(
-            (lvl.price - current_price) * lvl.amount for lvl in self._short_levels
-        )
+        return sum((lvl.price - current_price) * lvl.amount for lvl in self._short_levels)
 
     def get_combined_pnl(self, current_price: Decimal) -> Decimal:
         """
@@ -610,8 +606,7 @@ class DCAEngine:
             List of ``CloseOrder`` (sell orders) — one per LONG level.
         """
         orders: list[CloseOrder] = [
-            CloseOrder(price=lvl.price, amount=lvl.amount, side="sell")
-            for lvl in self._long_levels
+            CloseOrder(price=lvl.price, amount=lvl.amount, side="sell") for lvl in self._long_levels
         ]
         self._long_levels.clear()
         # Keep backward-compat: also clear the legacy position object.
@@ -631,8 +626,7 @@ class DCAEngine:
             List of ``CloseOrder`` (buy-to-cover orders) — one per SHORT level.
         """
         orders: list[CloseOrder] = [
-            CloseOrder(price=lvl.price, amount=lvl.amount, side="buy")
-            for lvl in self._short_levels
+            CloseOrder(price=lvl.price, amount=lvl.amount, side="buy") for lvl in self._short_levels
         ]
         self._short_levels.clear()
         self._last_short_price = None

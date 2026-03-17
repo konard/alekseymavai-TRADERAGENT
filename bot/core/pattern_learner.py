@@ -31,7 +31,9 @@ class Pattern:
     description: str
 
     # Pattern fingerprint: conditions that define this pattern
-    conditions: dict[str, Any]  # e.g. {"regime": "bull_trend", "adx_above": 25, "near_demand_zone": True}
+    conditions: dict[
+        str, Any
+    ]  # e.g. {"regime": "bull_trend", "adx_above": 25, "near_demand_zone": True}
 
     # Outcome statistics
     occurrences: int = 0
@@ -73,7 +75,7 @@ class Pattern:
             z = 1.96  # 95% confidence
             denominator = 1 + z**2 / n
             center = (p + z**2 / (2 * n)) / denominator
-            margin = z * (p * (1 - p) / n + z**2 / (4 * n**2))**0.5 / denominator
+            margin = z * (p * (1 - p) / n + z**2 / (4 * n**2)) ** 0.5 / denominator
             self.confidence = max(0, center - margin)
         else:
             self.confidence = self.win_rate * (self.occurrences / 10)  # low-sample penalty
@@ -99,6 +101,7 @@ class Pattern:
 @dataclass
 class PatternMatch:
     """Result of matching a signal against the pattern library."""
+
     pattern: Pattern
     match_score: float  # 0.0-1.0 how well the signal matches pattern conditions
     expected_win_rate: float
@@ -199,7 +202,9 @@ class PatternLearner:
             "open_ts": time.time(),
         }
 
-    def observe_close(self, position_id: str, pnl: float, close_context: dict[str, Any] | None = None):
+    def observe_close(
+        self, position_id: str, pnl: float, close_context: dict[str, Any] | None = None
+    ):
         """Record outcome when a position closes."""
         open_ctx = self._open_contexts.pop(position_id, {})
         if not open_ctx:
@@ -251,13 +256,15 @@ class PatternLearner:
         if fingerprint in self._patterns:
             pattern = self._patterns[fingerprint]
             if pattern.occurrences >= self._min_occurrences:
-                matches.append(PatternMatch(
-                    pattern=pattern,
-                    match_score=1.0,
-                    expected_win_rate=pattern.win_rate,
-                    expected_pnl=pattern.avg_pnl,
-                    recommendation=self._get_recommendation(pattern),
-                ))
+                matches.append(
+                    PatternMatch(
+                        pattern=pattern,
+                        match_score=1.0,
+                        expected_win_rate=pattern.win_rate,
+                        expected_pnl=pattern.avg_pnl,
+                        recommendation=self._get_recommendation(pattern),
+                    )
+                )
                 self._patterns_fired += 1
 
         # Partial matches (at least 50% conditions matching)
@@ -281,13 +288,15 @@ class PatternLearner:
                 match_score = 0
 
             if match_score >= 0.5:  # at least 50% conditions match
-                matches.append(PatternMatch(
-                    pattern=pattern,
-                    match_score=match_score,
-                    expected_win_rate=pattern.win_rate,
-                    expected_pnl=pattern.avg_pnl * match_score,  # discount by match quality
-                    recommendation=self._get_recommendation(pattern, match_score),
-                ))
+                matches.append(
+                    PatternMatch(
+                        pattern=pattern,
+                        match_score=match_score,
+                        expected_win_rate=pattern.win_rate,
+                        expected_pnl=pattern.avg_pnl * match_score,  # discount by match quality
+                        recommendation=self._get_recommendation(pattern, match_score),
+                    )
+                )
 
         # Sort by combined score
         matches.sort(key=lambda m: -(m.match_score * m.pattern.confidence))
@@ -349,8 +358,16 @@ class PatternLearner:
 
     def get_stats(self) -> dict[str, Any]:
         """Get learner statistics."""
-        profitable = [p for p in self._patterns.values() if p.avg_pnl > 0 and p.occurrences >= self._min_occurrences]
-        unprofitable = [p for p in self._patterns.values() if p.avg_pnl <= 0 and p.occurrences >= self._min_occurrences]
+        profitable = [
+            p
+            for p in self._patterns.values()
+            if p.avg_pnl > 0 and p.occurrences >= self._min_occurrences
+        ]
+        unprofitable = [
+            p
+            for p in self._patterns.values()
+            if p.avg_pnl <= 0 and p.occurrences >= self._min_occurrences
+        ]
 
         return {
             "total_patterns": len(self._patterns),
@@ -367,6 +384,7 @@ class PatternLearner:
         """Publish EXPERT_PATTERN_FIRED event."""
         if self._bus:
             from bot.core.event_bus import DomainEvent
+
             evt = DomainEvent(
                 entity_type="expert",
                 entity_id=match.pattern.pattern_id,

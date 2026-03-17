@@ -38,7 +38,9 @@ class EntryReason(str, Enum):
 
     # Trend scenarios
     TREND_PULLBACK_TO_EMA = "trend_pullback_to_ema"
-    TREND_RETURN_FROM_ABOVE = "trend_return_from_above"  # A+: price returns into EMA corridor from above
+    TREND_RETURN_FROM_ABOVE = (
+        "trend_return_from_above"  # A+: price returns into EMA corridor from above
+    )
     TREND_BOUNCE_FROM_SUPPORT = "trend_bounce_from_support"
     TREND_BOUNCE_FROM_RESISTANCE = "trend_bounce_from_resistance"
 

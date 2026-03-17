@@ -145,7 +145,7 @@ class RegimeTransitionDetector:
         self._observations.append((regime, ts if ts is not None else time.time()))
         # Trim to lookback
         if len(self._observations) > self._lookback:
-            self._observations = self._observations[-self._lookback:]
+            self._observations = self._observations[-self._lookback :]
 
     # ------------------------------------------------------------------
     def get_transition_probability(self) -> dict:

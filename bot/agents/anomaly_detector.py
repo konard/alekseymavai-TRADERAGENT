@@ -143,9 +143,7 @@ class AnomalyDetector:
 
             if abs(z_score) > self._z_threshold:
                 severity = min(1.0, abs(z_score) / (self._z_threshold * 2))
-                anomaly_type = _METRIC_TO_ANOMALY.get(
-                    metric_name, AnomalyType.PRICE_SPIKE
-                )
+                anomaly_type = _METRIC_TO_ANOMALY.get(metric_name, AnomalyType.PRICE_SPIKE)
                 anomaly = Anomaly(
                     anomaly_type=anomaly_type,
                     severity=severity,

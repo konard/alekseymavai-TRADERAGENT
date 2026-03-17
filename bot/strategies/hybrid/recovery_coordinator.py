@@ -286,9 +286,7 @@ class RecoveryCoordinator:
         if state.bars_elapsed >= self._config.timeout_bars:
             if self._config.timeout_action == "close_all":
                 action.should_close_all = True
-                action.close_reason = (
-                    f"recovery_timeout: {state.bars_elapsed} bars elapsed"
-                )
+                action.close_reason = f"recovery_timeout: {state.bars_elapsed} bars elapsed"
                 action.new_grid_range = self._compute_new_grid_range(current_price)
                 self._finalize_recovery(success=False)
                 return action
@@ -409,9 +407,7 @@ class RecoveryCoordinator:
     # Internal Helpers
     # =========================================================================
 
-    def _build_dca_levels(
-        self, current_price: Decimal, support: Decimal
-    ) -> list[Decimal]:
+    def _build_dca_levels(self, current_price: Decimal, support: Decimal) -> list[Decimal]:
         """Build DCA cascade price levels from current_price down to support (LONG recovery)."""
         levels: list[Decimal] = []
         step = self._config.dca_step_pct
@@ -428,9 +424,7 @@ class RecoveryCoordinator:
 
         return levels
 
-    def _build_dca_levels_short(
-        self, current_price: Decimal, resistance: Decimal
-    ) -> list[Decimal]:
+    def _build_dca_levels_short(self, current_price: Decimal, resistance: Decimal) -> list[Decimal]:
         """Build DCA cascade price levels from current_price UP to resistance (SHORT recovery)."""
         levels: list[Decimal] = []
         step = self._config.dca_step_pct
@@ -483,7 +477,7 @@ class RecoveryCoordinator:
 
             if _triggered:
                 order_num = state.next_dca_index
-                multiplier = self._config.dca_volume_multiplier ** order_num
+                multiplier = self._config.dca_volume_multiplier**order_num
                 size = state.base_order_size * multiplier
 
                 from datetime import datetime, timezone
@@ -512,9 +506,7 @@ class RecoveryCoordinator:
 
         return signals
 
-    def _compute_new_grid_range(
-        self, current_price: Decimal
-    ) -> tuple[Decimal, Decimal]:
+    def _compute_new_grid_range(self, current_price: Decimal) -> tuple[Decimal, Decimal]:
         """Compute new grid range centered on current price after recovery."""
         half_range = current_price * Decimal("0.05")  # 5% range
         return (current_price - half_range, current_price + half_range)

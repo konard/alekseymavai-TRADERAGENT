@@ -101,9 +101,7 @@ class CommitteeBacktestAdapter:
         should_exec = decision.verdict == Verdict.APPROVE
         return should_exec, decision.to_dict()
 
-    def record_outcome(
-        self, position_id: str, pnl: float, regime: str = ""
-    ) -> None:
+    def record_outcome(self, position_id: str, pnl: float, regime: str = "") -> None:
         """Score all expert votes for this closed position.
 
         - Calls feedback_tracker.record_outcome()
@@ -174,7 +172,5 @@ class CommitteeBacktestAdapter:
             "approved": self._approved,
             "rejected": self._rejected,
             "deferred": self._deferred,
-            "filter_rate": (
-                (self._rejected + self._deferred) / total if total > 0 else 0.0
-            ),
+            "filter_rate": ((self._rejected + self._deferred) / total if total > 0 else 0.0),
         }

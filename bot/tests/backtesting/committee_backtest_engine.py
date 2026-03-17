@@ -47,12 +47,9 @@ class CommitteeBacktestResult:
             "committee_rejected": self.committee_rejected,
             "committee_deferred": self.committee_deferred,
             "filter_rate": round(self.filter_rate, 4),
-            "per_expert_accuracy": {
-                k: round(v, 4) for k, v in self.per_expert_accuracy.items()
-            },
+            "per_expert_accuracy": {k: round(v, 4) for k, v in self.per_expert_accuracy.items()},
             "weight_evolution": {
-                k: [round(w, 4) for w in v]
-                for k, v in self.weight_evolution.items()
+                k: [round(w, 4) for w in v] for k, v in self.weight_evolution.items()
             },
         }
 
@@ -124,9 +121,7 @@ class CommitteeBacktestEngine:
         self._adapter = adapter
 
         # Track weight evolution
-        weight_snapshots: dict[str, list[float]] = {
-            e.name: [e.weight] for e in experts
-        }
+        weight_snapshots: dict[str, list[float]] = {e.name: [e.weight] for e in experts}
 
         baseline_pnl = 0.0
         committee_pnl = 0.0
@@ -150,9 +145,7 @@ class CommitteeBacktestEngine:
             )
 
             # Generate position_id for outcome tracking
-            position_id = signal.get(
-                "position_id", f"bt_pos_{i}"
-            )
+            position_id = signal.get("position_id", f"bt_pos_{i}")
 
             if should_exec:
                 committee_pnl += pnl
