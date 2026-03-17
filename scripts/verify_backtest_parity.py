@@ -336,12 +336,12 @@ async def run_verification(
         config.enable_strategy_router,
     )
 
-    # --- P0.4: SMC signal frequency = every M5 bar ---
+    # --- P0.4: SMC signal frequency = every 12 M5 bars (1 hour) ---
     add_row(
-        "P0.4 SMC signal freq (every M5)",
-        "smc_generate_signal_every_n=1",
+        "P0.4 SMC signal freq (hourly)",
+        "smc_generate_signal_every_n=12",
         str(config.smc_generate_signal_every_n),
-        config.smc_generate_signal_every_n == 1,
+        config.smc_generate_signal_every_n == 12,
     )
 
     # --- P0.5: DCA warmup catch-up ---

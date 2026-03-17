@@ -101,10 +101,12 @@ class OrchestratorBacktestConfig:
     #   SMC:         called every 60 M5 bars = 300 sec (mirrors live bot 5-min throttle)
     default_analyze_every_n: int = 1  # Grid, DCA, TrendFollower — every M5 bar
     smc_analyze_every_n: int = 60  # SMC — every 300 sec (60 × 5 min bars)
-    # SMC generate_signal frequency: matches live bot (every M5 bar).
-    # Note: if performance is a concern, set to 12 (hourly) via OrchestratorBacktestConfig
-    # override — but default must mirror live to ensure signal count parity.
-    smc_generate_signal_every_n: int = 1  # SMC signal check every M5 bar (live parity)
+    # SMC generate_signal frequency: every 12 M5 bars (= 1 hour).
+    # Rationale: analyze_market runs every 60 bars — calling generate_signal every bar
+    # during that window repeats identical signals (same OBs/FVGs, same state) and
+    # causes 60× over-trading. 12 bars (hourly) matches SMC's primary H1 timeframe
+    # and gives at most 5 signal checks per analysis window, matching live behaviour.
+    smc_generate_signal_every_n: int = 12  # SMC signal check every 12 M5 bars (1 hour)
 
     # Recovery (DCA cascade when Grid hits lower boundary)
     enable_recovery: bool = False  # opt-in; requires grid enabled

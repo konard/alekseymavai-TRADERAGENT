@@ -863,7 +863,7 @@ def _cfg_from_backtest_yaml(
         initial_balance=_ib,
         warmup_bars=int(bt.get("warmup_bars", 500)),
         default_analyze_every_n=int(orch.get("analyze_every_n", 1)),
-        smc_generate_signal_every_n=int(orch.get("smc_generate_signal_every_n", 1)),
+        smc_generate_signal_every_n=int(orch.get("smc_generate_signal_every_n", 12)),
         router_cooldown_bars=int(orch.get("router_cooldown_bars", 120)),
         regime_check_every_n=int(orch.get("regime_check_every_n", 12)),
         enable_strategy_router=bool(orch.get("enable_strategy_router", True)),
@@ -1030,10 +1030,10 @@ def _phase1_worker(args_tuple: tuple) -> tuple[str, dict | None, str | None, flo
                 smc_params=cfg.smc_params,
             )
 
-            # ── Progress callback: TG every 5 min + checkpoint every 15% ──
+            # ── Progress callback: TG every 5 min + checkpoint every 10% ──
             _last_tg = [t0]
             _last_ckpt_pct = [0.0]  # last % at which checkpoint was saved
-            _ckpt_interval = 15.0   # save checkpoint every 15%
+            _ckpt_interval = 10.0   # save checkpoint every 10%
             _out_dir = Path(output_dir_str)
 
             async def _progress_cb(pct: float, bars_done: int, total_bars: int, pv: float) -> None:
