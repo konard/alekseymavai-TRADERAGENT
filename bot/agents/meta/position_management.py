@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # StopAction
@@ -59,7 +57,7 @@ class DynamicStopManager:
         self.partial_exit_pct = partial_exit_pct
         self.trail_activation_r = trail_activation_r
         self.trail_distance_pct = trail_distance_pct
-        self._positions: Dict[str, _PositionState] = {}
+        self._positions: dict[str, _PositionState] = {}
 
     # -- stateless evaluation ------------------------------------------------
 
@@ -257,7 +255,7 @@ class RiskParityAllocator:
         self.target_total_risk = target_total_risk
         self.max_single_allocation = max_single_allocation
         self.min_allocation = min_allocation
-        self._vols: Dict[str, float] = {}
+        self._vols: dict[str, float] = {}
 
     def set_strategy_vol(self, strategy: str, volatility: float) -> None:
         if volatility <= 0:
@@ -298,7 +296,7 @@ class RiskParityAllocator:
                 break
 
         # Build result
-        result: Dict[str, StrategyRiskContribution] = {}
+        result: dict[str, StrategyRiskContribution] = {}
         for s, target_w in alloc.items():
             vol = self._vols[s]
             var_contrib = target_w * vol * self.target_total_risk
@@ -317,7 +315,7 @@ class RiskParityAllocator:
         current_allocations: dict[str, float],
     ) -> list[dict]:
         targets = self.calculate_allocations()
-        actions: List[dict] = []
+        actions: list[dict] = []
 
         all_strategies = set(targets.keys()) | set(current_allocations.keys())
         for s in sorted(all_strategies):

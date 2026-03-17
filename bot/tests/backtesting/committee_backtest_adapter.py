@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bot.agents.committee import InvestmentCommittee
@@ -29,10 +29,10 @@ class CommitteeBacktestAdapter:
 
     def __init__(
         self,
-        committee: "InvestmentCommittee",
-        feedback_tracker: "ExpertFeedbackTracker",
-        regime_store: "RegimeProfileStore | None" = None,
-        calibrator: "WeightCalibrator | None" = None,
+        committee: InvestmentCommittee,
+        feedback_tracker: ExpertFeedbackTracker,
+        regime_store: RegimeProfileStore | None = None,
+        calibrator: WeightCalibrator | None = None,
         calibrate_every_n: int = 20,
     ) -> None:
         self._committee = committee

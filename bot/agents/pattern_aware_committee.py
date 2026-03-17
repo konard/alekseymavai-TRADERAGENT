@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from bot.agents.committee import InvestmentCommittee
 from bot.agents.base_expert import BaseExpert, CommitteeDecision
+from bot.agents.committee import InvestmentCommittee
 from bot.agents.pattern_evidence_provider import PatternEvidenceProvider
 from bot.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from bot.core.pattern_learner import PatternLearner
     from bot.core.event_bus import EventBus
+    from bot.core.pattern_learner import PatternLearner
 
 logger = get_logger(__name__)
 

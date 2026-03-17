@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Awaitable
 
 
 class PipelineStage(Enum):

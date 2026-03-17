@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from bot.agents.tools.market_data import BaseTool, ToolResult
-
 
 # ---------------------------------------------------------------------------
 # DebateProtocol

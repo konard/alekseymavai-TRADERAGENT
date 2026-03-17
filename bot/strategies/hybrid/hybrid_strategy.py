@@ -25,10 +25,15 @@ Usage:
         # Open DCA deal
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from bot.strategies.base import SignalDirection
 
 from bot.strategies.dca.dca_engine import DCAEngine, EngineAction
 from bot.strategies.dca.dca_signal_generator import MarketState
@@ -38,16 +43,15 @@ from bot.strategies.grid.grid_risk_manager import (
     RiskCheckResult,
 )
 from bot.strategies.hybrid.hybrid_config import HybridConfig, HybridMode
-from bot.strategies.hybrid.recovery_coordinator import (
-    RecoveryAction,
-    RecoveryCoordinator,
-    RecoveryState,
-)
 from bot.strategies.hybrid.market_regime_detector import (
     MarketIndicators,
     MarketRegimeDetectorV2,
     RegimeResult,
     RegimeType,
+)
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryCoordinator,
+    RecoveryState,
 )
 from bot.utils.logger import get_logger
 
@@ -333,7 +337,7 @@ class HybridStrategy:
         current_bar: int,
         smc_support: Decimal | None = None,
         base_order_size: Decimal = Decimal("150"),
-        direction: "SignalDirection | None" = None,
+        direction: SignalDirection | None = None,
     ) -> None:
         """Transition to RECOVERY_ACTIVE mode."""
         if self._recovery_coordinator is None:

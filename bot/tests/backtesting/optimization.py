@@ -24,6 +24,14 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from bot.strategies.base import BaseStrategy
+from bot.tests.backtesting.backtesting_engine import BacktestResult
+from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
+from bot.tests.backtesting.multi_tf_engine import (
+    MultiTFBacktestConfig,
+    MultiTimeframeBacktestEngine,
+)
+
 # ---------------------------------------------------------------------------
 # Module-level state for ProcessPoolExecutor workers (set via initializer).
 # Must live at module level so worker processes can pickle/access them.
@@ -171,13 +179,13 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     import asyncio as _asyncio
 
     from bot.tests.backtesting.optimization import (
-        OptimizationTrial,
-        ParameterOptimizer,
         _ORCH_WORKER_CONFIG,
         _ORCH_WORKER_DATA,
         _ORCH_WORKER_OBJECTIVE,
         _ORCH_WORKER_SYMBOL,
         _ORCH_WORKER_TIMEOUT,
+        OptimizationTrial,
+        ParameterOptimizer,
         _build_worker_factories,
     )
     from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
@@ -195,14 +203,6 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
     return OptimizationTrial(params=params, result=result, objective_value=obj_val)
 
-
-from bot.strategies.base import BaseStrategy
-from bot.tests.backtesting.backtesting_engine import BacktestResult
-from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
-from bot.tests.backtesting.multi_tf_engine import (
-    MultiTFBacktestConfig,
-    MultiTimeframeBacktestEngine,
-)
 
 if TYPE_CHECKING:
     from bot.core.trading_core.core import TradingCore

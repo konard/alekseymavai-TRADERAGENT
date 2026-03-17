@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from bot.core.event_bus import EventBus, DomainEvent
+    from bot.core.event_bus import DomainEvent, EventBus
 
-from bot.agents.base_expert import Verdict, CommitteeDecision
+from bot.agents.base_expert import CommitteeDecision, Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class ExpertScorecard:
 class ExpertFeedbackTracker:
     """Tracks expert vote accuracy against actual trade outcomes."""
 
-    def __init__(self, event_bus: "EventBus | None" = None) -> None:
+    def __init__(self, event_bus: EventBus | None = None) -> None:
         self._bus = event_bus
         self._pending_decisions: dict[str, dict[str, Any]] = {}
         self._scorecards: dict[str, ExpertScorecard] = {}
@@ -130,7 +130,7 @@ class ExpertFeedbackTracker:
     def get_accuracy(self, expert_name: str) -> float:
         return self.get_scorecard(expert_name).accuracy
 
-    async def _on_decision_made(self, event: "DomainEvent") -> None:
+    async def _on_decision_made(self, event: DomainEvent) -> None:
         """Handle DECISION_MADE event from EventBus."""
         data = event.data
         decision = data.get("decision")
@@ -140,7 +140,7 @@ class ExpertFeedbackTracker:
         if decision is not None:
             self.record_decision(decision, position_id, regime, market_data)
 
-    async def _on_position_closed(self, event: "DomainEvent") -> None:
+    async def _on_position_closed(self, event: DomainEvent) -> None:
         """Handle POSITION_CLOSED event from EventBus."""
         data = event.data
         position_id = data.get("position_id", event.entity_id)

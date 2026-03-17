@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 

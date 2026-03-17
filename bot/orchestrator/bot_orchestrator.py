@@ -48,12 +48,12 @@ from bot.strategies.dca.dca_signal_generator import MarketState
 from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
 from bot.strategies.grid.grid_risk_manager import GridRiskManager
 from bot.strategies.hybrid.hybrid_config import HybridConfig
+from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.hybrid.recovery_config import RecoveryConfig
 from bot.strategies.hybrid.recovery_coordinator import (
     RecoveryCoordinator,
     UnderwaterPosition,
 )
-from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc_adapter import SMCStrategyAdapter
 from bot.strategies.trend_follower import TrendFollowerConfig as TrendFollowerDataclassConfig

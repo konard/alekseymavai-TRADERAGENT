@@ -1,6 +1,6 @@
 """Risk Expert — analyzes drawdown, exposure, daily loss limits."""
 
-from bot.agents.base_expert import BaseExpert, Argument, ArgumentType, Vote, Verdict
+from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
 class RiskExpert(BaseExpert):

@@ -8,11 +8,10 @@ Inspired by VentureOS fund's EXPERT_PATTERN_LEARNED / EXPERT_PATTERN_FIRED event
 
 from __future__ import annotations
 
-import time
 import hashlib
-from collections import defaultdict
+import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 

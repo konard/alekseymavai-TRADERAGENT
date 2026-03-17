@@ -1,8 +1,9 @@
 """Event Replay Debugger — replays historical signals through committee for counterfactual analysis."""
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from bot.agents.base_expert import Verdict
 from bot.agents.committee import InvestmentCommittee
@@ -215,24 +216,24 @@ class EventReplayDebugger:
             weight_configs = [current_weights]
 
             # Equal weights
-            weight_configs.append({n: 1.0 for n in expert_names})
+            weight_configs.append(dict.fromkeys(expert_names, 1.0))
 
             # Risk-heavy
-            risk_heavy = {n: 0.5 for n in expert_names}
+            risk_heavy = dict.fromkeys(expert_names, 0.5)
             for n in expert_names:
                 if "risk" in n.lower():
                     risk_heavy[n] = 2.5
             weight_configs.append(risk_heavy)
 
             # SMC-heavy
-            smc_heavy = {n: 0.7 for n in expert_names}
+            smc_heavy = dict.fromkeys(expert_names, 0.7)
             for n in expert_names:
                 if "smc" in n.lower() or "structuralist" in n.lower():
                     smc_heavy[n] = 2.0
             weight_configs.append(smc_heavy)
 
             # Contrarian-heavy
-            contrarian_heavy = {n: 0.7 for n in expert_names}
+            contrarian_heavy = dict.fromkeys(expert_names, 0.7)
             for n in expert_names:
                 if "contrarian" in n.lower():
                     contrarian_heavy[n] = 2.0
@@ -352,10 +353,10 @@ class EventReplayDebugger:
 
     def _create_default_committee(self) -> InvestmentCommittee:
         """Create default committee with 4 experts."""
+        from bot.agents.contrarian_expert import ContrarianExpert
+        from bot.agents.risk_expert import RiskExpert
         from bot.agents.smc_expert import SMCExpert
         from bot.agents.trend_expert import TrendExpert
-        from bot.agents.risk_expert import RiskExpert
-        from bot.agents.contrarian_expert import ContrarianExpert
 
         committee = InvestmentCommittee()
         committee.add_expert(SMCExpert())

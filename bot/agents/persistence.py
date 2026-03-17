@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bot.agents.committee import InvestmentCommittee
@@ -292,7 +292,7 @@ class AgentStatePersistence:
         if not profiles_data:
             return False
 
-        from bot.agents.regime_profile import RegimeAccuracy, ExpertRegimeProfile
+        from bot.agents.regime_profile import ExpertRegimeProfile, RegimeAccuracy
 
         for expert_name, regimes in profiles_data.items():
             profile = ExpertRegimeProfile(expert_name)
@@ -363,7 +363,7 @@ class AgentStatePersistence:
         if not path.exists():
             return None
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(

@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from bot.core.event_bus import DomainEvent, EventBus, EventPriority
+from bot.core.event_bus import EventBus
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -249,7 +249,7 @@ class CorrelationGuard:
 
         total_effective = 0.0
 
-        for direction, positions in groups.items():
+        for _direction, positions in groups.items():
             n = len(positions)
             if n == 0:
                 continue

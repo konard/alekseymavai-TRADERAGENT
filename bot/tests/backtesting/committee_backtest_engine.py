@@ -6,15 +6,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from bot.agents.base_expert import BaseExpert, Verdict
+from bot.agents.base_expert import BaseExpert
 from bot.agents.committee import InvestmentCommittee
+from bot.agents.contrarian_expert import ContrarianExpert
 from bot.agents.feedback_tracker import ExpertFeedbackTracker
 from bot.agents.regime_profile import RegimeProfileStore
-from bot.agents.weight_calibrator import WeightCalibrator
+from bot.agents.risk_expert import RiskExpert
 from bot.agents.smc_expert import SMCExpert
 from bot.agents.trend_expert import TrendExpert
-from bot.agents.risk_expert import RiskExpert
-from bot.agents.contrarian_expert import ContrarianExpert
+from bot.agents.weight_calibrator import WeightCalibrator
 from bot.tests.backtesting.committee_backtest_adapter import CommitteeBacktestAdapter
 
 logger = logging.getLogger(__name__)

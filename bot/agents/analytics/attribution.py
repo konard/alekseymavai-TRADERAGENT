@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -73,7 +73,7 @@ class PnLDecomposer:
 
         portfolio_avg_pnl = total_pnl / len(trades)
         selection_pnl = 0.0
-        for symbol, pnls in symbol_pnls.items():
+        for _symbol, pnls in symbol_pnls.items():
             symbol_avg = sum(pnls) / len(pnls)
             selection_pnl += (symbol_avg - portfolio_avg_pnl) * len(pnls)
 
@@ -138,8 +138,8 @@ class PnLDecomposer:
             }
         winning = sum(1 for t in self._trades if t.pnl > 0)
         losing = sum(1 for t in self._trades if t.pnl < 0)
-        strategies = sorted(set(t.strategy for t in self._trades))
-        symbols = sorted(set(t.symbol for t in self._trades))
+        strategies = sorted({t.strategy for t in self._trades})
+        symbols = sorted({t.symbol for t in self._trades})
         return {
             "total_trades": total,
             "strategies": strategies,

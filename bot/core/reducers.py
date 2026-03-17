@@ -6,7 +6,8 @@ Reducers are pure functions with no side effects — they derive current state
 by replaying the event timeline in chronological order.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from bot.core.event_bus import DomainEvent
 

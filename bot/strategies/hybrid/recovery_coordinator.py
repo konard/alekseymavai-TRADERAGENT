@@ -23,9 +23,8 @@ from bot.strategies.hybrid.recovery_config import RecoveryConfig
 from bot.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from datetime import datetime
 
-    from bot.core.smc.models import OrderBlock, SMCContext, SwingPoint
+    from bot.core.smc.models import SMCContext
 
 logger = get_logger(__name__)
 
@@ -74,7 +73,7 @@ class RecoveryState:
             "entered_bar": self.entered_bar,
             "grid_positions": len(self.grid_positions),
             "smc_support": float(self.smc_support),
-            "dca_levels": [float(l) for l in self.dca_levels],
+            "dca_levels": [float(level) for level in self.dca_levels],
             "dca_fills": len(self.dca_fills),
             "blended_avg_entry": float(self.blended_avg_entry),
             "blended_total_size": float(self.blended_total_size),

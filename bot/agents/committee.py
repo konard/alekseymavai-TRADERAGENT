@@ -4,12 +4,12 @@ import uuid
 from typing import Any
 
 from bot.agents.base_expert import (
-    BaseExpert,
     Argument,
     ArgumentType,
-    Vote,
-    Verdict,
+    BaseExpert,
     CommitteeDecision,
+    Verdict,
+    Vote,
 )
 from bot.utils.logger import get_logger
 
@@ -204,7 +204,7 @@ class InvestmentCommittee:
         expert_weights = {e.name: e.weight for e in self._experts}
 
         # Calculate weighted scores per verdict
-        verdict_scores: dict[Verdict, float] = {v: 0.0 for v in Verdict}
+        verdict_scores: dict[Verdict, float] = dict.fromkeys(Verdict, 0.0)
         total_weight = 0.0
 
         for vote in votes:
