@@ -1,6 +1,6 @@
 """Contrarian Expert — detects traps, divergences, and over-crowded setups."""
 
-from bot.agents.base_expert import BaseExpert, Argument, ArgumentType, Vote, Verdict
+from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
 class ContrarianExpert(BaseExpert):

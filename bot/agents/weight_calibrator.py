@@ -52,9 +52,9 @@ class WeightCalibrator:
 
     def calibrate(
         self,
-        committee: "InvestmentCommittee",
-        tracker: "ExpertFeedbackTracker",
-        regime_store: "RegimeProfileStore | None" = None,
+        committee: InvestmentCommittee,
+        tracker: ExpertFeedbackTracker,
+        regime_store: RegimeProfileStore | None = None,
         current_regime: str | None = None,
     ) -> dict[str, float]:
         """Adjust expert weights based on accuracy.
@@ -111,7 +111,7 @@ class WeightCalibrator:
         """Return full weight history: expert_name -> [(timestamp, weight), ...]."""
         return dict(self._weight_history)
 
-    def get_current_weights(self, committee: "InvestmentCommittee") -> dict[str, float]:
+    def get_current_weights(self, committee: InvestmentCommittee) -> dict[str, float]:
         """Snapshot of current expert weights from the committee."""
         return {e.name: e.weight for e in committee.experts}
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-
 _DIRECTION_VALUES = {"bullish": 1.0, "bearish": -1.0, "neutral": 0.0}
 _ROLLING_WINDOW = 20
 

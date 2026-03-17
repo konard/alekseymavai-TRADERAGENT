@@ -5,8 +5,8 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
 
 class BreakerState(enum.Enum):

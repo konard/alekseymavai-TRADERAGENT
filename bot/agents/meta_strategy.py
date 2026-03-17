@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from bot.core.predictive_model import MarkovTransitionModel
-from bot.core.pattern_learner import PatternLearner
 from bot.agents.regime_profile import RegimeProfileStore
+from bot.core.pattern_learner import PatternLearner
+from bot.core.predictive_model import MarkovTransitionModel
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)

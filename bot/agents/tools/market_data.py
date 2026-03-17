@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 
 @dataclass

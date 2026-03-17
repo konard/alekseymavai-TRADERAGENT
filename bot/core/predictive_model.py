@@ -14,7 +14,7 @@ import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 
@@ -182,7 +182,7 @@ class MarkovTransitionModel:
         else:
             # No data — uniform distribution
             n = len(self._states) if self._states else 1
-            probs = {s: 1.0 / n for s in self._states}
+            probs = dict.fromkeys(self._states, 1.0 / n)
             basis = "uniform (no data)"
 
         # Sort by probability

@@ -13,8 +13,9 @@ Examples:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 
@@ -97,7 +98,7 @@ class CrossEntityAutomation:
 
     async def start(self):
         """Subscribe to all trigger events."""
-        triggers = set(r.trigger_event for r in self._rules)
+        triggers = {r.trigger_event for r in self._rules}
         for trigger in triggers:
             unsub = self._bus.subscribe(trigger, self._on_event)
             self._unsubscribers.append(unsub)

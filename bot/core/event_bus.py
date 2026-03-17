@@ -10,10 +10,11 @@ import json
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import IntEnum
-from typing import Any, Callable
+from typing import Any
 
 from bot.utils.logger import get_logger
 

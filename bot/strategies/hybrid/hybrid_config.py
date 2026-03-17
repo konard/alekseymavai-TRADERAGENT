@@ -22,7 +22,7 @@ class HybridMode(str, Enum):
     RECOVERY_ACTIVE = "recovery_active"  # Grid paused, DCA recovery cascade
 
 
-from bot.strategies.hybrid.recovery_config import RecoveryConfig
+from bot.strategies.hybrid.recovery_config import RecoveryConfig  # noqa: E402
 
 
 @dataclass

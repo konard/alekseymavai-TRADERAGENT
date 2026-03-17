@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from bot.agents.base_expert import Verdict
 from bot.agents.committee import InvestmentCommittee
 from bot.agents.feedback_tracker import ExpertFeedbackTracker
 from bot.agents.regime_profile import RegimeProfileStore
 from bot.agents.weight_calibrator import WeightCalibrator
-
 
 # ---------------------------------------------------------------------------
 # Default outcome profiles per (regime, direction)
@@ -430,10 +430,10 @@ class SelfPlaySimulator:
         WeightCalibrator,
     ]:
         """Create committee with 4 experts + tracker + store + calibrator."""
+        from bot.agents.contrarian_expert import ContrarianExpert
+        from bot.agents.risk_expert import RiskExpert
         from bot.agents.smc_expert import SMCExpert
         from bot.agents.trend_expert import TrendExpert
-        from bot.agents.risk_expert import RiskExpert
-        from bot.agents.contrarian_expert import ContrarianExpert
 
         committee = InvestmentCommittee()
         committee.add_expert(SMCExpert())

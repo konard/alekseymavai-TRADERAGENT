@@ -1,6 +1,6 @@
 """Trend Expert — analyzes EMA, ADX, momentum for trend confirmation."""
 
-from bot.agents.base_expert import BaseExpert, Argument, ArgumentType, Vote, Verdict
+from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
 class TrendExpert(BaseExpert):

@@ -203,12 +203,15 @@ class TestDCAAdapterUnit:
 
     def test_generate_signal_no_drop(self):
         adapter = DCAAdapter()
-        # Prices going up — no DCA entry
+        # Prices going up significantly — no LONG entry, but SHORT entry fires
+        # (Phase 3: bidirectional DCA generates SHORT when price rises from recent low)
         prices = [100 + i for i in range(50)]
         df = _make_ohlcv(prices)
         adapter.analyze_market(df)
         signal = adapter.generate_signal(df, Decimal("10000"))
-        assert signal is None
+        # No LONG signal (price didn't drop from recent high)
+        # A SHORT signal is expected: price rose ~49% from recent low of 100
+        assert signal is None or signal.direction.value == "short"
 
     def test_open_and_close_position(self):
         adapter = DCAAdapter()

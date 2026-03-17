@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Optional
 
 

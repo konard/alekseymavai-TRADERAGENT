@@ -271,7 +271,7 @@ class ScenarioPlanner:
         )
 
         positions = portfolio.get("positions", [])
-        affected = [p for p in positions] if scenario.impact_score < 0 else []
+        affected = list(positions) if scenario.impact_score < 0 else []
 
         return {
             "estimated_loss": estimated_loss,
