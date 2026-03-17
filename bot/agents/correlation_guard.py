@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from bot.core.event_bus import DomainEvent, EventBus, EventPriority
+from bot.core.event_bus import EventBus
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,7 +74,7 @@ class CorrelationGuard:
         self._returns[symbol].append(return_pct)
         # Keep only the most recent window_size entries
         if len(self._returns[symbol]) > self._window_size * 2:
-            self._returns[symbol] = self._returns[symbol][-self._window_size:]
+            self._returns[symbol] = self._returns[symbol][-self._window_size :]
 
     def observe_returns_batch(self, returns: dict[str, float]) -> None:
         """Record returns for multiple symbols at once."""
@@ -215,7 +215,7 @@ class CorrelationGuard:
                 # Store alert
                 self._alerts.append(alert)
                 if len(self._alerts) > self._max_alerts:
-                    self._alerts = self._alerts[-self._max_alerts:]
+                    self._alerts = self._alerts[-self._max_alerts :]
 
                 logger.info(
                     "correlation_alert",
@@ -249,7 +249,7 @@ class CorrelationGuard:
 
         total_effective = 0.0
 
-        for direction, positions in groups.items():
+        for _direction, positions in groups.items():
             n = len(positions)
             if n == 0:
                 continue

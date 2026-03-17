@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from bot.agents.committee import InvestmentCommittee
 from bot.agents.base_expert import BaseExpert, CommitteeDecision
+from bot.agents.committee import InvestmentCommittee
 from bot.agents.pattern_evidence_provider import PatternEvidenceProvider
 from bot.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from bot.core.pattern_learner import PatternLearner
     from bot.core.event_bus import EventBus
+    from bot.core.pattern_learner import PatternLearner
 
 logger = get_logger(__name__)
 
@@ -34,7 +34,9 @@ class PatternAwareCommittee(InvestmentCommittee):
         self._pattern_learner = pattern_learner
         self._provider = PatternEvidenceProvider(pattern_learner) if pattern_learner else None
 
-    async def evaluate(self, signal: dict[str, Any], market_data: dict[str, Any]) -> CommitteeDecision:
+    async def evaluate(
+        self, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> CommitteeDecision:
         """Enrich market_data with pattern evidence, then run standard committee evaluation."""
         if self._provider:
             enriched = self._provider.enrich_market_data(signal, market_data)

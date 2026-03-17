@@ -5,8 +5,8 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
 
 class BreakerState(enum.Enum):
@@ -181,8 +181,12 @@ class AuditTrail:
             if entry.prev_hash != prev_hash:
                 return {"valid": False, "entries_checked": i + 1, "first_invalid": i}
             expected = _compute_hash(
-                entry.entry_id, entry.ts, entry.action, entry.actor,
-                entry.details, entry.prev_hash,
+                entry.entry_id,
+                entry.ts,
+                entry.action,
+                entry.actor,
+                entry.details,
+                entry.prev_hash,
             )
             if entry.entry_hash != expected:
                 return {"valid": False, "entries_checked": i + 1, "first_invalid": i}

@@ -226,11 +226,7 @@ class SMCAnalyzer:
 
         # 3. EQL / DEMAND liquidity levels below price
         for lv in ctx.liquidity_levels:
-            if (
-                lv.liquidity_type.value in ("eql", "demand")
-                and not lv.swept
-                and lv.price < price
-            ):
+            if lv.liquidity_type.value in ("eql", "demand") and not lv.swept and lv.price < price:
                 candidates.append(lv.price)
 
         return max(candidates) if candidates else None
@@ -261,11 +257,7 @@ class SMCAnalyzer:
 
         # 3. EQH / SUPPLY liquidity levels above price
         for lv in ctx.liquidity_levels:
-            if (
-                lv.liquidity_type.value in ("eqh", "supply")
-                and not lv.swept
-                and lv.price > price
-            ):
+            if lv.liquidity_type.value in ("eqh", "supply") and not lv.swept and lv.price > price:
                 candidates.append(lv.price)
 
         return min(candidates) if candidates else None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 
@@ -24,7 +24,9 @@ class PatternEvidenceProvider:
     def __init__(self, pattern_learner: PatternLearner) -> None:
         self._learner = pattern_learner
 
-    def enrich_market_data(self, signal: dict[str, Any], market_data: dict[str, Any]) -> dict[str, Any]:
+    def enrich_market_data(
+        self, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Build context from signal + market_data, query patterns, return enriched copy.
 
         The original market_data dict is never mutated.

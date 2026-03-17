@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -73,7 +73,7 @@ class PnLDecomposer:
 
         portfolio_avg_pnl = total_pnl / len(trades)
         selection_pnl = 0.0
-        for symbol, pnls in symbol_pnls.items():
+        for _symbol, pnls in symbol_pnls.items():
             symbol_avg = sum(pnls) / len(pnls)
             selection_pnl += (symbol_avg - portfolio_avg_pnl) * len(pnls)
 
@@ -138,8 +138,8 @@ class PnLDecomposer:
             }
         winning = sum(1 for t in self._trades if t.pnl > 0)
         losing = sum(1 for t in self._trades if t.pnl < 0)
-        strategies = sorted(set(t.strategy for t in self._trades))
-        symbols = sorted(set(t.symbol for t in self._trades))
+        strategies = sorted({t.strategy for t in self._trades})
+        symbols = sorted({t.symbol for t in self._trades})
         return {
             "total_trades": total,
             "strategies": strategies,
@@ -208,9 +208,7 @@ class AgentProfiler:
 
         # Avg response time
         avg_response_time = (
-            sum(r.execution_time for r in agent_tools) / total_tool_uses
-            if total_tool_uses
-            else 0.0
+            sum(r.execution_time for r in agent_tools) / total_tool_uses if total_tool_uses else 0.0
         )
 
         # Success rate
@@ -218,9 +216,7 @@ class AgentProfiler:
         success_rate = success_count / total_tool_uses if total_tool_uses else 0.0
 
         # Most used tool
-        most_used_tool = (
-            max(tool_breakdown, key=tool_breakdown.get) if tool_breakdown else ""
-        )
+        most_used_tool = max(tool_breakdown, key=tool_breakdown.get) if tool_breakdown else ""
 
         # Fastest tool (lowest avg execution time)
         tool_times: dict[str, list[float]] = defaultdict(list)
@@ -235,12 +231,8 @@ class AgentProfiler:
 
         # Decision accuracy: "correct" outcomes / total
         total_decisions = len(agent_decisions)
-        correct_decisions = sum(
-            1 for d in agent_decisions if d.outcome == "correct"
-        )
-        decision_accuracy = (
-            correct_decisions / total_decisions if total_decisions else 0.0
-        )
+        correct_decisions = sum(1 for d in agent_decisions if d.outcome == "correct")
+        decision_accuracy = correct_decisions / total_decisions if total_decisions else 0.0
 
         # Confidence calibration: Pearson correlation between confidence
         # and binary success (outcome == "correct" → 1, else 0).
@@ -326,9 +318,7 @@ class AgentProfiler:
                 "total": total,
                 "correct": correct,
                 "accuracy": correct / total if total else 0.0,
-                "avg_confidence": (
-                    sum(d.confidence for d in decisions) / total if total else 0.0
-                ),
+                "avg_confidence": (sum(d.confidence for d in decisions) / total if total else 0.0),
             }
 
         return breakdown

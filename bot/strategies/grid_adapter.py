@@ -421,9 +421,17 @@ class GridAdapter(BaseStrategy):
         for pos_id, pos in self._positions.items():
             if pos["entry_price"] > 0:
                 if pos["direction"] == SignalDirection.SHORT:
-                    pnl = (pos["entry_price"] - pos["current_price"]) * pos["size"] / pos["entry_price"]
+                    pnl = (
+                        (pos["entry_price"] - pos["current_price"])
+                        * pos["size"]
+                        / pos["entry_price"]
+                    )
                 else:
-                    pnl = (pos["current_price"] - pos["entry_price"]) * pos["size"] / pos["entry_price"]
+                    pnl = (
+                        (pos["current_price"] - pos["entry_price"])
+                        * pos["size"]
+                        / pos["entry_price"]
+                    )
             else:
                 pnl = Decimal("0")
             result.append(

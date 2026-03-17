@@ -11,6 +11,8 @@ Defines operating modes and parameters for Grid↔DCA transitions:
 from dataclasses import dataclass, field
 from enum import Enum
 
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
+
 
 class HybridMode(str, Enum):
     """Operating mode of the hybrid strategy."""
@@ -20,9 +22,6 @@ class HybridMode(str, Enum):
     DCA_ACTIVE = "dca_active"  # DCA active after grid breakout
     BOTH_ACTIVE = "both_active"  # Both active (intermediate)
     RECOVERY_ACTIVE = "recovery_active"  # Grid paused, DCA recovery cascade
-
-
-from bot.strategies.hybrid.recovery_config import RecoveryConfig
 
 
 @dataclass

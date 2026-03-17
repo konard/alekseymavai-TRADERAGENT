@@ -119,7 +119,7 @@ class GridEngine:
         # Position trackers.
         # LONG: filled buy orders awaiting a paired sell (TP).
         # SHORT: filled sell orders awaiting a paired buy (TP).
-        self._open_buys: dict[str, GridOrder] = {}   # order_id -> filled buy GridOrder
+        self._open_buys: dict[str, GridOrder] = {}  # order_id -> filled buy GridOrder
         self._open_sells: dict[str, GridOrder] = {}  # order_id -> filled sell GridOrder (SHORT)
 
         # Statistics
@@ -187,7 +187,9 @@ class GridEngine:
                 elif price > current_price:
                     sell_price = price * (Decimal("1") + self.profit_per_grid)
                     sell_amount = (self.amount_per_grid / sell_price).quantize(Decimal("0.000001"))
-                    order = GridOrder(level=level_idx, price=sell_price, amount=sell_amount, side="sell")
+                    order = GridOrder(
+                        level=level_idx, price=sell_price, amount=sell_amount, side="sell"
+                    )
                     self.grid_orders.append(order)
                     orders_to_place.append(order)
             else:
@@ -199,7 +201,9 @@ class GridEngine:
                 elif price < current_price:
                     buy_price = price * (Decimal("1") - self.profit_per_grid)
                     buy_amount = (self.amount_per_grid / buy_price).quantize(Decimal("0.000001"))
-                    order = GridOrder(level=level_idx, price=buy_price, amount=buy_amount, side="buy")
+                    order = GridOrder(
+                        level=level_idx, price=buy_price, amount=buy_amount, side="buy"
+                    )
                     self.grid_orders.append(order)
                     orders_to_place.append(order)
 

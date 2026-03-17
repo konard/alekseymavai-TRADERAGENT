@@ -32,10 +32,18 @@ from decimal import Decimal
 from typing import Any
 
 from bot.core.capital_arbiter import (
-    ALLOCATION as _ARBITER_ALLOCATION,
-    CapitalArbiter,
     _REGIME_FAMILY as _ARBITER_REGIME_FAMILY,
+)
+from bot.core.capital_arbiter import (
     _UNKNOWN as _ARBITER_UNKNOWN,
+)
+from bot.core.capital_arbiter import (
+    ALLOCATION as _ARBITER_ALLOCATION,
+)
+from bot.core.capital_arbiter import (
+    CapitalArbiter,
+)
+from bot.core.capital_arbiter import (
     _normalise_strategy as _arbiter_norm,
 )
 from bot.core.risk_manager import RiskManager
@@ -48,17 +56,16 @@ from bot.orchestrator.market_regime import (
 from bot.orchestrator.routing_config import RoutingConfig
 from bot.orchestrator.strategy_conductor import StrategyConductor
 from bot.strategies.base import BaseStrategy, ExitReason, SignalDirection
+from bot.strategies.hybrid.recovery_config import RecoveryConfig
+from bot.strategies.hybrid.recovery_coordinator import (
+    RecoveryCoordinator,
+    UnderwaterPosition,
+)
 from bot.tests.backtesting.backtesting_engine import BacktestResult
 from bot.tests.backtesting.market_simulator import MarketSimulator
 from bot.tests.backtesting.multi_tf_data_loader import (
     MultiTimeframeData,
     MultiTimeframeDataLoader,
-)
-from bot.strategies.hybrid.recovery_config import RecoveryConfig
-from bot.strategies.hybrid.recovery_coordinator import (
-    RecoveryCoordinator,
-    RecoveryPhase,
-    UnderwaterPosition,
 )
 from bot.tests.backtesting.strategy_router import StrategyRouter
 
@@ -697,9 +704,7 @@ class BacktestOrchestratorEngine:
 
             # Progress logging — time-based (every _progress_interval_sec) OR every 5%
             _now_t = _time.monotonic()
-            _bar_pct_hit = (
-                bars_since_warmup > 0 and bars_since_warmup % _progress_interval == 0
-            )
+            _bar_pct_hit = bars_since_warmup > 0 and bars_since_warmup % _progress_interval == 0
             _time_hit = (_now_t - _last_progress_t) >= _progress_interval_sec
             if _bar_pct_hit or _time_hit:
                 _last_progress_t = _now_t
@@ -708,7 +713,12 @@ class BacktestOrchestratorEngine:
                 elapsed_min = (_now_t - _run_start_t) / 60.0
                 logger.info(
                     "progress: %.1f%% (%d/%d bars) | price=%.2f | portfolio=$%.2f | elapsed=%.1fm",
-                    pct, bars_since_warmup, tradeable_bars, float(current_price), pv, elapsed_min,
+                    pct,
+                    bars_since_warmup,
+                    tradeable_bars,
+                    float(current_price),
+                    pv,
+                    elapsed_min,
                 )
                 if progress_callback is not None:
                     try:
@@ -726,6 +736,7 @@ class BacktestOrchestratorEngine:
                     bar_timestamp = _idx_val.to_pydatetime()
                 elif isinstance(_idx_val, (int, float)):
                     from datetime import timezone as _tz
+
                     bar_timestamp = datetime.fromtimestamp(_idx_val / 1000, tz=_tz.utc)
             except Exception:
                 pass
@@ -746,9 +757,7 @@ class BacktestOrchestratorEngine:
                 # 1b. Push StrategyConductor directives on regime change
                 # Mirrors live: BotOrchestrator → StrategyConductor.on_regime_change()
                 if conductor is not None:
-                    conductor.on_regime_change(
-                        current_regime, strategy_instances=strategies
-                    )
+                    conductor.on_regime_change(current_regime, strategy_instances=strategies)
 
             # 2. Strategy routing
             # Two modes controlled by config.use_additive_routing:
@@ -1067,9 +1076,11 @@ class BacktestOrchestratorEngine:
                             vpm_pos_ids=vpm_pos_ids["grid"],
                         )
                         # Track the fill for blended avg recalculation
-                        _mult = Decimal(
-                            str(_rsig.metadata.get("multiplier", 1.0))
-                        ) if _rsig.metadata else Decimal("1")
+                        _mult = (
+                            Decimal(str(_rsig.metadata.get("multiplier", 1.0)))
+                            if _rsig.metadata
+                            else Decimal("1")
+                        )
                         _dca_fills.append(
                             UnderwaterPosition(
                                 pos_id=f"rdca_{i}_{len(_dca_fills)}",
@@ -1079,17 +1090,13 @@ class BacktestOrchestratorEngine:
                         )
                     # Register DCA fills for blended avg tracking
                     if _dca_fills:
-                        recovery_coordinator.on_price_update(
-                            current_price, new_fills=_dca_fills
-                        )
+                        recovery_coordinator.on_price_update(current_price, new_fills=_dca_fills)
 
                     if recovery_action.should_close_all:
                         # Close all Grid positions
                         _all_grid_pos = list(position_amounts["grid"].keys())
                         if _all_grid_pos:
-                            _force_exits = [
-                                (pid, ExitReason.MANUAL) for pid in _all_grid_pos
-                            ]
+                            _force_exits = [(pid, ExitReason.MANUAL) for pid in _all_grid_pos]
                             _pnl = await self._handle_exits(
                                 strat_name="grid",
                                 strategy=_grid,
@@ -1258,8 +1265,7 @@ class BacktestOrchestratorEngine:
                     ),
                     sl_price=(
                         signal.stop_loss
-                        if getattr(signal, "stop_loss", None)
-                        and signal.stop_loss > Decimal("0")
+                        if getattr(signal, "stop_loss", None) and signal.stop_loss > Decimal("0")
                         else None
                     ),
                     meta={"pos_id": pos_id},

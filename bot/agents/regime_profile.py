@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from bot.agents.base_expert import Verdict
 
@@ -85,9 +85,7 @@ class ExpertRegimeProfile:
         if verdict == Verdict.APPROVE:
             ra._pnl_sum += pnl
             ra._pnl_count += 1
-            ra.avg_pnl_when_approved = (
-                ra._pnl_sum / ra._pnl_count if ra._pnl_count > 0 else 0.0
-            )
+            ra.avg_pnl_when_approved = ra._pnl_sum / ra._pnl_count if ra._pnl_count > 0 else 0.0
 
     def get_accuracy(self, regime: str) -> float:
         """Return accuracy for a regime, or 0.5 if no data."""

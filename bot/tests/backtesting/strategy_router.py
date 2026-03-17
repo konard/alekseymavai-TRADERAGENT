@@ -26,7 +26,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -174,8 +174,15 @@ class StrategyRouter:
         if target != prev:
             # -------------------------------------------------------
             # Two-phase PRE_SWITCH gate (only after first regime seen)
+            # REDUCE_EXPOSURE bypasses the gate — it is an emergency signal
+            # that must take effect immediately (mirrors StrategySelector).
             # -------------------------------------------------------
-            if self._enable_pre_switch_gate and self._current_regime is not None:
+            is_reduce_exposure = regime.recommended_strategy == RecommendedStrategy.REDUCE_EXPOSURE
+            if (
+                self._enable_pre_switch_gate
+                and self._current_regime is not None
+                and not is_reduce_exposure
+            ):
                 ts = current_timestamp or datetime.now(timezone.utc)
                 gate_result = self._apply_two_phase_gate(
                     regime=regime,
@@ -186,10 +193,10 @@ class StrategyRouter:
                     return gate_result
 
             # -------------------------------------------------------
-            # Legacy cooldown guard
+            # Legacy cooldown guard (skipped for REDUCE_EXPOSURE)
             # -------------------------------------------------------
             bars_since_switch = current_bar - self._last_switch_bar
-            if prev and bars_since_switch < self.cooldown_bars:
+            if prev and bars_since_switch < self.cooldown_bars and not is_reduce_exposure:
                 cooldown_remaining = self.cooldown_bars - bars_since_switch
                 logger.debug(
                     "strategy_switch_blocked_by_cooldown",
@@ -408,9 +415,7 @@ class StrategyRouter:
             extra={
                 "reason": reason,
                 "target": (
-                    self._pre_switch_target_regime.value
-                    if self._pre_switch_target_regime
-                    else None
+                    self._pre_switch_target_regime.value if self._pre_switch_target_regime else None
                 ),
             },
         )

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from bot.agents.tools.market_data import BaseTool, ToolResult
 
@@ -13,19 +14,23 @@ class BacktestSkill(BaseTool):
     name = "backtest"
     description = "Run a quick mini-backtest on a hypothesis"
 
-    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         strategy: str = params.get("strategy", "long")
         entry_price: float = params["entry_price"]
         stop_loss: float = params["stop_loss"]
         take_profit: float = params["take_profit"]
-        historical_prices: List[float] = params["historical_prices"]
+        historical_prices: list[float] = params["historical_prices"]
 
         if not historical_prices:
             return ToolResult(success=False, error="historical_prices is empty")
 
         # --- deterministic single-path simulation ---
         result, pnl, bars_to_exit = self._simulate_path(
-            strategy, entry_price, stop_loss, take_profit, historical_prices,
+            strategy,
+            entry_price,
+            stop_loss,
+            take_profit,
+            historical_prices,
         )
 
         # --- risk / reward ---
@@ -44,7 +49,11 @@ class BacktestSkill(BaseTool):
             shuffled = list(historical_prices)
             random.shuffle(shuffled)
             r, _, _ = self._simulate_path(
-                strategy, entry_price, stop_loss, take_profit, shuffled,
+                strategy,
+                entry_price,
+                stop_loss,
+                take_profit,
+                shuffled,
             )
             if r == "win":
                 mc_wins += 1
@@ -67,7 +76,7 @@ class BacktestSkill(BaseTool):
         entry_price: float,
         stop_loss: float,
         take_profit: float,
-        prices: List[float],
+        prices: list[float],
     ) -> tuple[str, float, int]:
         """Walk *prices* bar-by-bar; return (result, pnl, bars)."""
         for i, price in enumerate(prices):
@@ -93,9 +102,9 @@ class CorrelationSkill(BaseTool):
     name = "correlation_check"
     description = "Calculate Pearson and rolling correlation between two return series"
 
-    async def execute(self, params: Dict[str, Any]) -> ToolResult:
-        returns_a: List[float] = params["returns_a"]
-        returns_b: List[float] = params["returns_b"]
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
+        returns_a: list[float] = params["returns_a"]
+        returns_b: list[float] = params["returns_b"]
         label_a: str = params.get("label_a", "A")
         label_b: str = params.get("label_b", "B")
 
@@ -110,15 +119,13 @@ class CorrelationSkill(BaseTool):
 
         # Rolling 20-period correlation
         window = 20
-        rolling: List[float | None] = []
+        rolling: list[float | None] = []
         for end in range(window, n + 1):
             rolling.append(round(self._pearson(a[end - window : end], b[end - window : end]), 4))
 
         regime = self._classify_regime(abs(corr))
 
-        interpretation = (
-            f"{label_a} and {label_b} show {regime} correlation ({corr:.2f})"
-        )
+        interpretation = f"{label_a} and {label_b} show {regime} correlation ({corr:.2f})"
 
         return ToolResult(
             success=True,
@@ -132,13 +139,13 @@ class CorrelationSkill(BaseTool):
 
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _pearson(x: List[float], y: List[float]) -> float:
+    def _pearson(x: list[float], y: list[float]) -> float:
         n = len(x)
         if n == 0:
             return 0.0
         mean_x = sum(x) / n
         mean_y = sum(y) / n
-        cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+        cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y, strict=False))
         std_x = math.sqrt(sum((xi - mean_x) ** 2 for xi in x))
         std_y = math.sqrt(sum((yi - mean_y) ** 2 for yi in y))
         if std_x == 0 or std_y == 0:
@@ -160,8 +167,8 @@ class VolatilityForecastSkill(BaseTool):
     name = "volatility_forecast"
     description = "EWMA volatility forecast with regime classification"
 
-    async def execute(self, params: Dict[str, Any]) -> ToolResult:
-        returns: List[float] = params["returns"]
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
+        returns: list[float] = params["returns"]
         horizon: int = params.get("horizon", 5)
 
         if len(returns) < 2:
@@ -172,7 +179,7 @@ class VolatilityForecastSkill(BaseTool):
         # EWMA variance
         var = returns[0] ** 2
         for r in returns[1:]:
-            var = lam * var + (1 - lam) * r ** 2
+            var = lam * var + (1 - lam) * r**2
 
         current_vol = math.sqrt(var)
 
@@ -217,10 +224,10 @@ class SentimentSkill(BaseTool):
     name = "sentiment"
     description = "Fetch sentiment data and generate contrarian signals"
 
-    def __init__(self, sentiment_provider: Optional[Callable[[str], Dict[str, Any]]] = None):
+    def __init__(self, sentiment_provider: Optional[Callable[[str], dict[str, Any]]] = None):
         self._provider = sentiment_provider
 
-    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         symbol: str = params.get("symbol", "BTCUSDT")
 
         if self._provider is not None:

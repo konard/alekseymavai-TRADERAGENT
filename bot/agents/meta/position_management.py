@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # StopAction
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class StopAction:
@@ -29,6 +28,7 @@ class StopAction:
 # ---------------------------------------------------------------------------
 # DynamicStopManager
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _PositionState:
@@ -57,7 +57,7 @@ class DynamicStopManager:
         self.partial_exit_pct = partial_exit_pct
         self.trail_activation_r = trail_activation_r
         self.trail_distance_pct = trail_distance_pct
-        self._positions: Dict[str, _PositionState] = {}
+        self._positions: dict[str, _PositionState] = {}
 
     # -- stateless evaluation ------------------------------------------------
 
@@ -215,6 +215,7 @@ class DynamicStopManager:
 # StrategyRiskContribution
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StrategyRiskContribution:
     """Risk contribution of a single strategy in the portfolio."""
@@ -241,6 +242,7 @@ class StrategyRiskContribution:
 # RiskParityAllocator
 # ---------------------------------------------------------------------------
 
+
 class RiskParityAllocator:
     """Allocates capital across strategies using inverse-volatility risk parity."""
 
@@ -253,7 +255,7 @@ class RiskParityAllocator:
         self.target_total_risk = target_total_risk
         self.max_single_allocation = max_single_allocation
         self.min_allocation = min_allocation
-        self._vols: Dict[str, float] = {}
+        self._vols: dict[str, float] = {}
 
     def set_strategy_vol(self, strategy: str, volatility: float) -> None:
         if volatility <= 0:
@@ -294,7 +296,7 @@ class RiskParityAllocator:
                 break
 
         # Build result
-        result: Dict[str, StrategyRiskContribution] = {}
+        result: dict[str, StrategyRiskContribution] = {}
         for s, target_w in alloc.items():
             vol = self._vols[s]
             var_contrib = target_w * vol * self.target_total_risk
@@ -313,7 +315,7 @@ class RiskParityAllocator:
         current_allocations: dict[str, float],
     ) -> list[dict]:
         targets = self.calculate_allocations()
-        actions: List[dict] = []
+        actions: list[dict] = []
 
         all_strategies = set(targets.keys()) | set(current_allocations.keys())
         for s in sorted(all_strategies):
@@ -333,13 +335,15 @@ class RiskParityAllocator:
             else:
                 action_type = "decrease"
 
-            actions.append({
-                "strategy": s,
-                "action": action_type,
-                "from_pct": current,
-                "to_pct": target,
-                "delta_pct": delta,
-            })
+            actions.append(
+                {
+                    "strategy": s,
+                    "action": action_type,
+                    "from_pct": current,
+                    "to_pct": target,
+                    "delta_pct": delta,
+                }
+            )
 
         return actions
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from bot.core.event_bus import DomainEvent, EventBus
 from bot.utils.logger import get_logger
@@ -244,18 +245,10 @@ class CommitteeTelegramFeed:
             logger.warning("telegram_feed_start_no_bus")
             return
 
-        self._unsubscribers.append(
-            self._bus.subscribe("DECISION_MADE", self._on_decision)
-        )
-        self._unsubscribers.append(
-            self._bus.subscribe("ANOMALY_DETECTED", self._on_anomaly)
-        )
-        self._unsubscribers.append(
-            self._bus.subscribe("RISK_HALTED", self._on_halt)
-        )
-        self._unsubscribers.append(
-            self._bus.subscribe("RISK_RESUMED", self._on_resume)
-        )
+        self._unsubscribers.append(self._bus.subscribe("DECISION_MADE", self._on_decision))
+        self._unsubscribers.append(self._bus.subscribe("ANOMALY_DETECTED", self._on_anomaly))
+        self._unsubscribers.append(self._bus.subscribe("RISK_HALTED", self._on_halt))
+        self._unsubscribers.append(self._bus.subscribe("RISK_RESUMED", self._on_resume))
 
         logger.info("telegram_feed_started", subscriptions=4)
 

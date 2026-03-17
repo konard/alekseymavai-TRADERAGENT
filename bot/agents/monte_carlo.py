@@ -167,7 +167,7 @@ class MonteCarloSimulator:
                     ds = daily_std if daily_std is not None else 0.0
                     daily_ret = self._rng.gauss(dm, ds)
 
-                balance *= (1.0 + daily_ret)
+                balance *= 1.0 + daily_ret
                 if balance < 0:
                     balance = 0.0
 
@@ -201,7 +201,11 @@ class MonteCarloSimulator:
         prob_dd_20 = sum(1 for dd in max_drawdowns if dd > 0.20) / num_simulations
         prob_dd_50 = sum(1 for dd in max_drawdowns if dd > 0.50) / num_simulations
 
-        mean_return_pct = ((mean_final - initial_balance) / initial_balance) * 100.0 if initial_balance > 0 else 0.0
+        mean_return_pct = (
+            ((mean_final - initial_balance) / initial_balance) * 100.0
+            if initial_balance > 0
+            else 0.0
+        )
 
         # Sharpe estimate: annualized
         daily_rets_realized = []
@@ -237,9 +241,7 @@ class MonteCarloSimulator:
         self._last_result = result
         return result
 
-    def _compute_var(
-        self, final_balances: list[float], initial: float, confidence: float
-    ) -> float:
+    def _compute_var(self, final_balances: list[float], initial: float, confidence: float) -> float:
         """VaR = initial_balance - percentile(final_balances, 1-confidence)"""
         sorted_fb = sorted(final_balances)
         pct = (1.0 - confidence) * 100.0
@@ -310,7 +312,9 @@ class MonteCarloSimulator:
             rr = 1.5
             denom = overall_wr * rr - (1.0 - overall_wr)
             if abs(denom) > 1e-9:
-                avg_loss_abs = abs(overall_avg_pnl / denom) if overall_avg_pnl != 0 else initial_balance * 0.01
+                avg_loss_abs = (
+                    abs(overall_avg_pnl / denom) if overall_avg_pnl != 0 else initial_balance * 0.01
+                )
                 avg_win = rr * avg_loss_abs
                 avg_loss = -avg_loss_abs
             else:

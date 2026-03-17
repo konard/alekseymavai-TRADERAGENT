@@ -1,8 +1,9 @@
 """Event Replay Debugger — replays historical signals through committee for counterfactual analysis."""
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from bot.agents.base_expert import Verdict
 from bot.agents.committee import InvestmentCommittee
@@ -90,9 +91,7 @@ class ReplayResult:
             "avoided_losses": round(self.avoided_losses, 2),
             "missed_profits": round(self.missed_profits, 2),
             "filter_rate": round(self.filter_rate, 4),
-            "expert_accuracy": {
-                k: round(v, 4) for k, v in self.expert_accuracy.items()
-            },
+            "expert_accuracy": {k: round(v, 4) for k, v in self.expert_accuracy.items()},
             "trades": [t.to_dict() for t in self.trades],
             "ts": self.ts,
         }
@@ -217,24 +216,24 @@ class EventReplayDebugger:
             weight_configs = [current_weights]
 
             # Equal weights
-            weight_configs.append({n: 1.0 for n in expert_names})
+            weight_configs.append(dict.fromkeys(expert_names, 1.0))
 
             # Risk-heavy
-            risk_heavy = {n: 0.5 for n in expert_names}
+            risk_heavy = dict.fromkeys(expert_names, 0.5)
             for n in expert_names:
                 if "risk" in n.lower():
                     risk_heavy[n] = 2.5
             weight_configs.append(risk_heavy)
 
             # SMC-heavy
-            smc_heavy = {n: 0.7 for n in expert_names}
+            smc_heavy = dict.fromkeys(expert_names, 0.7)
             for n in expert_names:
                 if "smc" in n.lower() or "structuralist" in n.lower():
                     smc_heavy[n] = 2.0
             weight_configs.append(smc_heavy)
 
             # Contrarian-heavy
-            contrarian_heavy = {n: 0.7 for n in expert_names}
+            contrarian_heavy = dict.fromkeys(expert_names, 0.7)
             for n in expert_names:
                 if "contrarian" in n.lower():
                     contrarian_heavy[n] = 2.0
@@ -263,9 +262,7 @@ class EventReplayDebugger:
 
         return results
 
-    def _compute_replay_result(
-        self, trade_results: list[ReplayTradeResult]
-    ) -> ReplayResult:
+    def _compute_replay_result(self, trade_results: list[ReplayTradeResult]) -> ReplayResult:
         """Compute aggregate ReplayResult from individual trade results."""
         total = len(trade_results)
         approved = sum(1 for t in trade_results if t.committee_verdict == "approve")
@@ -283,19 +280,13 @@ class EventReplayDebugger:
         filtered_total_pnl = sum(t.filtered_pnl for t in trade_results)
         filtered_winners = sum(1 for t in approved_trades if t.filtered_pnl > 0)
         filtered_losers = sum(1 for t in approved_trades if t.filtered_pnl <= 0)
-        filtered_win_rate = (
-            filtered_winners / len(approved_trades) if approved_trades else 0.0
-        )
+        filtered_win_rate = filtered_winners / len(approved_trades) if approved_trades else 0.0
 
         # Improvement metrics
         pnl_delta = filtered_total_pnl - actual_total_pnl
         rejected_trades = [t for t in trade_results if not t.would_have_traded]
-        avoided_losses = abs(
-            sum(t.actual_pnl for t in rejected_trades if t.actual_pnl < 0)
-        )
-        missed_profits = sum(
-            t.actual_pnl for t in rejected_trades if t.actual_pnl > 0
-        )
+        avoided_losses = abs(sum(t.actual_pnl for t in rejected_trades if t.actual_pnl < 0))
+        missed_profits = sum(t.actual_pnl for t in rejected_trades if t.actual_pnl > 0)
         filter_rate = (rejected + deferred) / total if total > 0 else 0.0
 
         # Per-expert accuracy
@@ -322,9 +313,7 @@ class EventReplayDebugger:
             trades=trade_results,
         )
 
-    def _score_expert_votes(
-        self, trades_results: list[ReplayTradeResult]
-    ) -> dict[str, float]:
+    def _score_expert_votes(self, trades_results: list[ReplayTradeResult]) -> dict[str, float]:
         """Calculate per-expert accuracy across replay.
 
         An expert vote is considered 'correct' if:
@@ -364,10 +353,10 @@ class EventReplayDebugger:
 
     def _create_default_committee(self) -> InvestmentCommittee:
         """Create default committee with 4 experts."""
+        from bot.agents.contrarian_expert import ContrarianExpert
+        from bot.agents.risk_expert import RiskExpert
         from bot.agents.smc_expert import SMCExpert
         from bot.agents.trend_expert import TrendExpert
-        from bot.agents.risk_expert import RiskExpert
-        from bot.agents.contrarian_expert import ContrarianExpert
 
         committee = InvestmentCommittee()
         committee.add_expert(SMCExpert())

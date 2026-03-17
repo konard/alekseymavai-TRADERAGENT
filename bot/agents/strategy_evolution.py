@@ -5,8 +5,8 @@ from __future__ import annotations
 import random
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 
 @dataclass
@@ -49,9 +49,7 @@ class EvolutionResult:
             "best_fitness": self.best_fitness,
             "fitness_history": list(self.fitness_history),
             "avg_fitness_history": list(self.avg_fitness_history),
-            "parameter_convergence": {
-                k: list(v) for k, v in self.parameter_convergence.items()
-            },
+            "parameter_convergence": {k: list(v) for k, v in self.parameter_convergence.items()},
             "total_evaluations": self.total_evaluations,
             "elapsed_seconds": self.elapsed_seconds,
         }
@@ -165,9 +163,7 @@ class StrategyEvolver:
 
             # Track best genome of the best param for convergence
             for name in self._parameter_ranges:
-                parameter_convergence[name].append(
-                    self._population[0].parameters[name]
-                )
+                parameter_convergence[name].append(self._population[0].parameters[name])
 
             # Update global best
             if self._best_genome is None or best_fit > self._best_genome.fitness:
@@ -258,7 +254,9 @@ class StrategyEvolver:
 
     def _select_parent(self) -> Genome:
         """Tournament selection: pick tournament_size random, return best."""
-        candidates = self._rng.sample(self._population, min(self._tournament_size, len(self._population)))
+        candidates = self._rng.sample(
+            self._population, min(self._tournament_size, len(self._population))
+        )
         return max(candidates, key=lambda g: g.fitness)
 
     def _crossover(self, parent_a: Genome, parent_b: Genome) -> Genome:

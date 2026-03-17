@@ -48,12 +48,12 @@ from bot.strategies.dca.dca_signal_generator import MarketState
 from bot.strategies.dca.startup_analyzer import DCAStartupAnalyzer
 from bot.strategies.grid.grid_risk_manager import GridRiskManager
 from bot.strategies.hybrid.hybrid_config import HybridConfig
+from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.hybrid.recovery_config import RecoveryConfig
 from bot.strategies.hybrid.recovery_coordinator import (
     RecoveryCoordinator,
     UnderwaterPosition,
 )
-from bot.strategies.hybrid.hybrid_strategy import HybridStrategy
 from bot.strategies.smc.config import SMCConfig
 from bot.strategies.smc_adapter import SMCStrategyAdapter
 from bot.strategies.trend_follower import TrendFollowerConfig as TrendFollowerDataclassConfig
@@ -336,7 +336,9 @@ class BotOrchestrator:
                 timeout_bars=self.config.recovery.timeout_bars,
                 timeout_action=self.config.recovery.timeout_action,
                 fallback_support_pct=Decimal(str(self.config.recovery.fallback_support_pct)),
-                max_recovery_capital_pct=Decimal(str(self.config.recovery.max_recovery_capital_pct)),
+                max_recovery_capital_pct=Decimal(
+                    str(self.config.recovery.max_recovery_capital_pct)
+                ),
                 cooldown_after_recovery_bars=self.config.recovery.cooldown_after_recovery_bars,
             )
             _rcfg.validate()
@@ -803,6 +805,7 @@ class BotOrchestrator:
         grid_engine = getattr(self, "grid_engine", None)
         if grid_engine:
             from bot.orchestrator.market_regime import MarketRegime
+
             bear_regimes = {MarketRegime.BEAR_TREND, MarketRegime.DISTRIBUTION}
             target_direction = (
                 GridDirection.SHORT if analysis.regime in bear_regimes else GridDirection.LONG
@@ -1018,7 +1021,9 @@ class BotOrchestrator:
 
                 if self._recovery_in_progress:
                     await self._process_recovery_logic()
-                elif self._recovery_coordinator is not None and await self._check_recovery_trigger():
+                elif (
+                    self._recovery_coordinator is not None and await self._check_recovery_trigger()
+                ):
                     await self._process_recovery_logic()
                 elif grid_active and dca_active and self.hybrid_strategy:
                     await self._process_hybrid_logic()
@@ -1221,12 +1226,15 @@ class BotOrchestrator:
             except Exception as e:
                 logger.warning("recovery_cancel_grid_order_failed", order_id=order_id, error=str(e))
 
-        await self._publish_event(EventType.RECOVERY_ENTERED, {
-            "price": str(self.current_price),
-            "grid_lower": str(grid_lower),
-            "underwater_positions": len(underwater),
-            "smc_support": str(smc_support) if smc_support else None,
-        })
+        await self._publish_event(
+            EventType.RECOVERY_ENTERED,
+            {
+                "price": str(self.current_price),
+                "grid_lower": str(grid_lower),
+                "underwater_positions": len(underwater),
+                "smc_support": str(smc_support) if smc_support else None,
+            },
+        )
         logger.info(
             "recovery_entered_live",
             price=float(self.current_price),
@@ -1256,11 +1264,18 @@ class BotOrchestrator:
             if state is not None:
                 total_spent = sum(f.entry_price * f.size for f in state.dca_fills)
                 max_capital = balance * self._recovery_coordinator.config.max_recovery_capital_pct
-                mult = Decimal(str(signal.metadata.get("multiplier", 1.0))) if signal.metadata else Decimal("1")
+                mult = (
+                    Decimal(str(signal.metadata.get("multiplier", 1.0)))
+                    if signal.metadata
+                    else Decimal("1")
+                )
                 next_cost = self.current_price * mult * state.base_order_size / self.current_price
                 if total_spent + (next_cost * self.current_price) > max_capital:
-                    logger.warning("recovery_dca_capital_limit",
-                                   spent=float(total_spent), limit=float(max_capital))
+                    logger.warning(
+                        "recovery_dca_capital_limit",
+                        spent=float(total_spent),
+                        limit=float(max_capital),
+                    )
                     break
 
             # Standard risk manager gate
@@ -1278,10 +1293,18 @@ class BotOrchestrator:
 
             # Place market buy order
             try:
-                mult_val = Decimal(str(signal.metadata.get("multiplier", 1.0))) if signal.metadata else Decimal("1")
+                mult_val = (
+                    Decimal(str(signal.metadata.get("multiplier", 1.0)))
+                    if signal.metadata
+                    else Decimal("1")
+                )
                 base_amount = (
-                    state.base_order_size * mult_val / self.current_price
-                ).quantize(Decimal("0.000001")) if state else Decimal("0")
+                    (state.base_order_size * mult_val / self.current_price).quantize(
+                        Decimal("0.000001")
+                    )
+                    if state
+                    else Decimal("0")
+                )
 
                 if not self.config.dry_run and base_amount > 0:
                     result = await self.exchange.create_order(
@@ -1290,9 +1313,9 @@ class BotOrchestrator:
                         side="buy",
                         amount=float(base_amount),
                     )
-                    fill_price = Decimal(str(
-                        result.get("average", result.get("price", self.current_price))
-                    ))
+                    fill_price = Decimal(
+                        str(result.get("average", result.get("price", self.current_price)))
+                    )
                 else:
                     fill_price = self.current_price
 
@@ -1303,11 +1326,16 @@ class BotOrchestrator:
                 )
                 dca_fills.append(fill)
 
-                await self._publish_event(EventType.RECOVERY_DCA_PLACED, {
-                    "price": str(fill_price),
-                    "dca_level": signal.metadata.get("dca_order_num", 0) if signal.metadata else 0,
-                    "amount": str(base_amount),
-                })
+                await self._publish_event(
+                    EventType.RECOVERY_DCA_PLACED,
+                    {
+                        "price": str(fill_price),
+                        "dca_level": (
+                            signal.metadata.get("dca_order_num", 0) if signal.metadata else 0
+                        ),
+                        "amount": str(base_amount),
+                    },
+                )
             except Exception as e:
                 logger.error("recovery_dca_order_failed", error=str(e))
 
@@ -1347,13 +1375,17 @@ class BotOrchestrator:
             if "tp_hit" in (recovery_action.close_reason or "")
             else EventType.RECOVERY_TIMEOUT
         )
-        await self._publish_event(event_type, {
-            "reason": recovery_action.close_reason,
-            "new_grid_range": (
-                [str(x) for x in recovery_action.new_grid_range]
-                if recovery_action.new_grid_range else None
-            ),
-        })
+        await self._publish_event(
+            event_type,
+            {
+                "reason": recovery_action.close_reason,
+                "new_grid_range": (
+                    [str(x) for x in recovery_action.new_grid_range]
+                    if recovery_action.new_grid_range
+                    else None
+                ),
+            },
+        )
 
         # Restart grid with new range
         if recovery_action.new_grid_range and self.grid_engine is not None:
@@ -1370,10 +1402,13 @@ class BotOrchestrator:
             grid_orders = self.grid_engine.initialize_grid(self.current_price)
             await self._place_grid_orders(grid_orders)
 
-            await self._publish_event(EventType.RECOVERY_EXITED, {
-                "new_lower": str(new_lower),
-                "new_upper": str(new_upper),
-            })
+            await self._publish_event(
+                EventType.RECOVERY_EXITED,
+                {
+                    "new_lower": str(new_lower),
+                    "new_upper": str(new_upper),
+                },
+            )
 
         self._recovery_in_progress = False
         logger.info("recovery_exit_complete", reason=recovery_action.close_reason)
@@ -1816,6 +1851,7 @@ class BotOrchestrator:
         # SMC: direction per position
         if self.smc_strategy:
             from bot.strategies.base import SignalDirection as _SD
+
             for pos in self.smc_strategy.get_active_positions():
                 if getattr(pos, "direction", None) == _SD.SHORT:
                     short_exp += pos.size
@@ -1838,7 +1874,9 @@ class BotOrchestrator:
                 self._hedge_mode_enabled = True
                 logger.info("hedge_mode_enabled", symbol=self.config.symbol)
             else:
-                logger.warning("exchange_no_set_position_mode", exchange=type(self.exchange).__name__)
+                logger.warning(
+                    "exchange_no_set_position_mode", exchange=type(self.exchange).__name__
+                )
         except Exception as e:
             logger.warning("hedge_mode_enable_failed", error=str(e))
 

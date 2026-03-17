@@ -11,14 +11,18 @@ import pandas as pd
 
 from bot.strategies.smc.config import DEFAULT_SMC_CONFIG, SMCConfig
 from bot.strategies.smc.confluence_zones import ConfluenceZoneAnalyzer
-from bot.strategies.smc.entry_signals import EntrySignalGenerator, SMCSignal
+
+# Dummy pattern required by SMCSignal dataclass when creating structural-event signals
+from bot.strategies.smc.entry_signals import (
+    EntrySignalGenerator,
+    PatternType,
+    PriceActionPattern,
+    SMCSignal,
+)
 from bot.strategies.smc.entry_signals import SignalDirection as SMCSignalDirection
 from bot.strategies.smc.market_structure import MarketStructureAnalyzer, TrendDirection
 from bot.strategies.smc.position_manager import PositionManager, PositionMetrics
 from bot.utils.logger import get_logger
-
-# Dummy pattern required by SMCSignal dataclass when creating structural-event signals
-from bot.strategies.smc.entry_signals import PatternType, PriceActionPattern
 
 logger = get_logger(__name__)
 
@@ -570,9 +574,7 @@ class SMCStrategy:
     # Internal: structure confidence scoring
     # ------------------------------------------------------------------
 
-    def _compute_structure_confidence(
-        self, ctx, df_m5: pd.DataFrame, event_type: str
-    ) -> float:
+    def _compute_structure_confidence(self, ctx, df_m5: pd.DataFrame, event_type: str) -> float:
         """
         Compute structure_confidence (0.0–1.0) from three factors:
 
@@ -588,9 +590,17 @@ class SMCStrategy:
         if ctx.order_blocks:
             if event_type == "support_break":
                 # Bear OBs (supply) are consistent with a downside break
-                aligned = [ob for ob in ctx.order_blocks if ob.ob_type.value == "bear" and not ob.invalidated]
+                aligned = [
+                    ob
+                    for ob in ctx.order_blocks
+                    if ob.ob_type.value == "bear" and not ob.invalidated
+                ]
             else:
-                aligned = [ob for ob in ctx.order_blocks if ob.ob_type.value == "bull" and not ob.invalidated]
+                aligned = [
+                    ob
+                    for ob in ctx.order_blocks
+                    if ob.ob_type.value == "bull" and not ob.invalidated
+                ]
             ob_score = min(len(aligned) / max(len(ctx.order_blocks), 1), 1.0) * 0.4
             score += ob_score
 

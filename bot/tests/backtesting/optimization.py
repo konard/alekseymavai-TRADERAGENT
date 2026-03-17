@@ -55,6 +55,7 @@ def _init_orchestrator_worker(
         _h.setLevel(_logging.ERROR)
     try:
         import structlog as _sl
+
         _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(_logging.ERROR))
     except Exception:
         pass
@@ -170,13 +171,13 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     import asyncio as _asyncio
 
     from bot.tests.backtesting.optimization import (
-        OptimizationTrial,
-        ParameterOptimizer,
         _ORCH_WORKER_CONFIG,
         _ORCH_WORKER_DATA,
         _ORCH_WORKER_OBJECTIVE,
         _ORCH_WORKER_SYMBOL,
         _ORCH_WORKER_TIMEOUT,
+        OptimizationTrial,
+        ParameterOptimizer,
         _build_worker_factories,
     )
     from bot.tests.backtesting.orchestrator_engine import BacktestOrchestratorEngine
@@ -186,17 +187,19 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     _build_worker_factories(engine, _ORCH_WORKER_SYMBOL, cfg)
 
     async def _run_with_timeout() -> Any:
-        return await _asyncio.wait_for(engine.run(_ORCH_WORKER_DATA, cfg), timeout=_ORCH_WORKER_TIMEOUT)
+        return await _asyncio.wait_for(
+            engine.run(_ORCH_WORKER_DATA, cfg), timeout=_ORCH_WORKER_TIMEOUT
+        )
 
     result = _asyncio.run(_run_with_timeout())
     obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
     return OptimizationTrial(params=params, result=result, objective_value=obj_val)
 
 
-from bot.strategies.base import BaseStrategy
-from bot.tests.backtesting.backtesting_engine import BacktestResult
-from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData
-from bot.tests.backtesting.multi_tf_engine import (
+from bot.strategies.base import BaseStrategy  # noqa: E402
+from bot.tests.backtesting.backtesting_engine import BacktestResult  # noqa: E402
+from bot.tests.backtesting.multi_tf_data_loader import MultiTimeframeData  # noqa: E402
+from bot.tests.backtesting.multi_tf_engine import (  # noqa: E402
     MultiTFBacktestConfig,
     MultiTimeframeBacktestEngine,
 )
@@ -728,10 +731,7 @@ class ParameterOptimizer:
                         trial_timeout_sec,
                     ),
                 ) as pool:
-                    futures = {
-                        pool.submit(_run_orchestrator_trial, p): p
-                        for p in combinations
-                    }
+                    futures = {pool.submit(_run_orchestrator_trial, p): p for p in combinations}
 
                     for future in concurrent.futures.as_completed(futures):
                         try:
@@ -755,13 +755,19 @@ class ParameterOptimizer:
                             eta = (total - done) / rate if rate > 0 else 0
                             best_val = (
                                 max(_trials, key=lambda t: t.objective_value).objective_value
-                                if _trials else 0.0
+                                if _trials
+                                else 0.0
                             )
                             _logger.info(
                                 "[Phase 2] %d/%d (%.0f%%) | best=%.3f | "
                                 "timeout=%d | failed=%d | ETA=%.0fs",
-                                done, total, done / total * 100,
-                                best_val, _timed_out, _failed, eta,
+                                done,
+                                total,
+                                done / total * 100,
+                                best_val,
+                                _timed_out,
+                                _failed,
+                                eta,
                             )
 
                             # Fire external progress callback (used for Telegram etc.)

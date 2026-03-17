@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bot.agents.committee import InvestmentCommittee
@@ -29,10 +29,10 @@ class CommitteeBacktestAdapter:
 
     def __init__(
         self,
-        committee: "InvestmentCommittee",
-        feedback_tracker: "ExpertFeedbackTracker",
-        regime_store: "RegimeProfileStore | None" = None,
-        calibrator: "WeightCalibrator | None" = None,
+        committee: InvestmentCommittee,
+        feedback_tracker: ExpertFeedbackTracker,
+        regime_store: RegimeProfileStore | None = None,
+        calibrator: WeightCalibrator | None = None,
         calibrate_every_n: int = 20,
     ) -> None:
         self._committee = committee
@@ -101,9 +101,7 @@ class CommitteeBacktestAdapter:
         should_exec = decision.verdict == Verdict.APPROVE
         return should_exec, decision.to_dict()
 
-    def record_outcome(
-        self, position_id: str, pnl: float, regime: str = ""
-    ) -> None:
+    def record_outcome(self, position_id: str, pnl: float, regime: str = "") -> None:
         """Score all expert votes for this closed position.
 
         - Calls feedback_tracker.record_outcome()
@@ -174,7 +172,5 @@ class CommitteeBacktestAdapter:
             "approved": self._approved,
             "rejected": self._rejected,
             "deferred": self._deferred,
-            "filter_rate": (
-                (self._rejected + self._deferred) / total if total > 0 else 0.0
-            ),
+            "filter_rate": ((self._rejected + self._deferred) / total if total > 0 else 0.0),
         }

@@ -13,8 +13,9 @@ Examples:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from bot.utils.logger import get_logger
 
@@ -97,7 +98,7 @@ class CrossEntityAutomation:
 
     async def start(self):
         """Subscribe to all trigger events."""
-        triggers = set(r.trigger_event for r in self._rules)
+        triggers = {r.trigger_event for r in self._rules}
         for trigger in triggers:
             unsub = self._bus.subscribe(trigger, self._on_event)
             self._unsubscribers.append(unsub)
@@ -134,15 +135,18 @@ class CrossEntityAutomation:
             rule.mark_fired()
 
             # Record in history
-            self._history.insert(0, {
-                "rule": rule.name,
-                "trigger_event": event.event_type,
-                "trigger_entity": f"{event.entity_type}:{event.entity_id}",
-                "ts": time.time(),
-                "fire_count": rule.fire_count,
-            })
+            self._history.insert(
+                0,
+                {
+                    "rule": rule.name,
+                    "trigger_event": event.event_type,
+                    "trigger_entity": f"{event.entity_type}:{event.entity_id}",
+                    "ts": time.time(),
+                    "fire_count": rule.fire_count,
+                },
+            )
             if len(self._history) > self._max_history:
-                self._history = self._history[:self._max_history]
+                self._history = self._history[: self._max_history]
 
     async def _fire_action(self, trigger_event: DomainEvent, rule: AutomationRule, action: dict):
         """Fire a single automation action — create and publish a new event."""
@@ -170,7 +174,11 @@ class CrossEntityAutomation:
             entity_type=entity_type,
             entity_id=entity_id,
             event_type=event_type,
-            data={**data, "_automation_rule": rule.name, "_trigger_event_id": trigger_event.event_id},
+            data={
+                **data,
+                "_automation_rule": rule.name,
+                "_trigger_event_id": trigger_event.event_id,
+            },
             bot_name=trigger_event.bot_name,
             causes=[trigger_event.event_id],
         )
@@ -189,152 +197,183 @@ class CrossEntityAutomation:
         """Register built-in trading automation rules."""
 
         # Rule 1: Portfolio stop-loss → deactivate all strategies
-        self.add_rule(AutomationRule(
-            name="portfolio_stop_loss_cascade",
-            description="При стоп-лоссе портфеля деактивировать все стратегии",
-            trigger_event="PORTFOLIO_STOP_LOSS",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "strategy",
-                    "entity_id": "all",
-                    "event_type": "STRATEGY_DEACTIVATED",
-                    "data_fn": lambda e: {"reason": "Portfolio stop-loss triggered", "source": "automation"},
-                },
-                {
-                    "entity_type": "bot",
-                    "entity_id_fn": lambda e: e.bot_name,
-                    "event_type": "BOT_EMERGENCY_STOP",
-                    "data_fn": lambda e: {"reason": "Portfolio stop-loss", "source": "automation"},
-                },
-            ],
-            cooldown_seconds=60,
-        ))
+        self.add_rule(
+            AutomationRule(
+                name="portfolio_stop_loss_cascade",
+                description="При стоп-лоссе портфеля деактивировать все стратегии",
+                trigger_event="PORTFOLIO_STOP_LOSS",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "strategy",
+                        "entity_id": "all",
+                        "event_type": "STRATEGY_DEACTIVATED",
+                        "data_fn": lambda e: {
+                            "reason": "Portfolio stop-loss triggered",
+                            "source": "automation",
+                        },
+                    },
+                    {
+                        "entity_type": "bot",
+                        "entity_id_fn": lambda e: e.bot_name,
+                        "event_type": "BOT_EMERGENCY_STOP",
+                        "data_fn": lambda e: {
+                            "reason": "Portfolio stop-loss",
+                            "source": "automation",
+                        },
+                    },
+                ],
+                cooldown_seconds=60,
+            )
+        )
 
         # Rule 2: Daily loss limit → pause all strategies
-        self.add_rule(AutomationRule(
-            name="daily_loss_limit_cascade",
-            description="При достижении дневного лимита убытков — пауза",
-            trigger_event="DAILY_LOSS_LIMIT_HIT",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "risk",
-                    "entity_id": "daily",
-                    "event_type": "RISK_HALTED",
-                    "data_fn": lambda e: {"reason": "Daily loss limit", "daily_loss": e.data.get("daily_loss")},
-                },
-            ],
-            cooldown_seconds=300,
-        ))
+        self.add_rule(
+            AutomationRule(
+                name="daily_loss_limit_cascade",
+                description="При достижении дневного лимита убытков — пауза",
+                trigger_event="DAILY_LOSS_LIMIT_HIT",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "risk",
+                        "entity_id": "daily",
+                        "event_type": "RISK_HALTED",
+                        "data_fn": lambda e: {
+                            "reason": "Daily loss limit",
+                            "daily_loss": e.data.get("daily_loss"),
+                        },
+                    },
+                ],
+                cooldown_seconds=300,
+            )
+        )
 
         # Rule 3: Consecutive losses → escalate risk
-        self.add_rule(AutomationRule(
-            name="loss_streak_escalation",
-            description="3 убыточные позиции подряд → остановка торговли",
-            trigger_event="POSITION_CLOSED",
-            condition=lambda e: self._check_loss_streak(e),
-            actions=[
-                {
-                    "entity_type": "risk",
-                    "entity_id": "streak",
-                    "event_type": "RISK_HALTED",
-                    "data_fn": lambda e: {
-                        "reason": f"Loss streak: {self._consecutive_losses} consecutive losses",
-                        "streak": self._consecutive_losses,
+        self.add_rule(
+            AutomationRule(
+                name="loss_streak_escalation",
+                description="3 убыточные позиции подряд → остановка торговли",
+                trigger_event="POSITION_CLOSED",
+                condition=lambda e: self._check_loss_streak(e),
+                actions=[
+                    {
+                        "entity_type": "risk",
+                        "entity_id": "streak",
+                        "event_type": "RISK_HALTED",
+                        "data_fn": lambda e: {
+                            "reason": f"Loss streak: {self._consecutive_losses} consecutive losses",
+                            "streak": self._consecutive_losses,
+                        },
                     },
-                },
-            ],
-            cooldown_seconds=600,
-        ))
+                ],
+                cooldown_seconds=600,
+            )
+        )
 
         # Rule 4: Regime change → strategy activation events
-        self.add_rule(AutomationRule(
-            name="regime_strategy_activation",
-            description="Смена режима → уведомление стратегий",
-            trigger_event="TRANSITION_COMPLETE",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "strategy",
-                    "entity_id": "routing",
-                    "event_type": "STRATEGY_ACTIVATED",
-                    "data_fn": lambda e: {
-                        "regime": e.data.get("new_regime"),
-                        "source": "automation",
+        self.add_rule(
+            AutomationRule(
+                name="regime_strategy_activation",
+                description="Смена режима → уведомление стратегий",
+                trigger_event="TRANSITION_COMPLETE",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "strategy",
+                        "entity_id": "routing",
+                        "event_type": "STRATEGY_ACTIVATED",
+                        "data_fn": lambda e: {
+                            "regime": e.data.get("new_regime"),
+                            "source": "automation",
+                        },
                     },
-                },
-            ],
-        ))
+                ],
+            )
+        )
 
         # Rule 5: Risk resumed → notify strategies
-        self.add_rule(AutomationRule(
-            name="risk_resumed_notification",
-            description="Возобновление торговли → уведомление стратегий",
-            trigger_event="RISK_RESUMED",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "strategy",
-                    "entity_id": "all",
-                    "event_type": "STRATEGY_ACTIVATED",
-                    "data_fn": lambda e: {"reason": "Risk resumed", "source": "automation"},
-                },
-            ],
-        ))
+        self.add_rule(
+            AutomationRule(
+                name="risk_resumed_notification",
+                description="Возобновление торговли → уведомление стратегий",
+                trigger_event="RISK_RESUMED",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "strategy",
+                        "entity_id": "all",
+                        "event_type": "STRATEGY_ACTIVATED",
+                        "data_fn": lambda e: {"reason": "Risk resumed", "source": "automation"},
+                    },
+                ],
+            )
+        )
 
         # Rule 6: Bot error → risk notification
-        self.add_rule(AutomationRule(
-            name="bot_error_risk_notification",
-            description="Ошибка бота → уведомление риск-менеджера",
-            trigger_event="BOT_ERROR",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "risk",
-                    "entity_id_fn": lambda e: e.bot_name,
-                    "event_type": "TRADE_REJECTED",
-                    "data_fn": lambda e: {"reason": f"Bot error: {e.data.get('error', 'unknown')}", "source": "automation"},
-                },
-            ],
-            cooldown_seconds=30,
-        ))
+        self.add_rule(
+            AutomationRule(
+                name="bot_error_risk_notification",
+                description="Ошибка бота → уведомление риск-менеджера",
+                trigger_event="BOT_ERROR",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "risk",
+                        "entity_id_fn": lambda e: e.bot_name,
+                        "event_type": "TRADE_REJECTED",
+                        "data_fn": lambda e: {
+                            "reason": f"Bot error: {e.data.get('error', 'unknown')}",
+                            "source": "automation",
+                        },
+                    },
+                ],
+                cooldown_seconds=30,
+            )
+        )
 
         # Rule 7: Position opened → update portfolio state
-        self.add_rule(AutomationRule(
-            name="position_portfolio_sync",
-            description="Открытие позиции → обновление портфеля",
-            trigger_event="POSITION_OPENED",
-            condition=lambda e: True,
-            actions=[
-                {
-                    "entity_type": "portfolio",
-                    "entity_id": "main",
-                    "event_type": "BALANCE_UPDATED",
-                    "data_fn": lambda e: {"source": "position_opened", "position_id": e.entity_id},
-                },
-            ],
-        ))
+        self.add_rule(
+            AutomationRule(
+                name="position_portfolio_sync",
+                description="Открытие позиции → обновление портфеля",
+                trigger_event="POSITION_OPENED",
+                condition=lambda e: True,
+                actions=[
+                    {
+                        "entity_type": "portfolio",
+                        "entity_id": "main",
+                        "event_type": "BALANCE_UPDATED",
+                        "data_fn": lambda e: {
+                            "source": "position_opened",
+                            "position_id": e.entity_id,
+                        },
+                    },
+                ],
+            )
+        )
 
         # Rule 8: Committee REJECT → trade rejected event
-        self.add_rule(AutomationRule(
-            name="committee_reject_cascade",
-            description="Комитет отклонил → событие отклонения",
-            trigger_event="DECISION_MADE",
-            condition=lambda e: e.data.get("verdict") == "reject",
-            actions=[
-                {
-                    "entity_type": "risk",
-                    "entity_id_fn": lambda e: e.entity_id,
-                    "event_type": "TRADE_REJECTED",
-                    "data_fn": lambda e: {
-                        "reason": f"Committee rejected: {e.data.get('reasoning', '')}",
-                        "score": e.data.get("score"),
-                        "source": "committee",
+        self.add_rule(
+            AutomationRule(
+                name="committee_reject_cascade",
+                description="Комитет отклонил → событие отклонения",
+                trigger_event="DECISION_MADE",
+                condition=lambda e: e.data.get("verdict") == "reject",
+                actions=[
+                    {
+                        "entity_type": "risk",
+                        "entity_id_fn": lambda e: e.entity_id,
+                        "event_type": "TRADE_REJECTED",
+                        "data_fn": lambda e: {
+                            "reason": f"Committee rejected: {e.data.get('reasoning', '')}",
+                            "score": e.data.get("score"),
+                            "source": "committee",
+                        },
                     },
-                },
-            ],
-        ))
+                ],
+            )
+        )
 
         logger.info("default_automation_rules_registered", count=len(self._rules))
 

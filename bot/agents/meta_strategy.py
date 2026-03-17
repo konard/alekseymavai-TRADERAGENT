@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from bot.core.predictive_model import MarkovTransitionModel
-from bot.core.pattern_learner import PatternLearner
 from bot.agents.regime_profile import RegimeProfileStore
+from bot.core.pattern_learner import PatternLearner
+from bot.core.predictive_model import MarkovTransitionModel
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -219,9 +219,7 @@ class MetaStrategyAllocator:
         # Build reasoning
         parts = []
         if pattern_confidence > 0:
-            parts.append(
-                f"pattern WR={pattern_win_rate:.0%} conf={pattern_confidence:.2f}"
-            )
+            parts.append(f"pattern WR={pattern_win_rate:.0%} conf={pattern_confidence:.2f}")
         else:
             parts.append("no pattern data")
         parts.append(f"regime_persist={regime_persistence_prob:.2f}")
@@ -240,9 +238,7 @@ class MetaStrategyAllocator:
             reasoning=reasoning,
         )
 
-    def _normalize_allocations(
-        self, scores: list[StrategyScore]
-    ) -> dict[str, float]:
+    def _normalize_allocations(self, scores: list[StrategyScore]) -> dict[str, float]:
         """Normalize composite scores into allocations respecting min/max bounds."""
         n = len(scores)
         if n == 0:

@@ -5,7 +5,6 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 
 class ExecutionAlgo(Enum):
@@ -251,6 +250,7 @@ class ExecutionOptimizer:
 # Market Microstructure
 # ======================================================================
 
+
 @dataclass
 class _Tick:
     price: float
@@ -365,11 +365,7 @@ class MarketMicrostructure:
                 effective_spreads.append(2.0 * abs(curr.price - mid))
                 mid_idx += 1
 
-        effective = (
-            sum(effective_spreads) / len(effective_spreads)
-            if effective_spreads
-            else 0.0
-        )
+        effective = sum(effective_spreads) / len(effective_spreads) if effective_spreads else 0.0
 
         # Realized spread: effective spread minus price impact
         # Approximation: half the avg spread

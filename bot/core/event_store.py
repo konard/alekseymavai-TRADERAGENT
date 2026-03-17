@@ -7,7 +7,6 @@ database-backed store without changing the interface.
 """
 
 import json
-import os
 from pathlib import Path
 
 from bot.core.event_bus import DomainEvent
@@ -59,9 +58,7 @@ class EventStore:
                 event_type=event.event_type,
             )
 
-    async def load_timeline(
-        self, entity_type: str, entity_id: str
-    ) -> list[DomainEvent]:
+    async def load_timeline(self, entity_type: str, entity_id: str) -> list[DomainEvent]:
         """Load all events for a specific entity from its timeline file."""
         entity_file = self._storage_dir / entity_type / f"{entity_id}.jsonl"
         return self._load_file(entity_file)
@@ -91,14 +88,14 @@ class EventStore:
         try:
             all_file = self._storage_dir / "_all.jsonl"
             if all_file.exists():
-                with open(all_file, "r", encoding="utf-8") as f:
+                with open(all_file, encoding="utf-8") as f:
                     stats["total"] = sum(1 for line in f if line.strip())
 
             for entry in sorted(self._storage_dir.iterdir()):
                 if entry.is_dir() and entry.name != "__pycache__":
                     count = 0
                     for jsonl_file in entry.glob("*.jsonl"):
-                        with open(jsonl_file, "r", encoding="utf-8") as f:
+                        with open(jsonl_file, encoding="utf-8") as f:
                             count += sum(1 for line in f if line.strip())
                     stats["by_entity_type"][entry.name] = count
 
@@ -114,7 +111,7 @@ class EventStore:
             return events
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
