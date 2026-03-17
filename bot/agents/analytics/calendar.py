@@ -79,9 +79,7 @@ class EventCalendar:
     ) -> list[MarketEvent]:
         now = current_ts if current_ts is not None else time.time()
         cutoff = now + hours_ahead * 3600
-        upcoming = [
-            e for e in self._events.values() if now <= e.scheduled_ts <= cutoff
-        ]
+        upcoming = [e for e in self._events.values() if now <= e.scheduled_ts <= cutoff]
         upcoming.sort(key=lambda e: e.scheduled_ts)
         return upcoming
 
@@ -99,10 +97,7 @@ class EventCalendar:
                 mult = self._IMPACT_MULTIPLIER.get(event.impact, 1.0)
                 if mult < best_multiplier:
                     best_multiplier = mult
-                    best_reason = (
-                        f"{event.name} in {hours_until:.1f}h "
-                        f"(impact={event.impact})"
-                    )
+                    best_reason = f"{event.name} in {hours_until:.1f}h " f"(impact={event.impact})"
                     best_event = event
                     best_hours = hours_until
 
@@ -119,16 +114,12 @@ class EventCalendar:
     ) -> list[MarketEvent]:
         now = current_ts if current_ts is not None else time.time()
         cutoff = now - hours_back * 3600
-        past = [
-            e for e in self._events.values() if cutoff <= e.scheduled_ts < now
-        ]
+        past = [e for e in self._events.values() if cutoff <= e.scheduled_ts < now]
         past.sort(key=lambda e: e.scheduled_ts)
         return past
 
     def get_events_by_category(self, category: str) -> list[MarketEvent]:
-        return [
-            e for e in self._events.values() if e.category == category
-        ]
+        return [e for e in self._events.values() if e.category == category]
 
     def get_stats(self) -> dict:
         categories: dict[str, int] = {}
@@ -150,7 +141,14 @@ class EventCalendar:
         cal = cls()
         defaults = [
             ("BTC Halving", "crypto", "critical", 30 * 24, 48.0, "Bitcoin block reward halving"),
-            ("FOMC Meeting", "macro", "high", 7 * 24, 4.0, "Federal Reserve interest rate decision"),
+            (
+                "FOMC Meeting",
+                "macro",
+                "high",
+                7 * 24,
+                4.0,
+                "Federal Reserve interest rate decision",
+            ),
             ("CPI Release", "macro", "high", 3 * 24, 4.0, "Consumer Price Index release"),
             ("ETH Upgrade", "crypto", "medium", 14 * 24, 8.0, "Ethereum network upgrade"),
             ("Options Expiry", "crypto", "medium", 5 * 24, 2.0, "Monthly crypto options expiry"),
@@ -201,9 +199,7 @@ class Scenario:
         }
 
 
-_TRIGGER_RE = re.compile(
-    r"^(\w+)\s*(==|!=|<|>|<=|>=)\s*(.+)$"
-)
+_TRIGGER_RE = re.compile(r"^(\w+)\s*(==|!=|<|>|<=|>=)\s*(.+)$")
 
 
 def _evaluate_trigger(trigger: str, conditions: dict) -> bool:
@@ -258,9 +254,7 @@ class ScenarioPlanner:
                 continue
             if not sc.triggers:
                 continue
-            if all(
-                _evaluate_trigger(t, current_conditions) for t in sc.triggers
-            ):
+            if all(_evaluate_trigger(t, current_conditions) for t in sc.triggers):
                 matched.append(sc)
         return matched
 
@@ -270,11 +264,11 @@ class ScenarioPlanner:
             return []
         return [dict(a) for a in sc.actions]
 
-    def evaluate_portfolio_impact(
-        self, scenario: Scenario, portfolio: dict
-    ) -> dict:
+    def evaluate_portfolio_impact(self, scenario: Scenario, portfolio: dict) -> dict:
         total_value = portfolio.get("total_value", 0.0)
-        estimated_loss = abs(total_value * scenario.impact_score) if scenario.impact_score < 0 else 0.0
+        estimated_loss = (
+            abs(total_value * scenario.impact_score) if scenario.impact_score < 0 else 0.0
+        )
 
         positions = portfolio.get("positions", [])
         affected = [p for p in positions] if scenario.impact_score < 0 else []

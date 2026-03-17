@@ -55,6 +55,7 @@ def _init_orchestrator_worker(
         _h.setLevel(_logging.ERROR)
     try:
         import structlog as _sl
+
         _sl.configure(wrapper_class=_sl.make_filtering_bound_logger(_logging.ERROR))
     except Exception:
         pass
@@ -186,7 +187,9 @@ def _run_orchestrator_trial(params: dict[str, Any]) -> Any:
     _build_worker_factories(engine, _ORCH_WORKER_SYMBOL, cfg)
 
     async def _run_with_timeout() -> Any:
-        return await _asyncio.wait_for(engine.run(_ORCH_WORKER_DATA, cfg), timeout=_ORCH_WORKER_TIMEOUT)
+        return await _asyncio.wait_for(
+            engine.run(_ORCH_WORKER_DATA, cfg), timeout=_ORCH_WORKER_TIMEOUT
+        )
 
     result = _asyncio.run(_run_with_timeout())
     obj_val = float(getattr(result, _ORCH_WORKER_OBJECTIVE, None) or 0.0)
@@ -728,10 +731,7 @@ class ParameterOptimizer:
                         trial_timeout_sec,
                     ),
                 ) as pool:
-                    futures = {
-                        pool.submit(_run_orchestrator_trial, p): p
-                        for p in combinations
-                    }
+                    futures = {pool.submit(_run_orchestrator_trial, p): p for p in combinations}
 
                     for future in concurrent.futures.as_completed(futures):
                         try:
@@ -755,13 +755,19 @@ class ParameterOptimizer:
                             eta = (total - done) / rate if rate > 0 else 0
                             best_val = (
                                 max(_trials, key=lambda t: t.objective_value).objective_value
-                                if _trials else 0.0
+                                if _trials
+                                else 0.0
                             )
                             _logger.info(
                                 "[Phase 2] %d/%d (%.0f%%) | best=%.3f | "
                                 "timeout=%d | failed=%d | ETA=%.0fs",
-                                done, total, done / total * 100,
-                                best_val, _timed_out, _failed, eta,
+                                done,
+                                total,
+                                done / total * 100,
+                                best_val,
+                                _timed_out,
+                                _failed,
+                                eta,
                             )
 
                             # Fire external progress callback (used for Telegram etc.)

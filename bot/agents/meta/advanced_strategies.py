@@ -45,7 +45,7 @@ class FundingRateHarvester:
             self._history[symbol] = []
         self._history[symbol].append({"rate": funding_rate, "ts": ts})
         if len(self._history[symbol]) > self._max_history:
-            self._history[symbol] = self._history[symbol][-self._max_history:]
+            self._history[symbol] = self._history[symbol][-self._max_history :]
 
     def find_opportunities(self) -> list[FundingOpportunity]:
         opportunities: list[FundingOpportunity] = []
@@ -229,12 +229,14 @@ class SmartOrderRouter:
                 + self.latency_weight * latency_score
             )
             est_cost = size_usd * (q.spread_pct / 2 + q.fee_pct)
-            scored.append({
-                "venue": venue,
-                "score": round(total, 6),
-                "quote": q.to_dict(),
-                "estimated_cost": round(est_cost, 6),
-            })
+            scored.append(
+                {
+                    "venue": venue,
+                    "score": round(total, 6),
+                    "quote": q.to_dict(),
+                    "estimated_cost": round(est_cost, 6),
+                }
+            )
         scored.sort(key=lambda x: x["score"], reverse=True)
         best = scored[0]
         return {
@@ -273,11 +275,13 @@ class SmartOrderRouter:
             if alloc <= 0:
                 continue
             est_cost = alloc * (q.spread_pct / 2 + q.fee_pct)
-            splits.append({
-                "venue": venue,
-                "size_usd": round(alloc, 6),
-                "estimated_cost": round(est_cost, 6),
-            })
+            splits.append(
+                {
+                    "venue": venue,
+                    "size_usd": round(alloc, 6),
+                    "estimated_cost": round(est_cost, 6),
+                }
+            )
             remaining -= alloc
 
         # If there's remaining, allocate to best venue
@@ -292,11 +296,13 @@ class SmartOrderRouter:
             best_venue = all_venues[0]["venue"]
             q = eligible[best_venue]
             est_cost = size_usd * (q.spread_pct / 2 + q.fee_pct)
-            splits.append({
-                "venue": best_venue,
-                "size_usd": round(size_usd, 6),
-                "estimated_cost": round(est_cost, 6),
-            })
+            splits.append(
+                {
+                    "venue": best_venue,
+                    "size_usd": round(size_usd, 6),
+                    "estimated_cost": round(est_cost, 6),
+                }
+            )
         return splits
 
     def record_fill(
@@ -308,15 +314,17 @@ class SmartOrderRouter:
         size_usd: float,
     ) -> None:
         slippage = (actual_price - expected_price) / expected_price if expected_price else 0.0
-        self._fills.append({
-            "venue": venue,
-            "symbol": symbol,
-            "expected_price": expected_price,
-            "actual_price": actual_price,
-            "size_usd": size_usd,
-            "slippage": slippage,
-            "ts": time.time(),
-        })
+        self._fills.append(
+            {
+                "venue": venue,
+                "symbol": symbol,
+                "expected_price": expected_price,
+                "actual_price": actual_price,
+                "size_usd": size_usd,
+                "slippage": slippage,
+                "ts": time.time(),
+            }
+        )
 
     def get_venue_stats(self) -> dict[str, dict]:
         stats: dict[str, dict] = {}

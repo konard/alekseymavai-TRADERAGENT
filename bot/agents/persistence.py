@@ -195,9 +195,7 @@ class AgentStatePersistence:
         data: dict[str, Any] = {}
 
         if committee is not None:
-            data["expert_weights"] = {
-                e.name: e.weight for e in committee.experts
-            }
+            data["expert_weights"] = {e.name: e.weight for e in committee.experts}
 
         if calibrator is not None:
             data["base_weights"] = dict(calibrator._base_weights)
@@ -210,12 +208,7 @@ class AgentStatePersistence:
 
     @staticmethod
     def _build_feedback_data(tracker: ExpertFeedbackTracker) -> dict:
-        return {
-            "scorecards": {
-                name: sc.to_dict()
-                for name, sc in tracker._scorecards.items()
-            }
-        }
+        return {"scorecards": {name: sc.to_dict() for name, sc in tracker._scorecards.items()}}
 
     @staticmethod
     def _build_regime_data(regime_store: RegimeProfileStore) -> dict:

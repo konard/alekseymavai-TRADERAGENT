@@ -86,9 +86,7 @@ class TradeClustering:
             groups[key].append(t)
 
         clusters: list[TradeCluster] = []
-        for idx, ((regime, strategy, direction), trades) in enumerate(
-            sorted(groups.items())
-        ):
+        for idx, ((regime, strategy, direction), trades) in enumerate(sorted(groups.items())):
             size = len(trades)
             wins = sum(1 for t in trades if t.win)
             win_rate = wins / size if size else 0.0
@@ -300,7 +298,7 @@ class AdaptiveLearningRate:
             self._rates[agent_name] = self._clamp(self._rates[agent_name])
 
     def on_stable_regime(self) -> None:
-        extra_decay = self._decay ** 5
+        extra_decay = self._decay**5
         for agent_name in list(self._rates):
             self._rates[agent_name] *= extra_decay
             self._rates[agent_name] = self._clamp(self._rates[agent_name])

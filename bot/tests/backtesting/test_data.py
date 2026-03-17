@@ -193,6 +193,7 @@ class HistoricalDataProvider:
 
         # Adaptive trend: ln(3)/est_bars per bar → price ×3 over full series.
         import math
+
         _drift_per_bar = Decimal(str(math.log(3) / est_bars))
         if trend == "up":
             trend_strength = _drift_per_bar

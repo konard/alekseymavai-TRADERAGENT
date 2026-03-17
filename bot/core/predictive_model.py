@@ -27,9 +27,12 @@ logger = get_logger(__name__)
 @dataclass
 class Prediction:
     """A single prediction with confidence."""
+
     predicted_state: str
     probability: float
-    alternatives: list[dict[str, float]] = field(default_factory=list)  # [{state, probability}, ...]
+    alternatives: list[dict[str, float]] = field(
+        default_factory=list
+    )  # [{state, probability}, ...]
     horizon_seconds: float | None = None  # estimated time until transition
     basis: str = ""  # what data the prediction is based on
     ts: float = field(default_factory=time.time)
@@ -38,7 +41,10 @@ class Prediction:
         return {
             "predicted_state": self.predicted_state,
             "probability": round(self.probability, 4),
-            "alternatives": [{"state": a["state"], "probability": round(a["probability"], 4)} for a in self.alternatives],
+            "alternatives": [
+                {"state": a["state"], "probability": round(a["probability"], 4)}
+                for a in self.alternatives
+            ],
             "horizon_seconds": self.horizon_seconds,
             "basis": self.basis,
             "ts": self.ts,
@@ -70,16 +76,22 @@ class MarkovTransitionModel:
         self._first_order: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
         # Second-order: counts[(prev, current)][next] = count
-        self._second_order: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._second_order: dict[tuple[str, str], dict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
 
         # Transition times: time_deltas[from_state][to_state] = [delta1, delta2, ...]
-        self._transition_times: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        self._transition_times: dict[str, dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
 
         # State set
         self._states: set[str] = set()
 
         # Last state per entity for sequence tracking
-        self._entity_states: dict[str, list[tuple[str, float]]] = defaultdict(list)  # entity_key -> [(state, ts), ...]
+        self._entity_states: dict[str, list[tuple[str, float]]] = defaultdict(
+            list
+        )  # entity_key -> [(state, ts), ...]
 
         # Total observations
         self._total_transitions: int = 0
@@ -160,18 +172,12 @@ class MarkovTransitionModel:
         if prev_state and (prev_state, current_state) in self._second_order:
             counts = self._second_order[(prev_state, current_state)]
             total = sum(counts.values()) + self._smoothing * len(self._states)
-            probs = {
-                s: (counts.get(s, 0) + self._smoothing) / total
-                for s in self._states
-            }
+            probs = {s: (counts.get(s, 0) + self._smoothing) / total for s in self._states}
             basis = f"second-order: ({prev_state}, {current_state})"
         elif current_state in self._first_order:
             counts = self._first_order[current_state]
             total = sum(counts.values()) + self._smoothing * len(self._states)
-            probs = {
-                s: (counts.get(s, 0) + self._smoothing) / total
-                for s in self._states
-            }
+            probs = {s: (counts.get(s, 0) + self._smoothing) / total for s in self._states}
             basis = f"first-order: {current_state}"
         else:
             # No data — uniform distribution
@@ -201,7 +207,7 @@ class MarkovTransitionModel:
 
         self._predictions.insert(0, prediction)
         if len(self._predictions) > self._max_predictions:
-            self._predictions = self._predictions[:self._max_predictions]
+            self._predictions = self._predictions[: self._max_predictions]
 
         return prediction
 
@@ -309,6 +315,7 @@ class MarkovTransitionModel:
             entity_types: If provided, only observe events for these entity types.
                           If None, observe all events.
         """
+
         def on_event(event: DomainEvent):
             if entity_types and event.entity_type not in entity_types:
                 return
@@ -325,10 +332,16 @@ class MarkovTransitionModel:
         # Subscribe to all events using wildcard pattern
         # Since EventBus may not support wildcards, subscribe to common types
         common_types = [
-            "REGIME_DETECTED", "TRANSITION_COMPLETE", "REGIME_CHANGE_CANDIDATE",
-            "SIGNAL_GENERATED", "POSITION_OPENED", "POSITION_CLOSED",
-            "STRATEGY_ACTIVATED", "STRATEGY_DEACTIVATED",
-            "RISK_HALTED", "RISK_RESUMED",
+            "REGIME_DETECTED",
+            "TRANSITION_COMPLETE",
+            "REGIME_CHANGE_CANDIDATE",
+            "SIGNAL_GENERATED",
+            "POSITION_OPENED",
+            "POSITION_CLOSED",
+            "STRATEGY_ACTIVATED",
+            "STRATEGY_DEACTIVATED",
+            "RISK_HALTED",
+            "RISK_RESUMED",
             "DECISION_MADE",
         ]
         for event_type in common_types:

@@ -90,9 +90,11 @@ class DomainEvent:
                 result[key] = DomainEvent._convert_decimals(value)
             elif isinstance(value, list):
                 result[key] = [
-                    str(item) if isinstance(item, Decimal)
-                    else DomainEvent._convert_decimals(item) if isinstance(item, dict)
-                    else item
+                    (
+                        str(item)
+                        if isinstance(item, Decimal)
+                        else DomainEvent._convert_decimals(item) if isinstance(item, dict) else item
+                    )
                     for item in value
                 ]
             else:

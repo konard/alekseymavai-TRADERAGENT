@@ -80,11 +80,7 @@ class EnsemblePredictor:
 
     # ------------------------------------------------------------------
     def predict(self) -> EnsemblePrediction:
-        active = {
-            n: self._sources[n]
-            for n in self._latest_predictions
-            if n in self._sources
-        }
+        active = {n: self._sources[n] for n in self._latest_predictions if n in self._sources}
         if not active:
             return EnsemblePrediction(
                 direction="neutral",
@@ -116,11 +112,7 @@ class EnsemblePredictor:
 
         # agreement
         n_total = len(active)
-        agreeing = sum(
-            1
-            for n in active
-            if self._latest_predictions[n][0] == direction
-        )
+        agreeing = sum(1 for n in active if self._latest_predictions[n][0] == direction)
         agreement_ratio = agreeing / n_total
 
         # entropy
@@ -164,12 +156,14 @@ class EnsemblePredictor:
         for src in self._sources.values():
             recent = src.accuracy_history[-_ROLLING_WINDOW:]
             accuracy = sum(recent) / len(recent) if recent else 0.0
-            ranked.append({
-                "name": src.name,
-                "rolling_accuracy": accuracy,
-                "weight": src.weight,
-                "total_predictions": len(src.accuracy_history),
-            })
+            ranked.append(
+                {
+                    "name": src.name,
+                    "rolling_accuracy": accuracy,
+                    "weight": src.weight,
+                    "total_predictions": len(src.accuracy_history),
+                }
+            )
         ranked.sort(key=lambda d: d["rolling_accuracy"], reverse=True)
         return ranked
 

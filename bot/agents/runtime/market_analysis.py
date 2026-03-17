@@ -58,8 +58,8 @@ class VolatilityRegimeClassifier:
         self._timestamps.append(ts if ts is not None else time.time())
         # Keep only the rolling window
         if len(self._returns) > self._window_size:
-            self._returns = self._returns[-self._window_size:]
-            self._timestamps = self._timestamps[-self._window_size:]
+            self._returns = self._returns[-self._window_size :]
+            self._timestamps = self._timestamps[-self._window_size :]
 
     # ------------------------------------------------------------------
     def _ewma_vol(self) -> float:
@@ -237,7 +237,7 @@ class LiquidityScorer:
         buf = self._observations[symbol]
         buf.append(obs)
         if len(buf) > self._OBS_WINDOW:
-            self._observations[symbol] = buf[-self._OBS_WINDOW:]
+            self._observations[symbol] = buf[-self._OBS_WINDOW :]
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -291,10 +291,7 @@ class LiquidityScorer:
             stability_score = 0.0
 
         overall = (
-            0.30 * spread_score
-            + 0.30 * depth_score
-            + 0.25 * volume_score
-            + 0.15 * stability_score
+            0.30 * spread_score + 0.30 * depth_score + 0.25 * volume_score + 0.15 * stability_score
         )
 
         return LiquidityScore(
@@ -331,7 +328,5 @@ class LiquidityScorer:
             "symbols_tracked": len(self._observations),
             "min_score_to_trade": self._min_score,
             "depth_reference_usd": self._depth_ref,
-            "observations_per_symbol": {
-                sym: len(obs) for sym, obs in self._observations.items()
-            },
+            "observations_per_symbol": {sym: len(obs) for sym, obs in self._observations.items()},
         }

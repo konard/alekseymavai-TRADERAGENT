@@ -90,9 +90,7 @@ class SignalPipeline:
         self._last_run: list[PipelineResult] | None = None
         self._total_runs: int = 0
         self._successful_runs: int = 0
-        self._stage_durations: dict[PipelineStage, list[float]] = {
-            s: [] for s in PipelineStage
-        }
+        self._stage_durations: dict[PipelineStage, list[float]] = {s: [] for s in PipelineStage}
 
     def register_stage(
         self, stage: PipelineStage, handler: Callable[[dict], Awaitable[dict]]
@@ -105,9 +103,7 @@ class SignalPipeline:
     async def run_dry(self, signal: dict) -> list[PipelineResult]:
         return await self._execute(signal, skip_execution=True)
 
-    async def _execute(
-        self, signal: dict, *, skip_execution: bool
-    ) -> list[PipelineResult]:
+    async def _execute(self, signal: dict, *, skip_execution: bool) -> list[PipelineResult]:
         results: list[PipelineResult] = []
         context: dict = dict(signal)
 
@@ -182,12 +178,8 @@ class SignalPipeline:
 
         return {
             "total_runs": self._total_runs,
-            "success_rate": (
-                self._successful_runs / self._total_runs if self._total_runs else 0.0
-            ),
-            "avg_duration_ms": (
-                sum(all_durations) / len(all_durations) if all_durations else 0.0
-            ),
+            "success_rate": (self._successful_runs / self._total_runs if self._total_runs else 0.0),
+            "avg_duration_ms": (sum(all_durations) / len(all_durations) if all_durations else 0.0),
             "stage_durations": stage_avg,
         }
 
@@ -220,9 +212,7 @@ class AutoPilot:
     def set_mode(self, mode: AutoPilotMode) -> None:
         self._mode = mode
 
-    def set_confirmation_callback(
-        self, callback: Callable[[dict], Awaitable[bool]]
-    ) -> None:
+    def set_confirmation_callback(self, callback: Callable[[dict], Awaitable[bool]]) -> None:
         self._confirmation_callback = callback
 
     def set_constraints(

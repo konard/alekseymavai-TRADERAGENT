@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 # StopAction
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StopAction:
     """Describes a stop-loss management action."""
@@ -29,6 +30,7 @@ class StopAction:
 # ---------------------------------------------------------------------------
 # DynamicStopManager
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _PositionState:
@@ -215,6 +217,7 @@ class DynamicStopManager:
 # StrategyRiskContribution
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StrategyRiskContribution:
     """Risk contribution of a single strategy in the portfolio."""
@@ -240,6 +243,7 @@ class StrategyRiskContribution:
 # ---------------------------------------------------------------------------
 # RiskParityAllocator
 # ---------------------------------------------------------------------------
+
 
 class RiskParityAllocator:
     """Allocates capital across strategies using inverse-volatility risk parity."""
@@ -333,13 +337,15 @@ class RiskParityAllocator:
             else:
                 action_type = "decrease"
 
-            actions.append({
-                "strategy": s,
-                "action": action_type,
-                "from_pct": current,
-                "to_pct": target,
-                "delta_pct": delta,
-            })
+            actions.append(
+                {
+                    "strategy": s,
+                    "action": action_type,
+                    "from_pct": current,
+                    "to_pct": target,
+                    "delta_pct": delta,
+                }
+            )
 
         return actions
 

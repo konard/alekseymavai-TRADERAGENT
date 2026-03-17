@@ -116,26 +116,20 @@ class DynamicPositionSizer:
                 )
                 adjusted_risk = kelly_risk
         elif self._use_kelly and half_kelly <= 0:
-            reasoning_parts.append(
-                "Kelly suggests no edge; applying minimum risk"
-            )
+            reasoning_parts.append("Kelly suggests no edge; applying minimum risk")
             adjusted_risk = self._min_risk_pct
 
         # 6. Anomaly penalty
         if has_anomaly:
             pre_anomaly = adjusted_risk
             adjusted_risk *= self._anomaly_reduction
-            reasoning_parts.append(
-                f"Anomaly penalty: {pre_anomaly:.2f}% -> {adjusted_risk:.2f}%"
-            )
+            reasoning_parts.append(f"Anomaly penalty: {pre_anomaly:.2f}% -> {adjusted_risk:.2f}%")
 
         # 7. Clamp to [min, max]
         final = max(self._min_risk_pct, min(adjusted_risk, self._max_risk_pct))
 
         if not reasoning_parts:
-            reasoning_parts.append(
-                f"conf_mult={confidence_mult:.2f}, pat_mult={pattern_mult:.2f}"
-            )
+            reasoning_parts.append(f"conf_mult={confidence_mult:.2f}, pat_mult={pattern_mult:.2f}")
 
         result = SizingResult(
             base_risk_pct=self._base_risk_pct,
@@ -183,12 +177,8 @@ class DynamicPositionSizer:
                 "avg_kelly": 0.0,
                 "history_count": 0,
             }
-        avg_risk = sum(r.adjusted_risk_pct for r in self._history) / len(
-            self._history
-        )
-        avg_kelly = sum(r.kelly_fraction for r in self._history) / len(
-            self._history
-        )
+        avg_risk = sum(r.adjusted_risk_pct for r in self._history) / len(self._history)
+        avg_kelly = sum(r.kelly_fraction for r in self._history) / len(self._history)
         return {
             "avg_adjusted_risk": round(avg_risk, 4),
             "avg_kelly": round(avg_kelly, 4),

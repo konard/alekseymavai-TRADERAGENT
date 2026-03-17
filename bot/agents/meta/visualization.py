@@ -82,12 +82,8 @@ class PortfolioHeatMap:
         pv = self._portfolio_value if self._portfolio_value != 0 else 1.0
         total_risk_pct = total_exposure / pv * 100.0
 
-        long_exp = sum(
-            c.exposure_usd for c in cells if c.direction == "long"
-        )
-        short_exp = sum(
-            abs(c.exposure_usd) for c in cells if c.direction == "short"
-        )
+        long_exp = sum(c.exposure_usd for c in cells if c.direction == "long")
+        short_exp = sum(abs(c.exposure_usd) for c in cells if c.direction == "short")
         net = long_exp - short_exp
         if net > 0:
             net_direction = "long"
@@ -115,12 +111,10 @@ class PortfolioHeatMap:
         by_symbol: Dict[str, float] = {}
         by_strategy: Dict[str, float] = {}
         for p in self._positions.values():
-            by_symbol[p["symbol"]] = by_symbol.get(p["symbol"], 0.0) + abs(
+            by_symbol[p["symbol"]] = by_symbol.get(p["symbol"], 0.0) + abs(p["exposure_usd"])
+            by_strategy[p["strategy"]] = by_strategy.get(p["strategy"], 0.0) + abs(
                 p["exposure_usd"]
             )
-            by_strategy[p["strategy"]] = by_strategy.get(
-                p["strategy"], 0.0
-            ) + abs(p["exposure_usd"])
 
         if total > 0:
             by_symbol_pct = {k: v / total for k, v in by_symbol.items()}
@@ -129,17 +123,11 @@ class PortfolioHeatMap:
             by_symbol_pct = {}
             by_strategy_pct = {}
 
-        max_sym = (
-            max(by_symbol_pct, key=by_symbol_pct.get) if by_symbol_pct else ""
-        )
-        max_strat = (
-            max(by_strategy_pct, key=by_strategy_pct.get)
-            if by_strategy_pct
-            else ""
-        )
+        max_sym = max(by_symbol_pct, key=by_symbol_pct.get) if by_symbol_pct else ""
+        max_strat = max(by_strategy_pct, key=by_strategy_pct.get) if by_strategy_pct else ""
 
         # Herfindahl index on symbol proportions
-        hhi = sum(v ** 2 for v in by_symbol_pct.values())
+        hhi = sum(v**2 for v in by_symbol_pct.values())
 
         return {
             "by_symbol": by_symbol_pct,
@@ -174,12 +162,8 @@ class PortfolioHeatMap:
         total_exposure = sum(abs(c["exposure_usd"]) for c in cells)
         total_risk_pct = total_exposure / pv * 100.0
 
-        long_exp = sum(
-            c["exposure_usd"] for c in cells if c["direction"] == "long"
-        )
-        short_exp = sum(
-            abs(c["exposure_usd"]) for c in cells if c["direction"] == "short"
-        )
+        long_exp = sum(c["exposure_usd"] for c in cells if c["direction"] == "long")
+        short_exp = sum(abs(c["exposure_usd"]) for c in cells if c["direction"] == "short")
         net = long_exp - short_exp
         if net > 0:
             net_direction = "long"
@@ -202,9 +186,7 @@ class PortfolioHeatMap:
     # ------------------------------------------------------------------
 
     def get_stats(self) -> dict:
-        total_exposure = sum(
-            abs(p["exposure_usd"]) for p in self._positions.values()
-        )
+        total_exposure = sum(abs(p["exposure_usd"]) for p in self._positions.values())
         total_pnl = sum(p["pnl"] for p in self._positions.values())
         pv = self._portfolio_value if self._portfolio_value != 0 else 1.0
         return {
@@ -252,9 +234,7 @@ class AgentCollaborationGraph:
         key = frozenset({a, b})
         if key not in self._edges:
             sorted_pair = sorted([a, b])
-            self._edges[key] = CollaborationEdge(
-                agent_a=sorted_pair[0], agent_b=sorted_pair[1]
-            )
+            self._edges[key] = CollaborationEdge(agent_a=sorted_pair[0], agent_b=sorted_pair[1])
         return self._edges[key]
 
     def _update_rate(self, edge: CollaborationEdge) -> None:
@@ -265,9 +245,7 @@ class AgentCollaborationGraph:
         agents = list(votes.keys())
         for agent in agents:
             self._agents.add(agent)
-            self._agent_vote_count[agent] = (
-                self._agent_vote_count.get(agent, 0) + 1
-            )
+            self._agent_vote_count[agent] = self._agent_vote_count.get(agent, 0) + 1
 
         for a, b in combinations(agents, 2):
             edge = self._get_edge(a, b)
@@ -402,9 +380,7 @@ class AgentCollaborationGraph:
 
     def get_stats(self) -> dict:
         total_agreements = sum(e.agreement_count for e in self._edges.values())
-        total_disagreements = sum(
-            e.disagreement_count for e in self._edges.values()
-        )
+        total_disagreements = sum(e.disagreement_count for e in self._edges.values())
         total_coalitions = sum(e.coalition_count for e in self._edges.values())
         total_interactions = total_agreements + total_disagreements
         return {
@@ -414,8 +390,6 @@ class AgentCollaborationGraph:
             "total_disagreements": total_disagreements,
             "total_coalitions": total_coalitions,
             "overall_agreement_rate": (
-                total_agreements / total_interactions
-                if total_interactions > 0
-                else 0.0
+                total_agreements / total_interactions if total_interactions > 0 else 0.0
             ),
         }

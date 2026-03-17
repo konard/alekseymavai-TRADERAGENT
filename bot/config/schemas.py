@@ -83,23 +83,33 @@ class RecoveryConfigSchema(BaseModel):
 
     enabled: bool = Field(default=False, description="Enable recovery DCA cascade")
     tp_target_pct: Decimal = Field(
-        default=Decimal("0.01"), gt=0, le=Decimal("0.1"),
+        default=Decimal("0.01"),
+        gt=0,
+        le=Decimal("0.1"),
         description="Take-profit on blended average entry (+1%)",
     )
     max_dca_orders: int = Field(
-        default=5, ge=1, le=20,
+        default=5,
+        ge=1,
+        le=20,
         description="Maximum DCA orders in cascade",
     )
     dca_step_pct: Decimal = Field(
-        default=Decimal("0.015"), gt=0, le=Decimal("0.1"),
+        default=Decimal("0.015"),
+        gt=0,
+        le=Decimal("0.1"),
         description="Step between DCA levels (1.5%)",
     )
     dca_volume_multiplier: Decimal = Field(
-        default=Decimal("1.3"), ge=Decimal("1.0"), le=Decimal("3.0"),
+        default=Decimal("1.3"),
+        ge=Decimal("1.0"),
+        le=Decimal("3.0"),
         description="Martingale factor per DCA level",
     )
     timeout_bars: int = Field(
-        default=12, ge=1, le=100,
+        default=12,
+        ge=1,
+        le=100,
         description="Timeout in bars (12 x 5min = 1h)",
     )
     timeout_action: Literal["close_all", "hold"] = Field(
@@ -107,15 +117,21 @@ class RecoveryConfigSchema(BaseModel):
         description="Action on timeout: close_all or hold",
     )
     fallback_support_pct: Decimal = Field(
-        default=Decimal("0.05"), gt=0, le=Decimal("0.2"),
+        default=Decimal("0.05"),
+        gt=0,
+        le=Decimal("0.2"),
         description="Fallback support distance if no SMC level found (5%)",
     )
     max_recovery_capital_pct: Decimal = Field(
-        default=Decimal("0.30"), gt=0, le=Decimal("1.0"),
+        default=Decimal("0.30"),
+        gt=0,
+        le=Decimal("1.0"),
         description="Max capital for recovery DCA (30%)",
     )
     cooldown_after_recovery_bars: int = Field(
-        default=6, ge=0, le=50,
+        default=6,
+        ge=0,
+        le=50,
         description="Cooldown bars after recovery before grid restart (30 min)",
     )
 
@@ -486,7 +502,8 @@ class BotConfig(BaseModel):
     )
     smc: SMCConfigSchema | None = Field(default=None, description="SMC strategy configuration")
     recovery: RecoveryConfigSchema | None = Field(
-        default=None, description="Recovery DCA cascade configuration (hybrid strategy)")
+        default=None, description="Recovery DCA cascade configuration (hybrid strategy)"
+    )
     risk_management: RiskManagementConfig
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
 

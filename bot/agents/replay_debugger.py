@@ -90,9 +90,7 @@ class ReplayResult:
             "avoided_losses": round(self.avoided_losses, 2),
             "missed_profits": round(self.missed_profits, 2),
             "filter_rate": round(self.filter_rate, 4),
-            "expert_accuracy": {
-                k: round(v, 4) for k, v in self.expert_accuracy.items()
-            },
+            "expert_accuracy": {k: round(v, 4) for k, v in self.expert_accuracy.items()},
             "trades": [t.to_dict() for t in self.trades],
             "ts": self.ts,
         }
@@ -263,9 +261,7 @@ class EventReplayDebugger:
 
         return results
 
-    def _compute_replay_result(
-        self, trade_results: list[ReplayTradeResult]
-    ) -> ReplayResult:
+    def _compute_replay_result(self, trade_results: list[ReplayTradeResult]) -> ReplayResult:
         """Compute aggregate ReplayResult from individual trade results."""
         total = len(trade_results)
         approved = sum(1 for t in trade_results if t.committee_verdict == "approve")
@@ -283,19 +279,13 @@ class EventReplayDebugger:
         filtered_total_pnl = sum(t.filtered_pnl for t in trade_results)
         filtered_winners = sum(1 for t in approved_trades if t.filtered_pnl > 0)
         filtered_losers = sum(1 for t in approved_trades if t.filtered_pnl <= 0)
-        filtered_win_rate = (
-            filtered_winners / len(approved_trades) if approved_trades else 0.0
-        )
+        filtered_win_rate = filtered_winners / len(approved_trades) if approved_trades else 0.0
 
         # Improvement metrics
         pnl_delta = filtered_total_pnl - actual_total_pnl
         rejected_trades = [t for t in trade_results if not t.would_have_traded]
-        avoided_losses = abs(
-            sum(t.actual_pnl for t in rejected_trades if t.actual_pnl < 0)
-        )
-        missed_profits = sum(
-            t.actual_pnl for t in rejected_trades if t.actual_pnl > 0
-        )
+        avoided_losses = abs(sum(t.actual_pnl for t in rejected_trades if t.actual_pnl < 0))
+        missed_profits = sum(t.actual_pnl for t in rejected_trades if t.actual_pnl > 0)
         filter_rate = (rejected + deferred) / total if total > 0 else 0.0
 
         # Per-expert accuracy
@@ -322,9 +312,7 @@ class EventReplayDebugger:
             trades=trade_results,
         )
 
-    def _score_expert_votes(
-        self, trades_results: list[ReplayTradeResult]
-    ) -> dict[str, float]:
+    def _score_expert_votes(self, trades_results: list[ReplayTradeResult]) -> dict[str, float]:
         """Calculate per-expert accuracy across replay.
 
         An expert vote is considered 'correct' if:

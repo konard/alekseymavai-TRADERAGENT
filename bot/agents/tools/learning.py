@@ -19,6 +19,7 @@ def _binomial_p_value(wins: int, n: int, p0: float = 0.5) -> float:
 # HypothesisSkill
 # ---------------------------------------------------------------------------
 
+
 class HypothesisSkill(BaseTool):
     """Expert formulates and validates testable hypotheses about market behavior."""
 
@@ -42,7 +43,13 @@ class HypothesisSkill(BaseTool):
             expected_outcome : str
             confidence : float  (0-1)
         """
-        required = ("expert_name", "hypothesis", "test_conditions", "expected_outcome", "confidence")
+        required = (
+            "expert_name",
+            "hypothesis",
+            "test_conditions",
+            "expected_outcome",
+            "confidence",
+        )
         missing = [k for k in required if k not in params]
         if missing:
             return ToolResult(success=False, error=f"Missing required fields: {missing}")
@@ -77,11 +84,7 @@ class HypothesisSkill(BaseTool):
         sample_size = len(matched)
         wins = sum(1 for o in matched if o.get("result") == "win")
         win_rate = wins / sample_size if sample_size > 0 else 0.0
-        avg_pnl = (
-            sum(o.get("pnl", 0.0) for o in matched) / sample_size
-            if sample_size > 0
-            else 0.0
-        )
+        avg_pnl = sum(o.get("pnl", 0.0) for o in matched) / sample_size if sample_size > 0 else 0.0
         p_value = _binomial_p_value(wins, sample_size) if sample_size > 0 else 1.0
 
         # Determine status
@@ -132,6 +135,7 @@ class HypothesisSkill(BaseTool):
 # JournalSkill
 # ---------------------------------------------------------------------------
 
+
 class JournalSkill(BaseTool):
     """Trading journal: records decisions, reasoning, and post-trade reflections."""
 
@@ -156,7 +160,14 @@ class JournalSkill(BaseTool):
     # -- internals ----------------------------------------------------------
 
     def _record(self, params: dict[str, Any]) -> ToolResult:
-        required = ("trade_id", "expert_name", "decision", "reasoning", "market_context", "confidence")
+        required = (
+            "trade_id",
+            "expert_name",
+            "decision",
+            "reasoning",
+            "market_context",
+            "confidence",
+        )
         missing = [k for k in required if k not in params]
         if missing:
             return ToolResult(success=False, error=f"Missing required fields: {missing}")
@@ -206,8 +217,7 @@ class JournalSkill(BaseTool):
             results = [e for e in results if e["expert_name"] == expert_name]
         if outcome is not None:
             results = [
-                e for e in results
-                if e.get("reflection") and e["reflection"]["outcome"] == outcome
+                e for e in results if e.get("reflection") and e["reflection"]["outcome"] == outcome
             ]
         results = results[:limit]
         return ToolResult(success=True, data={"entries": results, "count": len(results)})
@@ -238,12 +248,8 @@ class JournalSkill(BaseTool):
         wins = [e for e in reflected if e["reflection"]["outcome"] == "win"]
         losses = [e for e in reflected if e["reflection"]["outcome"] == "loss"]
 
-        avg_conf_wins = (
-            sum(e["confidence"] for e in wins) / len(wins) if wins else 0.0
-        )
-        avg_conf_losses = (
-            sum(e["confidence"] for e in losses) / len(losses) if losses else 0.0
-        )
+        avg_conf_wins = sum(e["confidence"] for e in wins) / len(wins) if wins else 0.0
+        avg_conf_losses = sum(e["confidence"] for e in losses) / len(losses) if losses else 0.0
 
         # Top lessons by frequency
         lesson_counts: Counter[str] = Counter()
@@ -274,6 +280,7 @@ class JournalSkill(BaseTool):
 # LearningAggregator
 # ---------------------------------------------------------------------------
 
+
 class LearningAggregator:
     """Combines HypothesisSkill + JournalSkill to produce actionable insights."""
 
@@ -283,7 +290,9 @@ class LearningAggregator:
 
     def generate_insights(self, expert_name: str | None = None) -> dict:
         # Confirmed hypotheses
-        confirmed = self.hypothesis_skill.get_hypotheses(expert_name=expert_name, status="confirmed")
+        confirmed = self.hypothesis_skill.get_hypotheses(
+            expert_name=expert_name, status="confirmed"
+        )
 
         # Journal analytics
         entries = list(self.journal_skill._entries.values())

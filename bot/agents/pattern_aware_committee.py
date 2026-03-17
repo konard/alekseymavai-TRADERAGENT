@@ -34,7 +34,9 @@ class PatternAwareCommittee(InvestmentCommittee):
         self._pattern_learner = pattern_learner
         self._provider = PatternEvidenceProvider(pattern_learner) if pattern_learner else None
 
-    async def evaluate(self, signal: dict[str, Any], market_data: dict[str, Any]) -> CommitteeDecision:
+    async def evaluate(
+        self, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> CommitteeDecision:
         """Enrich market_data with pattern evidence, then run standard committee evaluation."""
         if self._provider:
             enriched = self._provider.enrich_market_data(signal, market_data)

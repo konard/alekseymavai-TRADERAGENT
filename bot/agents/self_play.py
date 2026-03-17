@@ -127,7 +127,9 @@ class SyntheticSignalGenerator:
             )[0]
 
             # Determine outcome
-            dir_profile = profile.get(direction, {"win_rate": 0.45, "avg_win": 80.0, "avg_loss": -75.0})
+            dir_profile = profile.get(
+                direction, {"win_rate": 0.45, "avg_win": 80.0, "avg_loss": -75.0}
+            )
             win_rate = dir_profile["win_rate"]
             is_winner = self._rng.random() < win_rate
 
@@ -265,8 +267,7 @@ class SelfPlayResult:
             "accuracy_per_epoch": list(self.accuracy_per_epoch),
             "per_expert_accuracy": dict(self.per_expert_accuracy),
             "per_regime_accuracy": {
-                regime: dict(experts)
-                for regime, experts in self.per_regime_accuracy.items()
+                regime: dict(experts) for regime, experts in self.per_regime_accuracy.items()
             },
             "total_signals": self.total_signals,
             "approve_rate": round(self.approve_rate, 4),
@@ -301,9 +302,7 @@ class SelfPlaySimulator:
         signal_generator: SyntheticSignalGenerator | None = None,
     ) -> None:
         if committee is None:
-            committee, feedback_tracker, regime_store, calibrator = (
-                self._create_defaults()
-            )
+            committee, feedback_tracker, regime_store, calibrator = self._create_defaults()
         self._committee = committee
         self._tracker = feedback_tracker or ExpertFeedbackTracker()
         self._regime_store = regime_store or RegimeProfileStore()
@@ -335,26 +334,21 @@ class SelfPlaySimulator:
             epoch_total = 0
 
             for i, sig in enumerate(signals):
-                decision = await self._committee.evaluate(
-                    sig["signal"], sig["market_data"]
-                )
+                decision = await self._committee.evaluate(sig["signal"], sig["market_data"])
                 position_id = f"sp_{epoch}_{i}"
                 regime = sig["regime"]
                 true_pnl = sig["true_pnl"]
 
                 # Record decision and outcome in tracker
-                self._tracker.record_decision(
-                    decision, position_id=position_id, regime=regime
-                )
+                self._tracker.record_decision(decision, position_id=position_id, regime=regime)
                 self._tracker.record_outcome(position_id, true_pnl)
 
                 # Update regime profiles for each vote
                 for vote in decision.votes:
                     if vote.verdict == Verdict.DEFER:
                         continue
-                    was_correct = (
-                        (vote.verdict == Verdict.APPROVE and true_pnl > 0)
-                        or (vote.verdict == Verdict.REJECT and true_pnl <= 0)
+                    was_correct = (vote.verdict == Verdict.APPROVE and true_pnl > 0) or (
+                        vote.verdict == Verdict.REJECT and true_pnl <= 0
                     )
                     self._regime_store.record_outcome(
                         vote.expert_name,
@@ -408,9 +402,7 @@ class SelfPlaySimulator:
 
         final_weights = {e.name: e.weight for e in self._committee.experts}
         approve_rate = (
-            self._total_approved / self._total_signals
-            if self._total_signals > 0
-            else 0.0
+            self._total_approved / self._total_signals if self._total_signals > 0 else 0.0
         )
 
         return SelfPlayResult(

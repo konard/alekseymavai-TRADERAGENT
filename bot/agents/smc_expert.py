@@ -28,12 +28,8 @@ class SMCExpert(BaseExpert):
 
             # Check if price is near a demand zone for LONG
             if direction == "LONG" and demand_obs:
-                nearest = min(
-                    demand_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price)
-                )
-                dist_pct = (
-                    abs(getattr(nearest, "price", 0) - price) / price if price > 0 else 1
-                )
+                nearest = min(demand_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price))
+                dist_pct = abs(getattr(nearest, "price", 0) - price) / price if price > 0 else 1
                 if dist_pct < 0.02:  # within 2%
                     confidence += 0.2
                     reasons.append(f"Цена у demand zone ({dist_pct:.1%})")
@@ -41,12 +37,8 @@ class SMCExpert(BaseExpert):
 
             # Check if price is near supply zone for SHORT
             if direction == "SHORT" and supply_obs:
-                nearest = min(
-                    supply_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price)
-                )
-                dist_pct = (
-                    abs(getattr(nearest, "price", 0) - price) / price if price > 0 else 1
-                )
+                nearest = min(supply_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price))
+                dist_pct = abs(getattr(nearest, "price", 0) - price) / price if price > 0 else 1
                 if dist_pct < 0.02:
                     confidence += 0.2
                     reasons.append(f"Цена у supply zone ({dist_pct:.1%})")
@@ -119,9 +111,7 @@ class SMCExpert(BaseExpert):
             ]
             price = signal.get("price", 0)
             if supply_obs and price > 0:
-                nearest = min(
-                    supply_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price)
-                )
+                nearest = min(supply_obs, key=lambda ob: abs(getattr(ob, "price", 0) - price))
                 dist_pct = abs(getattr(nearest, "price", 0) - price) / price
                 if dist_pct < 0.015:
                     return Argument(
@@ -142,19 +132,14 @@ class SMCExpert(BaseExpert):
             or analysis.get("near_supply")
             or analysis.get("bos_detected")
         )
-        has_risk = (
-            analysis.get("near_supply") and signal.get("direction", "").upper() == "LONG"
-        )
+        has_risk = analysis.get("near_supply") and signal.get("direction", "").upper() == "LONG"
 
         if has_structure and not has_risk:
             verdict = Verdict.APPROVE
             confidence = min(
                 0.9,
                 0.5
-                + 0.1
-                * len(
-                    [a for a in arguments if a.argument_type == ArgumentType.SUPPORTED]
-                ),
+                + 0.1 * len([a for a in arguments if a.argument_type == ArgumentType.SUPPORTED]),
             )
         elif has_risk:
             verdict = Verdict.REJECT

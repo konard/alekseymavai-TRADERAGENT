@@ -219,9 +219,7 @@ class MetaStrategyAllocator:
         # Build reasoning
         parts = []
         if pattern_confidence > 0:
-            parts.append(
-                f"pattern WR={pattern_win_rate:.0%} conf={pattern_confidence:.2f}"
-            )
+            parts.append(f"pattern WR={pattern_win_rate:.0%} conf={pattern_confidence:.2f}")
         else:
             parts.append("no pattern data")
         parts.append(f"regime_persist={regime_persistence_prob:.2f}")
@@ -240,9 +238,7 @@ class MetaStrategyAllocator:
             reasoning=reasoning,
         )
 
-    def _normalize_allocations(
-        self, scores: list[StrategyScore]
-    ) -> dict[str, float]:
+    def _normalize_allocations(self, scores: list[StrategyScore]) -> dict[str, float]:
         """Normalize composite scores into allocations respecting min/max bounds."""
         n = len(scores)
         if n == 0:
