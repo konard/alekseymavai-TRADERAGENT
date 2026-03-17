@@ -102,7 +102,7 @@ class ExecutionOptimizer:
 
         # Default → ICEBERG
         slices = self.generate_iceberg_slices(total_qty)
-        duration = sum(s["delay_seconds"] for s in slices)
+        duration = sum(s["delay_seconds"] for s in slices)  # type: ignore[misc]
         return ExecutionPlan(
             algo=ExecutionAlgo.ICEBERG,
             total_qty=total_qty,

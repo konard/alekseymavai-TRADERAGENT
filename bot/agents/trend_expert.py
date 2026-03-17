@@ -1,5 +1,7 @@
 """Trend Expert — analyzes EMA, ADX, momentum for trend confirmation."""
 
+from typing import Any
+
 from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
@@ -8,8 +10,8 @@ class TrendExpert(BaseExpert):
     role = "Трендовик"
     weight = 1.0
 
-    def analyze(self, signal, market_data):
-        evidence = {}
+    def analyze(self, signal: dict[str, Any], market_data: dict[str, Any]) -> Argument:
+        evidence: dict[str, Any] = {}
         confidence = 0.5
         reasons = []
         direction = signal.get("direction", "").upper()
@@ -81,7 +83,9 @@ class TrendExpert(BaseExpert):
             evidence=evidence,
         )
 
-    def challenge(self, argument, signal, market_data):
+    def challenge(
+        self, argument: Argument, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> Argument | None:
         if argument.expert_name == self.name:
             return None
 
@@ -107,7 +111,9 @@ class TrendExpert(BaseExpert):
                 )
         return None
 
-    def vote(self, signal, market_data, arguments):
+    def vote(
+        self, signal: dict[str, Any], market_data: dict[str, Any], arguments: list[Argument]
+    ) -> Vote:
         analysis = self._last_analysis
         conf = analysis.get("confidence", 0.5)
 

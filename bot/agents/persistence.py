@@ -357,14 +357,14 @@ class AgentStatePersistence:
                 tmp_path.unlink()
             raise
 
-    def _read_file(self, component: str) -> dict | None:
+    def _read_file(self, component: str) -> dict[Any, Any] | None:
         """Read a component JSON file. Returns None if not found or invalid."""
         path = self._state_dir / self._FILES[component]
         if not path.exists():
             return None
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                return json.load(f)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(
                 "agent_state_read_failed",

@@ -449,8 +449,8 @@ class RecoveryCoordinator:
         if not all_positions:
             return Decimal("0"), Decimal("0")
 
-        total_cost = sum(p.entry_price * p.size for p in all_positions)
-        total_size = sum(p.size for p in all_positions)
+        total_cost = sum((p.entry_price * p.size for p in all_positions), Decimal(0))
+        total_size = sum((p.size for p in all_positions), Decimal(0))
 
         if total_size == 0:
             return Decimal("0"), Decimal("0")

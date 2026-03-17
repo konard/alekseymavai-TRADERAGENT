@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -71,7 +73,7 @@ class CommitteeBacktestRunner:
     async def run(
         self,
         trades: list[BacktestTrade],
-        committee_scorer: callable | None = None,
+        committee_scorer: Callable[..., Any] | None = None,
     ) -> BacktestResult:
         self._runs += 1
         self._total_trades_processed += len(trades)
@@ -212,8 +214,8 @@ class WalkForwardValidator:
         self,
         start_ts: float,
         end_ts: float,
-        train_fn: callable,
-        test_fn: callable,
+        train_fn: Callable[..., Any],
+        test_fn: Callable[..., Any],
     ) -> dict:
         self._runs += 1
         windows = self.generate_windows(start_ts, end_ts)

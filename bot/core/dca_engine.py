@@ -573,7 +573,9 @@ class DCAEngine:
         For each LONG level we bought at *level.price* and now the price
         is *current_price*, so PnL = (current_price - level.price) × amount.
         """
-        return sum((current_price - lvl.price) * lvl.amount for lvl in self._long_levels)
+        return sum(
+            ((current_price - lvl.price) * lvl.amount for lvl in self._long_levels), Decimal(0)
+        )
 
     def _short_pnl(self, current_price: Decimal) -> Decimal:
         """
@@ -582,7 +584,9 @@ class DCAEngine:
         For each SHORT level we sold at *level.price* and the price is now
         *current_price*, so PnL = (level.price - current_price) × amount.
         """
-        return sum((lvl.price - current_price) * lvl.amount for lvl in self._short_levels)
+        return sum(
+            ((lvl.price - current_price) * lvl.amount for lvl in self._short_levels), Decimal(0)
+        )
 
     def get_combined_pnl(self, current_price: Decimal) -> Decimal:
         """

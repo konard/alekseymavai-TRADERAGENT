@@ -121,9 +121,9 @@ class EnsemblePredictor:
             counts[p] = counts.get(p, 0) + 1
         entropy = 0.0
         for c in counts.values():
-            p = c / n_total
-            if p > 0:
-                entropy -= p * math.log2(p)
+            prob = c / n_total
+            if prob > 0:
+                entropy -= prob * math.log2(prob)
 
         sources_info = [src.to_dict() for src in active.values()]
 

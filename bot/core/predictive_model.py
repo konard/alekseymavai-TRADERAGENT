@@ -30,9 +30,7 @@ class Prediction:
 
     predicted_state: str
     probability: float
-    alternatives: list[dict[str, float]] = field(
-        default_factory=list
-    )  # [{state, probability}, ...]
+    alternatives: list[dict[str, Any]] = field(default_factory=list)  # [{state, probability}, ...]
     horizon_seconds: float | None = None  # estimated time until transition
     basis: str = ""  # what data the prediction is based on
     ts: float = field(default_factory=time.time)
@@ -100,7 +98,7 @@ class MarkovTransitionModel:
         self._predictions: list[Prediction] = []
         self._max_predictions: int = 200
 
-    def observe(self, entity_key: str, state: str, ts: float | None = None):
+    def observe(self, entity_key: str, state: str, ts: float | None = None) -> None:
         """Record a state observation for an entity.
 
         Args:
@@ -137,7 +135,9 @@ class MarkovTransitionModel:
         if len(history) > 100:
             self._entity_states[entity_key] = history[-50:]
 
-    def observe_from_events(self, events: list[DomainEvent], state_extractor: str = "event_type"):
+    def observe_from_events(
+        self, events: list[DomainEvent], state_extractor: str = "event_type"
+    ) -> None:
         """Bulk-observe from a list of DomainEvents.
 
         Args:
@@ -307,7 +307,9 @@ class MarkovTransitionModel:
             "last_prediction": self._predictions[0].to_dict() if self._predictions else None,
         }
 
-    async def subscribe_to_bus(self, event_bus: EventBus, entity_types: list[str] | None = None):
+    async def subscribe_to_bus(
+        self, event_bus: EventBus, entity_types: list[str] | None = None
+    ) -> None:
         """Auto-observe events from EventBus.
 
         Args:
@@ -316,7 +318,7 @@ class MarkovTransitionModel:
                           If None, observe all events.
         """
 
-        def on_event(event: DomainEvent):
+        def on_event(event: DomainEvent) -> None:
             if entity_types and event.entity_type not in entity_types:
                 return
             entity_key = f"{event.entity_type}:{event.entity_id}"

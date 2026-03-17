@@ -1,5 +1,7 @@
 """Risk Expert — analyzes drawdown, exposure, daily loss limits."""
 
+from typing import Any
+
 from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
@@ -8,8 +10,8 @@ class RiskExpert(BaseExpert):
     role = "Риск-менеджер"
     weight = 1.5  # highest weight — risk has veto power
 
-    def analyze(self, signal, market_data):
-        evidence = {}
+    def analyze(self, signal: dict[str, Any], market_data: dict[str, Any]) -> Argument:
+        evidence: dict[str, Any] = {}
         confidence = 0.5
         reasons = []
         red_flags = 0
@@ -109,7 +111,9 @@ class RiskExpert(BaseExpert):
             evidence=evidence,
         )
 
-    def challenge(self, argument, signal, market_data):
+    def challenge(
+        self, argument: Argument, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> Argument | None:
         if argument.expert_name == self.name:
             return None
 
@@ -126,7 +130,9 @@ class RiskExpert(BaseExpert):
             )
         return None
 
-    def vote(self, signal, market_data, arguments):
+    def vote(
+        self, signal: dict[str, Any], market_data: dict[str, Any], arguments: list[Argument]
+    ) -> Vote:
         analysis = self._last_analysis
         red_flags = analysis.get("red_flags", 0)
         conf = analysis.get("confidence", 0.5)
