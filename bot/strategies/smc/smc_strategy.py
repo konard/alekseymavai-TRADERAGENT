@@ -17,6 +17,9 @@ from bot.strategies.smc.market_structure import MarketStructureAnalyzer, TrendDi
 from bot.strategies.smc.position_manager import PositionManager, PositionMetrics
 from bot.utils.logger import get_logger
 
+# Dummy pattern required by SMCSignal dataclass when creating structural-event signals
+from bot.strategies.smc.entry_signals import PatternType, PriceActionPattern
+
 logger = get_logger(__name__)
 
 
@@ -324,6 +327,292 @@ class SMCStrategy:
             validated=len(validated),
         )
         return validated
+
+    def detect_level_break(
+        self, df_m5: pd.DataFrame, current_price: Decimal
+    ) -> Optional[SMCSignal]:
+        """
+        Detect support / resistance breakout events.
+
+        Analyses the M5 OHLCV frame against the last known SMC context held in
+        ``self.market_structure``.  Returns an ``SMCSignal`` with
+        ``event_type`` set to ``"support_break"`` or ``"resistance_break"``
+        when a structural break is detected, or ``None`` when price is still
+        inside the current range.
+
+        Algorithm
+        ---------
+        1. Retrieve the cached ``SMCContext`` from the market-structure analyser
+           (populated by the most recent ``generate_signals`` / ``analyze_market``
+           call).  If no context is available, run a fresh analysis on *df_m5*.
+        2. Determine active key levels from OBs and FVGs closest to *current_price*.
+        3. **Support break**: last M5 candle *closed* below the nearest support
+           (bull OB high / bull FVG gap_low below current price).
+        4. **Resistance break**: last M5 candle *closed* above the nearest
+           resistance (bear OB low / bear FVG gap_high above current price).
+        5. Compute ``structure_confidence`` from OB quality, volume confirmation
+           relative to the recent average, and last BOS/CHoCH structural event.
+
+        Args:
+            df_m5: M5 OHLCV DataFrame.  Must have columns: open, high, low,
+                   close, volume (volume may be zeros).
+            current_price: Latest traded price as ``Decimal``.
+
+        Returns:
+            ``SMCSignal`` with ``event_type != "entry"`` on breakout, else
+            ``None``.
+        """
+        if df_m5.empty or len(df_m5) < 2:
+            return None
+
+        price = float(current_price)
+        last_close = float(df_m5["close"].iloc[-1])
+
+        # ------------------------------------------------------------------
+        # 1. Obtain SMC context
+        # ------------------------------------------------------------------
+        ctx = self.market_structure._smc_context
+        if ctx is None:
+            # No cached context — run a fresh analysis on the M5 frame
+            ctx = self.market_structure._analyzer.analyze(df_m5)
+            if not ctx.warmup_complete:
+                return None
+
+        analyzer = self.market_structure._analyzer
+
+        # ------------------------------------------------------------------
+        # 2. Find nearest support below *and* nearest resistance above price.
+        # For breakout detection we also need to look at levels that are
+        # *just above the last close* (support that was broken downward) or
+        # *just below the last close* (resistance that was broken upward).
+        # We search within a ±2% window around last_close so that we catch
+        # levels that were crossed by the last candle.
+        # ------------------------------------------------------------------
+        window = last_close * 0.02  # 2% search window
+
+        # Nearest support below price (for next_level after a support break)
+        nearest_support_below = analyzer.find_next_support(ctx, last_close)
+        # Nearest resistance above price (for next_level after a resistance break)
+        nearest_resistance_above = analyzer.find_next_resistance(ctx, last_close)
+
+        # Candidate support level that could have been broken: highest support
+        # within [last_close, last_close + window]
+        candidate_support = self._find_support_just_above(ctx, last_close, window)
+        # Candidate resistance level that could have been broken: lowest resistance
+        # within [last_close - window, last_close]
+        candidate_resistance = self._find_resistance_just_below(ctx, last_close, window)
+
+        event_type: Optional[str] = None
+        broken_level: Optional[float] = None
+        break_extreme: Optional[float] = None
+        next_level: Optional[float] = None
+
+        # ------------------------------------------------------------------
+        # 3. Support break: last close is *below* a support that existed just
+        #    above it (price closed through that support)
+        # ------------------------------------------------------------------
+        if candidate_support is not None and last_close < candidate_support:
+            event_type = "support_break"
+            broken_level = candidate_support
+            # break_extreme = lowest low of the last candle (for +1% trigger base)
+            break_extreme = float(df_m5["low"].iloc[-1])
+            # next SMC support below the broken level
+            next_level = nearest_support_below
+
+        # ------------------------------------------------------------------
+        # 4. Resistance break: last close is *above* a resistance that existed
+        #    just below it (price closed through that resistance)
+        # ------------------------------------------------------------------
+        elif candidate_resistance is not None and last_close > candidate_resistance:
+            event_type = "resistance_break"
+            broken_level = candidate_resistance
+            # break_extreme = highest high of the last candle (for +1% trigger base)
+            break_extreme = float(df_m5["high"].iloc[-1])
+            # next SMC resistance above the broken level
+            next_level = nearest_resistance_above
+
+        if event_type is None:
+            return None
+
+        # ------------------------------------------------------------------
+        # 5. Compute structure_confidence
+        # ------------------------------------------------------------------
+        structure_confidence = self._compute_structure_confidence(
+            ctx=ctx, df_m5=df_m5, event_type=event_type
+        )
+
+        # ------------------------------------------------------------------
+        # 6. Build a minimal SMCSignal carrying the structural event data
+        # ------------------------------------------------------------------
+        # Use last candle's close as entry, SL = break_extreme, TP = next_level
+        entry_d = Decimal(str(last_close))
+        sl_d = Decimal(str(break_extreme)) if break_extreme is not None else entry_d
+        if next_level is not None:
+            tp_d = Decimal(str(next_level))
+        else:
+            # Fallback: project 1% beyond the broken level in break direction
+            if event_type == "support_break":
+                tp_d = Decimal(str(broken_level)) * Decimal("0.99")
+            else:
+                tp_d = Decimal(str(broken_level)) * Decimal("1.01")
+
+        direction = (
+            SMCSignalDirection.SHORT if event_type == "support_break" else SMCSignalDirection.LONG
+        )
+
+        # A lightweight placeholder pattern (required by the dataclass)
+        dummy_pattern = PriceActionPattern(
+            pattern_type=PatternType.ENGULFING,
+            is_bullish=(direction == SMCSignalDirection.LONG),
+            index=len(df_m5) - 1,
+            timestamp=df_m5.index[-1],
+            open=Decimal(str(df_m5["open"].iloc[-1])),
+            high=Decimal(str(df_m5["high"].iloc[-1])),
+            low=Decimal(str(df_m5["low"].iloc[-1])),
+            close=entry_d,
+            quality_score=structure_confidence * 100,
+            confidence=structure_confidence,
+        )
+
+        risk = abs(entry_d - sl_d)
+        reward = abs(tp_d - entry_d)
+        rr = float(reward / risk) if risk > 0 else 0.0
+
+        signal = SMCSignal(
+            timestamp=df_m5.index[-1],
+            direction=direction,
+            entry_price=entry_d,
+            stop_loss=sl_d,
+            take_profit=tp_d,
+            pattern=dummy_pattern,
+            confidence=structure_confidence,
+            risk_reward_ratio=rr,
+            # Structural event fields
+            event_type=event_type,
+            broken_level=Decimal(str(broken_level)) if broken_level is not None else None,
+            break_extreme=Decimal(str(break_extreme)) if break_extreme is not None else None,
+            next_level=Decimal(str(next_level)) if next_level is not None else None,
+            structure_confidence=structure_confidence,
+        )
+
+        logger.info(
+            "level_break_detected",
+            event_type=event_type,
+            broken_level=broken_level,
+            break_extreme=break_extreme,
+            next_level=next_level,
+            structure_confidence=round(structure_confidence, 3),
+        )
+
+        return signal
+
+    # ------------------------------------------------------------------
+    # Internal: level search helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _find_support_just_above(ctx, price: float, window: float) -> Optional[float]:
+        """
+        Return the highest support level in (price, price + window].
+
+        A support level is a bull OB high, bull FVG gap_low, or EQL/DEMAND
+        liquidity level that sits just above the current price — indicating
+        price has closed *through* (below) it.
+        """
+        candidates: list[float] = []
+
+        for ob in ctx.order_blocks:
+            if ob.ob_type.value == "bull" and not ob.invalidated:
+                if price < ob.high <= price + window:
+                    candidates.append(ob.high)
+
+        for fvg in ctx.fair_value_gaps:
+            if fvg.fvg_type.value == "bull" and not fvg.filled:
+                if price < fvg.gap_low <= price + window:
+                    candidates.append(fvg.gap_low)
+
+        for lv in ctx.liquidity_levels:
+            if lv.liquidity_type.value in ("eql", "demand") and not lv.swept:
+                if price < lv.price <= price + window:
+                    candidates.append(lv.price)
+
+        return max(candidates) if candidates else None
+
+    @staticmethod
+    def _find_resistance_just_below(ctx, price: float, window: float) -> Optional[float]:
+        """
+        Return the lowest resistance level in [price - window, price).
+
+        A resistance level is a bear OB low, bear FVG gap_high, or EQH/SUPPLY
+        liquidity level that sits just below the current price — indicating
+        price has closed *through* (above) it.
+        """
+        candidates: list[float] = []
+
+        for ob in ctx.order_blocks:
+            if ob.ob_type.value == "bear" and not ob.invalidated:
+                if price - window <= ob.low < price:
+                    candidates.append(ob.low)
+
+        for fvg in ctx.fair_value_gaps:
+            if fvg.fvg_type.value == "bear" and not fvg.filled:
+                if price - window <= fvg.gap_high < price:
+                    candidates.append(fvg.gap_high)
+
+        for lv in ctx.liquidity_levels:
+            if lv.liquidity_type.value in ("eqh", "supply") and not lv.swept:
+                if price - window <= lv.price < price:
+                    candidates.append(lv.price)
+
+        return min(candidates) if candidates else None
+
+    # ------------------------------------------------------------------
+    # Internal: structure confidence scoring
+    # ------------------------------------------------------------------
+
+    def _compute_structure_confidence(
+        self, ctx, df_m5: pd.DataFrame, event_type: str
+    ) -> float:
+        """
+        Compute structure_confidence (0.0–1.0) from three factors:
+
+        * OB quality (0–0.4): fraction of non-invalidated OBs aligned with
+          the break direction.
+        * Volume confirmation (0–0.3): last candle volume vs 20-bar average.
+        * CHoCH/BOS confirmation (0–0.3): last structural event aligns with
+          the break direction.
+        """
+        score = 0.0
+
+        # 1. OB quality
+        if ctx.order_blocks:
+            if event_type == "support_break":
+                # Bear OBs (supply) are consistent with a downside break
+                aligned = [ob for ob in ctx.order_blocks if ob.ob_type.value == "bear" and not ob.invalidated]
+            else:
+                aligned = [ob for ob in ctx.order_blocks if ob.ob_type.value == "bull" and not ob.invalidated]
+            ob_score = min(len(aligned) / max(len(ctx.order_blocks), 1), 1.0) * 0.4
+            score += ob_score
+
+        # 2. Volume confirmation
+        if "volume" in df_m5.columns and len(df_m5) >= 2:
+            lookback = min(20, len(df_m5) - 1)
+            avg_vol = df_m5["volume"].iloc[-lookback - 1 : -1].mean()
+            last_vol = df_m5["volume"].iloc[-1]
+            if avg_vol > 0:
+                vol_ratio = min(float(last_vol) / float(avg_vol), 3.0)
+                score += (vol_ratio / 3.0) * 0.3
+
+        # 3. CHoCH / BOS alignment
+        last_event = ctx.last_structure
+        if last_event is not None:
+            is_bear_event = not last_event.is_bullish
+            if event_type == "support_break" and is_bear_event:
+                score += 0.3
+            elif event_type == "resistance_break" and last_event.is_bullish:
+                score += 0.3
+
+        return round(min(score, 1.0), 4)
 
     def manage_positions(
         self, current_prices: dict[str, Decimal], df: Optional[pd.DataFrame] = None

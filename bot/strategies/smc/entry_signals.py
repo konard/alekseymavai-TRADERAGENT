@@ -96,6 +96,13 @@ class SMCSignal:
     trend_direction: TrendDirection = TrendDirection.RANGING
     trend_aligned: bool = False
 
+    # Structural event fields (populated by detect_level_break)
+    event_type: str = "entry"  # "entry" | "support_break" | "resistance_break"
+    broken_level: Optional[Decimal] = None  # The broken support/resistance level
+    break_extreme: Optional[Decimal] = None  # break_low / break_high (base for +1% trigger)
+    next_level: Optional[Decimal] = None  # Next SMC level (target for surviving positions)
+    structure_confidence: float = 0.0  # Confidence 0.0–1.0
+
     def get_risk_amount(self) -> Decimal:
         """Calculate risk amount (entry - SL)"""
         return abs(self.entry_price - self.stop_loss)

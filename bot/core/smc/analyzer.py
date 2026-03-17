@@ -197,6 +197,80 @@ class SMCAnalyzer:
         )
 
     # ------------------------------------------------------------------
+    # Level helpers
+    # ------------------------------------------------------------------
+
+    def find_next_support(self, ctx: SMCContext, price: float) -> float | None:
+        """
+        Return the nearest support level below *price*.
+
+        Searches (in priority order):
+        1. Bullish OBs (demand zones) — high edge below price
+        2. Bull FVGs — gap_low below price
+        3. EQL/DEMAND liquidity levels below price
+
+        Returns the highest qualifying level (closest support below price),
+        or None if nothing is found.
+        """
+        candidates: list[float] = []
+
+        # 1. Bullish order blocks — use OB high as the support ceiling
+        for ob in ctx.order_blocks:
+            if ob.ob_type.value == "bull" and not ob.invalidated and ob.high < price:
+                candidates.append(ob.high)
+
+        # 2. Bullish FVGs — gap_low as the nearest support within the gap
+        for fvg in ctx.fair_value_gaps:
+            if fvg.fvg_type.value == "bull" and not fvg.filled and fvg.gap_low < price:
+                candidates.append(fvg.gap_low)
+
+        # 3. EQL / DEMAND liquidity levels below price
+        for lv in ctx.liquidity_levels:
+            if (
+                lv.liquidity_type.value in ("eql", "demand")
+                and not lv.swept
+                and lv.price < price
+            ):
+                candidates.append(lv.price)
+
+        return max(candidates) if candidates else None
+
+    def find_next_resistance(self, ctx: SMCContext, price: float) -> float | None:
+        """
+        Return the nearest resistance level above *price*.
+
+        Searches (in priority order):
+        1. Bearish OBs (supply zones) — low edge above price
+        2. Bear FVGs — gap_high above price
+        3. EQH/SUPPLY liquidity levels above price
+
+        Returns the lowest qualifying level (closest resistance above price),
+        or None if nothing is found.
+        """
+        candidates: list[float] = []
+
+        # 1. Bearish order blocks — use OB low as the resistance floor
+        for ob in ctx.order_blocks:
+            if ob.ob_type.value == "bear" and not ob.invalidated and ob.low > price:
+                candidates.append(ob.low)
+
+        # 2. Bearish FVGs — gap_high as the nearest resistance
+        for fvg in ctx.fair_value_gaps:
+            if fvg.fvg_type.value == "bear" and not fvg.filled and fvg.gap_high > price:
+                candidates.append(fvg.gap_high)
+
+        # 3. EQH / SUPPLY liquidity levels above price
+        for lv in ctx.liquidity_levels:
+            if (
+                lv.liquidity_type.value in ("eqh", "supply")
+                and not lv.swept
+                and lv.price > price
+            ):
+                candidates.append(lv.price)
+
+        return min(candidates) if candidates else None
+
+    # ------------------------------------------------------------------
     # Confidence scoring
     # ------------------------------------------------------------------
 
