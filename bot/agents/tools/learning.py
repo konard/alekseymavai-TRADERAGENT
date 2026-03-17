@@ -31,7 +31,7 @@ class HypothesisSkill(BaseTool):
 
     # -- public API ---------------------------------------------------------
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         """Create a new hypothesis.
 
         Parameters
@@ -147,7 +147,7 @@ class JournalSkill(BaseTool):
 
     # -- public API ---------------------------------------------------------
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         action = params.get("action")
         if action == "record":
             return self._record(params)

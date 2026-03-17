@@ -16,7 +16,7 @@ class AlertSkill(BaseTool):
     def __init__(self) -> None:
         self._alerts: list[dict[str, Any]] = []
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         symbol = params.get("symbol")
         target_price = params.get("target_price")
         direction = params.get("direction")
@@ -83,7 +83,7 @@ class VetoSkill(BaseTool):
         self._vetoes: list[dict[str, Any]] = []
         self._ttl_seconds = ttl_seconds
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         reason = params.get("reason")
         severity = params.get("severity")
         hedge_action = params.get("hedge_action")
@@ -137,7 +137,7 @@ class ScaleSkill(BaseTool):
     def __init__(self) -> None:
         self._requests: list[dict[str, Any]] = []
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         position_id = params.get("position_id")
         action = params.get("action")
         amount_pct = params.get("amount_pct")
@@ -196,7 +196,7 @@ class HedgeSkill(BaseTool):
     def __init__(self) -> None:
         self._hedges: list[dict[str, Any]] = []
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    def execute(self, params: dict[str, Any]) -> ToolResult:  # type: ignore[override]
         original_symbol = params.get("original_symbol")
         hedge_symbol = params.get("hedge_symbol")
         correlation = params.get("correlation")

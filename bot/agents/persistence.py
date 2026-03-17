@@ -364,7 +364,7 @@ class AgentStatePersistence:
             return None
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                return json.load(f)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(
                 "agent_state_read_failed",

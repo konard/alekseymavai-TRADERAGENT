@@ -216,7 +216,7 @@ class AgentProfiler:
         success_rate = success_count / total_tool_uses if total_tool_uses else 0.0
 
         # Most used tool
-        most_used_tool = max(tool_breakdown, key=tool_breakdown.get) if tool_breakdown else ""
+        most_used_tool = max(tool_breakdown, key=tool_breakdown.get) if tool_breakdown else ""  # type: ignore[arg-type]
 
         # Fastest tool (lowest avg execution time)
         tool_times: dict[str, list[float]] = defaultdict(list)

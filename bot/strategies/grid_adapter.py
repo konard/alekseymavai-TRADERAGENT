@@ -157,6 +157,7 @@ class GridAdapter(BaseStrategy):
         _needs_init = self._grid_engine is None
         if not _needs_init:
             # Recenter when price is outside grid bounds (with 1% buffer)
+            assert self._grid_engine is not None
             _buf = self._grid_engine.upper_price * Decimal("0.01")
             _outside = (
                 current > self._grid_engine.upper_price + _buf

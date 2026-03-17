@@ -55,7 +55,7 @@ class TelegramDashboard:
     def get_stats(self) -> dict:
         most_used = None
         if self._stats_command_usage:
-            most_used = max(self._stats_command_usage, key=self._stats_command_usage.get)
+            most_used = max(self._stats_command_usage, key=self._stats_command_usage.get)  # type: ignore[arg-type]
         return {
             "commands_processed": self._stats_commands_processed,
             "most_used_command": most_used,
@@ -161,7 +161,7 @@ class TelegramDashboard:
         data = await self._get_provider_data("committee")
         if data is None:
             return "Data not available"
-        return data.get("summary", "No committee decision available")
+        return data.get("summary", "No committee decision available")  # type: ignore[no-any-return]
 
     async def _cmd_heatmap(self, args: list[str]) -> str:
         data = await self._get_provider_data("heatmap")
@@ -279,7 +279,7 @@ class AlertManager:
 
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._notification_callback(alert))
+                loop.create_task(self._notification_callback(alert))  # type: ignore[arg-type]
             except RuntimeError:
                 pass
 
