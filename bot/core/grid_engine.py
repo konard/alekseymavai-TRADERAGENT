@@ -5,6 +5,8 @@ Handles grid level calculation, order placement, execution handling, and rebalan
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
@@ -29,6 +31,27 @@ class GridDirection(str, Enum):
 
     LONG = "long"
     SHORT = "short"
+
+
+class GridMode(str, Enum):
+    """Grid operating mode."""
+
+    LONG_ONLY = "long_only"
+    SHORT_ONLY = "short_only"
+    BIDIRECTIONAL = "bidirectional"  # default: hold LONG and SHORT simultaneously
+
+
+@dataclass
+class GridBiConfig:
+    """Configuration for bidirectional (market-maker) grid initialization."""
+
+    lower_bound: Decimal
+    upper_bound: Decimal
+    current_price: Decimal
+    step_pct: Decimal
+    long_levels: int
+    short_levels: int
+    order_size_quote: Decimal
 
 
 class GridOrder:
@@ -79,6 +102,7 @@ class GridEngine:
         profit_per_grid: Decimal,
         grid_type: GridType = GridType.STATIC,
         direction: GridDirection = GridDirection.LONG,
+        mode: GridMode = GridMode.LONG_ONLY,
     ):
         """
         Initialize Grid Engine.
@@ -92,6 +116,7 @@ class GridEngine:
             profit_per_grid: Profit percentage per grid (0.01 = 1%)
             grid_type: Type of grid (static or dynamic)
             direction: LONG (buy dips / sell rallies) or SHORT (sell rallies / buy dips)
+            mode: GridMode controlling unidirectional vs bidirectional operation
         """
         if upper_price <= lower_price:
             raise ValueError("upper_price must be greater than lower_price")
@@ -110,6 +135,7 @@ class GridEngine:
         self.profit_per_grid = profit_per_grid
         self.grid_type = grid_type
         self.direction = direction
+        self.mode = mode
 
         # Grid state
         self.grid_orders: list[GridOrder] = []
@@ -121,6 +147,12 @@ class GridEngine:
         # SHORT: filled sell orders awaiting a paired buy (TP).
         self._open_buys: dict[str, GridOrder] = {}   # order_id -> filled buy GridOrder
         self._open_sells: dict[str, GridOrder] = {}  # order_id -> filled sell GridOrder (SHORT)
+
+        # Bidirectional order stacks (BIDIRECTIONAL mode).
+        # _long_orders: pending/active LONG-side orders (buy below price + their TP sells).
+        # _short_orders: pending/active SHORT-side orders (sell above price + their TP buys).
+        self._long_orders: dict[str, GridOrder] = {}
+        self._short_orders: dict[str, GridOrder] = {}
 
         # Statistics
         self.total_profit = Decimal("0")
@@ -135,6 +167,7 @@ class GridEngine:
             grid_levels=grid_levels,
             grid_type=grid_type,
             direction=direction,
+            mode=mode,
         )
 
     def calculate_grid_levels(self) -> list[Decimal]:
@@ -157,21 +190,39 @@ class GridEngine:
 
         return levels
 
-    def initialize_grid(self, current_price: Decimal) -> list[GridOrder]:
+    def initialize_grid(
+        self,
+        current_price: Decimal,
+        config: Optional[GridBiConfig] = None,
+    ) -> list[GridOrder]:
         """
         Initialize grid orders based on current price.
 
-        Creates buy orders below current price and sell orders above.
+        When *config* is provided (or ``self.mode == GridMode.BIDIRECTIONAL``),
+        the grid is initialized in bidirectional (market-maker) mode:
+        - LONG levels are placed **below** current price (buy orders).
+        - SHORT levels are placed **above** current price (sell orders).
+        Both stacks are active simultaneously.
+
+        Without a config and in LONG_ONLY/SHORT_ONLY mode the legacy
+        unidirectional behaviour is preserved.
 
         Args:
             current_price: Current market price
+            config: Optional ``GridBiConfig``; triggers BIDIRECTIONAL mode when supplied.
 
         Returns:
             List of GridOrder objects to be placed
         """
         self.grid_orders.clear()
-        levels = self.calculate_grid_levels()
+        self._long_orders.clear()
+        self._short_orders.clear()
 
+        if config is not None or self.mode == GridMode.BIDIRECTIONAL:
+            return self._initialize_bidirectional(current_price, config)
+
+        # ── Legacy unidirectional path ────────────────────────────────────
+        levels = self.calculate_grid_levels()
         orders_to_place = []
 
         for level_idx, price in enumerate(levels):
@@ -208,6 +259,71 @@ class GridEngine:
             total_orders=len(orders_to_place),
             buy_orders=sum(1 for o in orders_to_place if o.side == "buy"),
             sell_orders=sum(1 for o in orders_to_place if o.side == "sell"),
+            current_price=float(current_price),
+        )
+
+        return orders_to_place
+
+    def _initialize_bidirectional(
+        self,
+        current_price: Decimal,
+        config: Optional[GridBiConfig] = None,
+    ) -> list[GridOrder]:
+        """
+        Build both LONG and SHORT order stacks simultaneously.
+
+        LONG stack: ``config.long_levels`` buy orders spaced by ``step_pct``
+        below ``current_price`` (down to ``lower_bound``).
+        SHORT stack: ``config.short_levels`` sell orders spaced by ``step_pct``
+        above ``current_price`` (up to ``upper_bound``).
+
+        When *config* is None, falls back to the engine's own parameters:
+        half the ``grid_levels`` go below (LONG) and half above (SHORT).
+        """
+        orders_to_place: list[GridOrder] = []
+
+        if config is not None:
+            step_pct = config.step_pct
+            order_size = config.order_size_quote
+            long_levels = config.long_levels
+            short_levels = config.short_levels
+        else:
+            # Derive from engine's existing parameters
+            step_pct = self.profit_per_grid
+            order_size = self.amount_per_grid
+            half = max(1, self.grid_levels // 2)
+            long_levels = half
+            short_levels = self.grid_levels - half
+
+        # ── LONG stack: buy orders below current price ────────────────────
+        for i in range(1, long_levels + 1):
+            price = current_price * (Decimal("1") - step_pct * i)
+            if config is not None and price < config.lower_bound:
+                break
+            base_amount = (order_size / price).quantize(Decimal("0.000001"))
+            order = GridOrder(level=i, price=price, amount=base_amount, side="buy")
+            self.grid_orders.append(order)
+            orders_to_place.append(order)
+            # Track in LONG stack (will be registered by caller via register_order)
+            # We use a temporary key; will be overwritten when exchange order_id arrives.
+            self._long_orders[f"_bi_long_{i}"] = order
+
+        # ── SHORT stack: sell orders above current price ──────────────────
+        for i in range(1, short_levels + 1):
+            price = current_price * (Decimal("1") + step_pct * i)
+            if config is not None and price > config.upper_bound:
+                break
+            base_amount = (order_size / price).quantize(Decimal("0.000001"))
+            order = GridOrder(level=i, price=price, amount=base_amount, side="sell")
+            self.grid_orders.append(order)
+            orders_to_place.append(order)
+            self._short_orders[f"_bi_short_{i}"] = order
+
+        logger.info(
+            "Grid initialized (bidirectional)",
+            total_orders=len(orders_to_place),
+            long_orders=long_levels,
+            short_orders=short_levels,
             current_price=float(current_price),
         )
 
@@ -391,12 +507,23 @@ class GridEngine:
     def set_direction(self, new_direction: GridDirection) -> list[str]:
         """Switch grid direction.  Returns all active order_ids to cancel on exchange.
 
+        .. deprecated::
+            Use :meth:`reconfigure` instead for bidirectional grids.  ``set_direction``
+            will be removed in a future version.
+
         Caller is responsible for:
         1. Cancelling returned order IDs on the exchange.
         2. Calling initialize_grid(current_price) to rebuild grid in new direction.
         """
         if new_direction == self.direction:
             return []
+
+        warnings.warn(
+            "set_direction() is deprecated and will be removed in a future version. "
+            "Use reconfigure(new_config) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         logger.info(
             "grid_direction_switch",
@@ -414,8 +541,144 @@ class GridEngine:
         self.filled_orders.clear()
         self._open_buys.clear()
         self._open_sells.clear()
+        self._long_orders.clear()
+        self._short_orders.clear()
 
         return order_ids_to_cancel
+
+    # ------------------------------------------------------------------
+    # Bidirectional helpers
+    # ------------------------------------------------------------------
+
+    def get_combined_unrealized_pnl(self, current_price: Decimal) -> Decimal:
+        """Return the combined unrealised PnL across both LONG and SHORT stacks.
+
+        Calculation:
+        - LONG stack: each filled buy whose TP sell hasn't triggered yet contributes
+          ``(current_price - entry_price) * amount``.  Negative when price < entry.
+        - SHORT stack: each filled sell whose TP buy hasn't triggered yet contributes
+          ``(entry_price - current_price) * amount``.  Negative when price > entry.
+
+        For unidirectional mode the result is the same as computing PnL from the
+        single open-position tracker (``_open_buys`` / ``_open_sells``).
+        """
+        pnl = Decimal("0")
+
+        # LONG positions: open buys waiting for TP sell
+        for order in self._open_buys.values():
+            pnl += (current_price - order.price) * order.amount
+
+        # SHORT positions: open sells waiting for TP buy
+        for order in self._open_sells.values():
+            pnl += (order.price - current_price) * order.amount
+
+        return pnl
+
+    def close_direction(self, direction: GridDirection) -> list[str]:
+        """Close one stack and return order_ids to cancel on the exchange.
+
+        In BIDIRECTIONAL mode this lets the caller shut down the LONG or SHORT
+        stack independently while leaving the other stack running.
+
+        Behaviour:
+        - Collects all ``active_orders`` belonging to the chosen *direction*.
+        - Removes them from ``active_orders``, ``_open_buys``/``_open_sells``,
+          and the matching ``_long_orders``/``_short_orders`` registry.
+        - Returns the list of order IDs for the caller to cancel on the exchange.
+
+        Args:
+            direction: ``GridDirection.LONG`` or ``GridDirection.SHORT``.
+
+        Returns:
+            List of order IDs that must be cancelled on the exchange.
+        """
+        ids_to_cancel: list[str] = []
+
+        if direction == GridDirection.LONG:
+            # Cancel active buy orders (and any paired TP sells from LONG stack)
+            target_sides = {"buy"}
+            # Also cancel sell orders that are TP for LONG (tracked in _long_orders)
+            long_order_ids = {
+                o.order_id for o in self._long_orders.values() if o.order_id is not None
+            }
+            for order_id, order in list(self.active_orders.items()):
+                if order.side in target_sides or order_id in long_order_ids:
+                    ids_to_cancel.append(order_id)
+                    self.active_orders.pop(order_id)
+                    self._open_buys.pop(order_id, None)
+            self._long_orders.clear()
+        else:
+            # Cancel active sell orders (and any paired TP buys from SHORT stack)
+            target_sides = {"sell"}
+            short_order_ids = {
+                o.order_id for o in self._short_orders.values() if o.order_id is not None
+            }
+            for order_id, order in list(self.active_orders.items()):
+                if order.side in target_sides or order_id in short_order_ids:
+                    ids_to_cancel.append(order_id)
+                    self.active_orders.pop(order_id)
+                    self._open_sells.pop(order_id, None)
+            self._short_orders.clear()
+
+        logger.info(
+            "grid_close_direction",
+            symbol=self.symbol,
+            direction=direction,
+            cancelled_count=len(ids_to_cancel),
+        )
+
+        return ids_to_cancel
+
+    def reconfigure(self, new_config: GridBiConfig) -> list[str]:
+        """Close all active orders and reinitialise the grid with *new_config*.
+
+        Replaces ``set_direction()`` for bidirectional grids.
+
+        Steps:
+        1. Collect all active order IDs to cancel on the exchange.
+        2. Reset full grid state (orders, positions, statistics).
+        3. Call ``_initialize_bidirectional`` with the new config.
+
+        Args:
+            new_config: New ``GridBiConfig`` describing the desired grid layout.
+
+        Returns:
+            List of order IDs that must be cancelled on the exchange before
+            the new orders (returned by a subsequent ``initialize_grid`` call)
+            can be placed.
+        """
+        ids_to_cancel = list(self.active_orders.keys())
+
+        # Reset all state
+        self.grid_orders.clear()
+        self.active_orders.clear()
+        self.filled_orders.clear()
+        self._open_buys.clear()
+        self._open_sells.clear()
+        self._long_orders.clear()
+        self._short_orders.clear()
+        self.total_profit = Decimal("0")
+        self.buy_count = 0
+        self.sell_count = 0
+
+        # Update bounds from config
+        self.upper_price = new_config.upper_bound
+        self.lower_price = new_config.lower_bound
+        self.mode = GridMode.BIDIRECTIONAL
+
+        # Reinitialise with new config
+        self._initialize_bidirectional(new_config.current_price, new_config)
+
+        logger.info(
+            "grid_reconfigured",
+            symbol=self.symbol,
+            cancelled_count=len(ids_to_cancel),
+            lower_bound=float(new_config.lower_bound),
+            upper_bound=float(new_config.upper_bound),
+            current_price=float(new_config.current_price),
+        )
+
+        return ids_to_cancel
 
     def get_grid_status(self) -> dict:
         """

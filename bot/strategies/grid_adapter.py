@@ -13,7 +13,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from bot.core.grid_engine import GridEngine
+from bot.core.grid_engine import GridBiConfig, GridEngine, GridMode
 from bot.strategies.base import (
     BaseMarketAnalysis,
     BaseSignal,
@@ -118,6 +118,53 @@ class GridAdapter(BaseStrategy):
         logger.info(
             "grid_direction_switched",
             new_direction=direction.value,
+            closed_positions=len(forced),
+        )
+        return forced
+
+    def reconfigure(self, new_config: GridBiConfig) -> list[tuple[str, "ExitReason"]]:
+        """Switch to BIDIRECTIONAL mode with a new GridBiConfig.
+
+        Force-closes all existing positions, delegates to
+        ``GridEngine.reconfigure()``, and rebuilds adapter-level state.
+
+        Args:
+            new_config: New ``GridBiConfig`` describing the desired layout.
+
+        Returns:
+            List of ``(pos_id, ExitReason.MANUAL)`` for positions that were
+            open before reconfiguration.  Caller should close them on the
+            exchange.
+        """
+        forced = self.force_close_all()
+        self._positions.clear()  # reconfigure closes all positions immediately
+
+        if self._grid_engine is not None:
+            self._grid_engine.reconfigure(new_config)
+        else:
+            # Engine not yet created — build one with bi-directional mode
+            self._grid_engine = GridEngine(
+                symbol=self._symbol,
+                upper_price=new_config.upper_bound,
+                lower_price=new_config.lower_bound,
+                grid_levels=new_config.long_levels + new_config.short_levels,
+                amount_per_grid=new_config.order_size_quote,
+                profit_per_grid=new_config.step_pct,
+                mode=GridMode.BIDIRECTIONAL,
+            )
+            self._grid_engine._initialize_bidirectional(new_config.current_price, new_config)
+
+        # Update adapter bounds from config
+        self._grid_lower_price = new_config.lower_bound
+        self._grid_upper_price = new_config.upper_bound
+        self._grid_levels = self._grid_engine.calculate_grid_levels()
+        self._recovery_triggered = False
+        self._paused = False
+
+        logger.info(
+            "grid_adapter_reconfigured",
+            lower_bound=float(new_config.lower_bound),
+            upper_bound=float(new_config.upper_bound),
             closed_positions=len(forced),
         )
         return forced
