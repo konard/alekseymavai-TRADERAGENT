@@ -3,6 +3,11 @@ DCA Strategy Adapter — Wraps DCA logic to conform to BaseStrategy interface.
 
 Translates DCA deal lifecycle into the unified signal/position interface
 for use with BacktestEngine and StrategyComparison.
+
+Bidirectional support (Phase 3, issue #400):
+- LONG deals: enter when price drops from recent high (unchanged).
+- SHORT deals: enter when price rises from recent low.
+Both stacks are tracked independently via _short_positions.
 """
 
 import uuid
@@ -83,6 +88,11 @@ class DCAAdapter(BaseStrategy):
         self._recent_high = Decimal("0")
         self._current_price = Decimal("0")
 
+        # SHORT stack tracking (Phase 3, issue #400)
+        # Mirrors LONG logic but averages UP on price rises.
+        self._short_positions: dict[str, dict[str, Any]] = {}
+        self._recent_low = Decimal("0")
+
     def get_strategy_name(self) -> str:
         return self._name
 
@@ -105,11 +115,13 @@ class DCAAdapter(BaseStrategy):
         close = df["close"].values
         self._current_price = Decimal(str(close[-1]))
 
-        # Track recent high for DCA entry — use wider window (100 bars)
+        # Track recent high/low for DCA entry — use wider window (100 bars)
         # to avoid resetting the reference too quickly in sideways markets.
         _lookback = min(100, len(close))
         recent_high = float(max(close[-_lookback:]))
         self._recent_high = Decimal(str(recent_high))
+        recent_low = float(min(close[-_lookback:]))
+        self._recent_low = Decimal(str(recent_low))
 
         # Volatility
         high = df["high"].values
@@ -138,9 +150,15 @@ class DCAAdapter(BaseStrategy):
             strategy_type="dca",
             details={
                 "recent_high": float(self._recent_high),
+                "recent_low": float(self._recent_low),
                 "deviation_from_high": (
                     float((self._recent_high - self._current_price) / self._recent_high)
                     if self._recent_high > 0
+                    else 0.0
+                ),
+                "deviation_from_low": (
+                    float((self._current_price - self._recent_low) / self._recent_low)
+                    if self._recent_low > 0
                     else 0.0
                 ),
             },
@@ -148,51 +166,76 @@ class DCAAdapter(BaseStrategy):
         return self._last_analysis
 
     def generate_signal(self, df: pd.DataFrame, current_balance: Decimal) -> Optional[BaseSignal]:
-        """Generate DCA entry signal when price drops from recent high."""
-        if df.empty or self._recent_high <= 0:
+        """
+        Generate DCA entry signal.
+
+        LONG: when price drops by ``price_deviation_pct`` from recent high.
+        SHORT (Phase 3, issue #400): when price rises by ``price_deviation_pct``
+        from recent low — mirrors LONG logic.
+
+        Only one LONG and one SHORT deal is open at any time.
+        """
+        if df.empty:
             return None
 
         close = Decimal(str(df["close"].iloc[-1]))
         self._current_price = close
 
-        # Check if we already have an active deal
-        if self._positions:
-            return None
+        # --- LONG signal ---
+        if not self._positions and self._recent_high > 0:
+            deviation = (self._recent_high - close) / self._recent_high
+            if deviation >= self._price_deviation_pct and current_balance >= self._base_order_size:
+                take_profit = close * (Decimal("1") + self._take_profit_pct)
+                total_drop = self._price_deviation_pct + (
+                    self._safety_step_pct * self._max_safety_orders
+                )
+                stop_loss = close * (Decimal("1") - total_drop)
+                return BaseSignal(
+                    direction=SignalDirection.LONG,
+                    entry_price=close,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    confidence=0.7,
+                    timestamp=datetime.now(timezone.utc),
+                    strategy_type="dca",
+                    signal_reason="dca_price_drop",
+                    risk_reward_ratio=float(self._take_profit_pct / total_drop),
+                    metadata={
+                        "deviation_pct": float(deviation),
+                        "safety_orders_available": self._max_safety_orders,
+                    },
+                )
 
-        # Check if price has dropped enough from recent high
-        deviation = (self._recent_high - close) / self._recent_high
-        if deviation < self._price_deviation_pct:
-            return None
+        # --- SHORT signal (mirror of LONG, Phase 3, issue #400) ---
+        if not self._short_positions and self._recent_low > 0:
+            deviation = (close - self._recent_low) / self._recent_low
+            if deviation >= self._price_deviation_pct and current_balance >= self._base_order_size:
+                take_profit = close * (Decimal("1") - self._take_profit_pct)
+                total_rise = self._price_deviation_pct + (
+                    self._safety_step_pct * self._max_safety_orders
+                )
+                stop_loss = close * (Decimal("1") + total_rise)
+                return BaseSignal(
+                    direction=SignalDirection.SHORT,
+                    entry_price=close,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    confidence=0.7,
+                    timestamp=datetime.now(timezone.utc),
+                    strategy_type="dca",
+                    signal_reason="dca_price_rise",
+                    risk_reward_ratio=float(self._take_profit_pct / total_rise),
+                    metadata={
+                        "deviation_pct": float(deviation),
+                        "safety_orders_available": self._max_safety_orders,
+                    },
+                )
 
-        # Cost check
-        if current_balance < self._base_order_size:
-            return None
-
-        # Calculate TP and SL
-        take_profit = close * (Decimal("1") + self._take_profit_pct)
-        # SL after all safety orders would be hit
-        total_drop = self._price_deviation_pct + (self._safety_step_pct * self._max_safety_orders)
-        stop_loss = close * (Decimal("1") - total_drop)
-
-        return BaseSignal(
-            direction=SignalDirection.LONG,
-            entry_price=close,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            confidence=0.7,
-            timestamp=datetime.now(timezone.utc),
-            strategy_type="dca",
-            signal_reason="dca_price_drop",
-            risk_reward_ratio=float(self._take_profit_pct / total_drop),
-            metadata={
-                "deviation_pct": float(deviation),
-                "safety_orders_available": self._max_safety_orders,
-            },
-        )
+        return None
 
     def open_position(self, signal: BaseSignal, position_size: Decimal) -> str:
         pos_id = str(uuid.uuid4())[:8]
-        self._positions[pos_id] = {
+        pos_data = {
             "direction": signal.direction,
             "entry_price": signal.entry_price,
             "avg_price": signal.entry_price,
@@ -205,6 +248,10 @@ class DCAAdapter(BaseStrategy):
             "entry_time": datetime.now(timezone.utc),
             "current_price": signal.entry_price,
         }
+        if signal.direction == SignalDirection.SHORT:
+            self._short_positions[pos_id] = pos_data
+        else:
+            self._positions[pos_id] = pos_data
         return pos_id
 
     def update_positions(
@@ -213,6 +260,7 @@ class DCAAdapter(BaseStrategy):
         exits: list[tuple[str, ExitReason]] = []
         self._current_price = current_price
 
+        # --- LONG positions ---
         for pos_id, pos in list(self._positions.items()):
             pos["current_price"] = current_price
             pos["bars_held"] = pos.get("bars_held", 0) + 1
@@ -261,19 +309,80 @@ class DCAAdapter(BaseStrategy):
                     # Update TP based on new average
                     pos["take_profit"] = pos["avg_price"] * (Decimal("1") + self._take_profit_pct)
 
+        # --- SHORT positions (Phase 3, issue #400) ---
+        for pos_id, pos in list(self._short_positions.items()):
+            pos["current_price"] = current_price
+            pos["bars_held"] = pos.get("bars_held", 0) + 1
+
+            # SHORT TP: price returns to avg_entry × (1 - tp_pct)
+            if current_price <= pos["take_profit"]:
+                exits.append((pos_id, ExitReason.TAKE_PROFIT))
+                continue
+
+            # SHORT stop loss: price rises above stop
+            if current_price >= pos["stop_loss"]:
+                exits.append((pos_id, ExitReason.STOP_LOSS))
+                continue
+
+            # Hard stop loss for SHORT
+            if self._hard_stop_loss_pct is not None:
+                loss_pct = (current_price - pos["avg_price"]) / pos["avg_price"]
+                if loss_pct >= self._hard_stop_loss_pct:
+                    exits.append((pos_id, ExitReason.STOP_LOSS))
+                    continue
+
+            # Max holding bars
+            if self._max_holding_bars is not None and pos["bars_held"] >= self._max_holding_bars:
+                exits.append((pos_id, ExitReason.MANUAL))
+                continue
+
+            # Safety orders: averaging UP (price rises by safety_step_pct)
+            safety_filled = pos["safety_orders_filled"]
+            if safety_filled < self._max_safety_orders:
+                next_level_rise = self._safety_step_pct * (safety_filled + 1)
+                trigger_price = pos["entry_price"] * (Decimal("1") + next_level_rise)
+                if current_price >= trigger_price:
+                    safety_size = self._safety_order_size * (
+                        self._martingale_multiplier**safety_filled
+                    )
+                    old_total = pos["total_invested"]
+                    safety_invest = safety_size * current_price
+                    new_total = old_total + safety_invest
+                    old_qty = pos["size"]
+                    new_qty = old_qty + safety_size
+                    pos["size"] = new_qty
+                    pos["total_invested"] = new_total
+                    pos["avg_price"] = new_total / new_qty if new_qty > 0 else pos["avg_price"]
+                    pos["safety_orders_filled"] = safety_filled + 1
+                    # Update TP: price needs to fall back to avg × (1 - tp_pct)
+                    pos["take_profit"] = pos["avg_price"] * (
+                        Decimal("1") - self._take_profit_pct
+                    )
+
         return exits
 
     def close_position(
         self, position_id: str, exit_reason: ExitReason, exit_price: Decimal
     ) -> None:
+        # Try LONG positions first, then SHORT.
         pos = self._positions.pop(position_id, None)
+        direction = SignalDirection.LONG
+        if pos is None:
+            pos = self._short_positions.pop(position_id, None)
+            direction = SignalDirection.SHORT
         if not pos:
             return
 
-        pnl = (exit_price - pos["avg_price"]) * pos["size"]
+        if direction == SignalDirection.LONG:
+            pnl = (exit_price - pos["avg_price"]) * pos["size"]
+        else:
+            # SHORT: profit when price falls below avg_entry
+            pnl = (pos["avg_price"] - exit_price) * pos["size"]
+
         self._closed_trades.append(
             {
                 "position_id": position_id,
+                "direction": direction.value,
                 "entry_price": pos["entry_price"],
                 "avg_price": pos["avg_price"],
                 "exit_price": exit_price,
@@ -307,6 +416,26 @@ class DCAAdapter(BaseStrategy):
                     },
                 )
             )
+        # Include SHORT positions (Phase 3, issue #400)
+        for pos_id, pos in self._short_positions.items():
+            pnl = (pos["avg_price"] - pos["current_price"]) * pos["size"]
+            result.append(
+                PositionInfo(
+                    position_id=pos_id,
+                    direction=SignalDirection.SHORT,
+                    entry_price=pos["avg_price"],
+                    current_price=pos["current_price"],
+                    size=pos["size"],
+                    stop_loss=pos["stop_loss"],
+                    take_profit=pos["take_profit"],
+                    unrealized_pnl=pnl,
+                    entry_time=pos["entry_time"],
+                    strategy_type="dca",
+                    metadata={
+                        "safety_orders_filled": pos["safety_orders_filled"],
+                    },
+                )
+            )
         return result
 
     def get_open_positions(self) -> list[dict]:
@@ -320,7 +449,7 @@ class DCAAdapter(BaseStrategy):
           - 'atr_stop_distance': Decimal  (fractional stop distance from avg_price)
         """
         result = []
-        for pos in self._positions.values():
+        for pos in list(self._positions.values()) + list(self._short_positions.values()):
             avg = pos["avg_price"]
             sl = pos["stop_loss"]
             size = pos["total_invested"]
@@ -337,6 +466,32 @@ class DCAAdapter(BaseStrategy):
                 }
             )
         return result
+
+    # ------------------------------------------------------------------
+    # Stack-level close helpers (Phase 3, issue #400)
+    # ------------------------------------------------------------------
+
+    def close_long_stack(self, exit_reason: ExitReason, exit_price: Decimal) -> None:
+        """
+        Close all LONG positions without touching SHORT positions.
+
+        Args:
+            exit_reason: Reason for exit (e.g. ExitReason.MANUAL).
+            exit_price: Price at which all LONG positions are closed.
+        """
+        for pos_id in list(self._positions.keys()):
+            self.close_position(pos_id, exit_reason, exit_price)
+
+    def close_short_stack(self, exit_reason: ExitReason, exit_price: Decimal) -> None:
+        """
+        Close all SHORT positions without touching LONG positions.
+
+        Args:
+            exit_reason: Reason for exit (e.g. ExitReason.MANUAL).
+            exit_price: Price at which all SHORT positions are closed.
+        """
+        for pos_id in list(self._short_positions.keys()):
+            self.close_position(pos_id, exit_reason, exit_price)
 
     def get_performance(self) -> StrategyPerformance:
         total = len(self._closed_trades)
@@ -376,8 +531,10 @@ class DCAAdapter(BaseStrategy):
 
     def reset(self) -> None:
         self._positions.clear()
+        self._short_positions.clear()
         self._closed_trades.clear()
         self._last_analysis = None
         self._directive = None
         self._recent_high = Decimal("0")
+        self._recent_low = Decimal("0")
         self._current_price = Decimal("0")

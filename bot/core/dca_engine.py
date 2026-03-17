@@ -1,16 +1,49 @@
 """
 DCAEngine - Dollar Cost Averaging strategy implementation
 Handles DCA trigger monitoring, position averaging, and take profit management
+
+Bidirectional DCA:
+- LONG stack: averages DOWN on price drops (buy more as price falls)
+- SHORT stack: averages UP on price rises (sell more as price rises)
+Both stacks are independent and can be operated simultaneously (hedged mode).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
 
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# =============================================================================
+# Bidirectional DCA data structures
+# =============================================================================
+
+
+@dataclass
+class DCALevel:
+    """A single entry level in a DCA stack (LONG or SHORT)."""
+
+    price: Decimal
+    amount: Decimal  # base asset quantity
+
+
+@dataclass
+class CloseOrder:
+    """
+    Instruction to close (exit) one DCA stack level on the exchange.
+
+    For LONG levels: place a market/limit sell order.
+    For SHORT levels: place a market/limit buy order (to cover).
+    """
+
+    price: Decimal  # reference price at which to close
+    amount: Decimal  # base asset quantity to trade
+    side: str  # "sell" (LONG close) | "buy" (SHORT close)
 
 
 class DCAPosition:
@@ -134,6 +167,18 @@ class DCAEngine:
         # When None (default), DCAEngine behaves exactly as before.
         self._core_position: Optional[CorePosition] = None  # type: ignore[name-defined]  # noqa: F821
 
+        # ------------------------------------------------------------------
+        # Bidirectional stacks (Phase 3 — issue #400)
+        # ------------------------------------------------------------------
+        # LONG stack: each DCALevel was bought as price fell.
+        # Converted from the existing `position` when needed, but also
+        # tracked explicitly for the new API.
+        self._long_levels: list[DCALevel] = []
+
+        # SHORT stack: each DCALevel was sold as price rose.
+        self._short_levels: list[DCALevel] = []
+        self._last_short_price: Decimal | None = None  # last SHORT entry price
+
         # Statistics
         self.total_dca_steps = 0
         self.total_invested = Decimal("0")
@@ -224,6 +269,9 @@ class DCAEngine:
         self.total_dca_steps += 1
         self.total_invested += current_price * self.amount_per_step
 
+        # Track in the explicit LONG stack as well.
+        self._long_levels.append(DCALevel(price=current_price, amount=self.amount_per_step))
+
         # Mirror fill into the shared CorePosition so Grid can adapt.
         if self._core_position is not None:
             self._core_position.update_from_fill(current_price, self.amount_per_step)
@@ -291,6 +339,7 @@ class DCAEngine:
         self.position = None
         self.last_buy_price = None
         self.highest_price_since_entry = None
+        self._long_levels.clear()
 
         return pnl
 
@@ -401,6 +450,195 @@ class DCAEngine:
             "realized_profit": float(self.realized_profit),
         }
 
+    # ------------------------------------------------------------------
+    # SHORT stack — bidirectional DCA (Phase 3, issue #400)
+    # ------------------------------------------------------------------
+
+    def check_short_dca_trigger(self, current_price: Decimal) -> bool:
+        """
+        Check if a new SHORT DCA level should be added.
+
+        Trigger condition (mirror of LONG):
+        - No SHORT levels yet → first SHORT entry allowed.
+        - Otherwise: price has RISEN by at least ``trigger_percentage``
+          from the last SHORT entry price.
+
+        Args:
+            current_price: Current market price.
+
+        Returns:
+            True if a SHORT DCA step should be executed.
+        """
+        if not self._short_levels:
+            # No SHORT position yet — open the first level.
+            return True
+
+        if len(self._short_levels) >= self.max_steps:
+            logger.debug(
+                "Max SHORT DCA steps reached",
+                current_steps=len(self._short_levels),
+                max_steps=self.max_steps,
+            )
+            return False
+
+        if self._last_short_price is not None:
+            price_rise = (current_price - self._last_short_price) / self._last_short_price
+            if price_rise >= self.trigger_percentage:
+                logger.info(
+                    "SHORT DCA trigger activated",
+                    current_price=float(current_price),
+                    last_short_price=float(self._last_short_price),
+                    price_rise=float(price_rise),
+                )
+                return True
+
+        return False
+
+    def execute_short_dca_step(self, current_price: Decimal) -> bool:
+        """
+        Execute one SHORT DCA step if the trigger condition is met.
+
+        Adds a ``DCALevel`` to ``_short_levels`` and updates
+        ``_last_short_price``.
+
+        Args:
+            current_price: Current market price.
+
+        Returns:
+            True if the SHORT step was executed, False otherwise.
+        """
+        if not self.check_short_dca_trigger(current_price):
+            return False
+
+        self._short_levels.append(DCALevel(price=current_price, amount=self.amount_per_step))
+        self._last_short_price = current_price
+
+        logger.info(
+            "SHORT DCA step executed",
+            step=len(self._short_levels),
+            price=float(current_price),
+            avg_short_entry=float(self._short_avg_entry()),
+        )
+        return True
+
+    def _short_avg_entry(self) -> Decimal:
+        """Weighted average entry price across all SHORT levels."""
+        if not self._short_levels:
+            return Decimal("0")
+        total_cost = sum(lvl.price * lvl.amount for lvl in self._short_levels)
+        total_amount = sum(lvl.amount for lvl in self._short_levels)
+        return total_cost / total_amount if total_amount else Decimal("0")
+
+    def _long_avg_entry(self) -> Decimal:
+        """Weighted average entry price across all LONG levels."""
+        if not self._long_levels:
+            return Decimal("0")
+        total_cost = sum(lvl.price * lvl.amount for lvl in self._long_levels)
+        total_amount = sum(lvl.amount for lvl in self._long_levels)
+        return total_cost / total_amount if total_amount else Decimal("0")
+
+    def check_short_take_profit(self, current_price: Decimal) -> bool:
+        """
+        Check if the SHORT stack's take-profit is reached.
+
+        TP for SHORT: price falls back to ``short_avg_entry × (1 - tp_pct)``.
+
+        Args:
+            current_price: Current market price.
+
+        Returns:
+            True if SHORT TP should be triggered.
+        """
+        if not self._short_levels:
+            return False
+        tp_price = self._short_avg_entry() * (Decimal("1") - self.take_profit_percentage)
+        if current_price <= tp_price:
+            logger.info(
+                "SHORT take profit triggered",
+                current_price=float(current_price),
+                short_avg_entry=float(self._short_avg_entry()),
+                tp_price=float(tp_price),
+            )
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Combined PnL and stack-close helpers (Phase 3, issue #400)
+    # ------------------------------------------------------------------
+
+    def _long_pnl(self, current_price: Decimal) -> Decimal:
+        """
+        Unrealized PnL for the LONG stack at *current_price*.
+
+        For each LONG level we bought at *level.price* and now the price
+        is *current_price*, so PnL = (current_price - level.price) × amount.
+        """
+        return sum(
+            (current_price - lvl.price) * lvl.amount for lvl in self._long_levels
+        )
+
+    def _short_pnl(self, current_price: Decimal) -> Decimal:
+        """
+        Unrealized PnL for the SHORT stack at *current_price*.
+
+        For each SHORT level we sold at *level.price* and the price is now
+        *current_price*, so PnL = (level.price - current_price) × amount.
+        """
+        return sum(
+            (lvl.price - current_price) * lvl.amount for lvl in self._short_levels
+        )
+
+    def get_combined_pnl(self, current_price: Decimal) -> Decimal:
+        """
+        Combined unrealized PnL of LONG stack + SHORT stack.
+
+        Args:
+            current_price: Current market price.
+
+        Returns:
+            Sum of LONG PnL and SHORT PnL (can be negative).
+        """
+        return self._long_pnl(current_price) + self._short_pnl(current_price)
+
+    def close_long_stack(self) -> list[CloseOrder]:
+        """
+        Build close orders for all LONG levels and clear the stack.
+
+        Does NOT touch the SHORT stack.
+
+        Returns:
+            List of ``CloseOrder`` (sell orders) — one per LONG level.
+        """
+        orders: list[CloseOrder] = [
+            CloseOrder(price=lvl.price, amount=lvl.amount, side="sell")
+            for lvl in self._long_levels
+        ]
+        self._long_levels.clear()
+        # Keep backward-compat: also clear the legacy position object.
+        self.position = None
+        self.last_buy_price = None
+        self.highest_price_since_entry = None
+        logger.info("LONG stack closed", orders_count=len(orders), symbol=self.symbol)
+        return orders
+
+    def close_short_stack(self) -> list[CloseOrder]:
+        """
+        Build close orders for all SHORT levels and clear the stack.
+
+        Does NOT touch the LONG stack.
+
+        Returns:
+            List of ``CloseOrder`` (buy-to-cover orders) — one per SHORT level.
+        """
+        orders: list[CloseOrder] = [
+            CloseOrder(price=lvl.price, amount=lvl.amount, side="buy")
+            for lvl in self._short_levels
+        ]
+        self._short_levels.clear()
+        self._last_short_price = None
+        logger.info("SHORT stack closed", orders_count=len(orders), symbol=self.symbol)
+        return orders
+
     def get_open_positions(self) -> list[dict]:
         """
         Return open positions in the format expected by PortfolioRiskManager
@@ -456,5 +694,8 @@ class DCAEngine:
         self.total_dca_steps = 0
         self.total_invested = Decimal("0")
         self.realized_profit = Decimal("0")
+        self._long_levels.clear()
+        self._short_levels.clear()
+        self._last_short_price = None
 
         logger.info("DCAEngine reset", symbol=self.symbol)
