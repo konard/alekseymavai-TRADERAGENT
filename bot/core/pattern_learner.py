@@ -50,7 +50,7 @@ class Pattern:
     # Tags
     tags: list[str] = field(default_factory=list)
 
-    def update_stats(self, pnl: float, ts: float | None = None):
+    def update_stats(self, pnl: float, ts: float | None = None) -> None:
         """Update pattern statistics with a new outcome."""
         ts = ts or time.time()
         self.occurrences += 1
@@ -194,7 +194,7 @@ class PatternLearner:
         else:
             return "us"
 
-    def observe_open(self, position_id: str, context: dict[str, Any]):
+    def observe_open(self, position_id: str, context: dict[str, Any]) -> None:
         """Record context when a position opens."""
         self._open_contexts[position_id] = {
             **context,
@@ -203,7 +203,7 @@ class PatternLearner:
 
     def observe_close(
         self, position_id: str, pnl: float, close_context: dict[str, Any] | None = None
-    ):
+    ) -> None:
         """Record outcome when a position closes."""
         open_ctx = self._open_contexts.pop(position_id, {})
         if not open_ctx:
@@ -317,18 +317,18 @@ class PatternLearner:
             return "avoid"
         return "neutral"
 
-    async def start(self):
+    async def start(self) -> None:
         """Subscribe to EventBus for automatic learning."""
         if not self._bus:
             return
 
-        def on_position_opened(event: DomainEvent):
+        def on_position_opened(event: DomainEvent) -> None:
             self.observe_open(
                 position_id=event.entity_id,
                 context=event.data,
             )
 
-        def on_position_closed(event: DomainEvent):
+        def on_position_closed(event: DomainEvent) -> None:
             pnl = event.data.get("pnl", 0)
             if isinstance(pnl, str):
                 try:
@@ -346,7 +346,7 @@ class PatternLearner:
 
         logger.info("pattern_learner_started")
 
-    async def stop(self):
+    async def stop(self) -> None:
         for unsub in self._unsubscribers:
             unsub()
         self._unsubscribers.clear()
@@ -379,7 +379,7 @@ class PatternLearner:
             "top_patterns": self.get_top_patterns(5),
         }
 
-    async def publish_pattern_fired(self, match: PatternMatch, session_id: str = ""):
+    async def publish_pattern_fired(self, match: PatternMatch, session_id: str = "") -> None:
         """Publish EXPERT_PATTERN_FIRED event."""
         if self._bus:
             from bot.core.event_bus import DomainEvent

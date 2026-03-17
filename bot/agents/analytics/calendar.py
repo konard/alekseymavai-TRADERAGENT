@@ -214,6 +214,7 @@ def _evaluate_trigger(trigger: str, conditions: dict) -> bool:
     actual = conditions[key]
 
     # Try to interpret the expected value in the same type as actual
+    expected: bool | float | str
     if isinstance(actual, bool):
         expected = raw_value in ("True", "true", "1")
     elif isinstance(actual, (int, float)):
@@ -233,7 +234,8 @@ def _evaluate_trigger(trigger: str, conditions: dict) -> bool:
         ">=": lambda a, b: a >= b,
     }
     try:
-        return ops[op](actual, expected)
+        result: bool = ops[op](actual, expected)
+        return result
     except TypeError:
         return False
 

@@ -123,8 +123,10 @@ class PortfolioHeatMap:
             by_symbol_pct = {}
             by_strategy_pct = {}
 
-        max_sym = max(by_symbol_pct, key=by_symbol_pct.get) if by_symbol_pct else ""
-        max_strat = max(by_strategy_pct, key=by_strategy_pct.get) if by_strategy_pct else ""
+        max_sym = max(by_symbol_pct, key=lambda k: by_symbol_pct[k]) if by_symbol_pct else ""
+        max_strat = (
+            max(by_strategy_pct, key=lambda k: by_strategy_pct[k]) if by_strategy_pct else ""
+        )
 
         # Herfindahl index on symbol proportions
         hhi = sum(v**2 for v in by_symbol_pct.values())

@@ -1,5 +1,7 @@
 """SMC Structuralist Expert — analyzes market structure, OB, FVG, liquidity."""
 
+from typing import Any
+
 from bot.agents.base_expert import Argument, ArgumentType, BaseExpert, Verdict, Vote
 
 
@@ -8,7 +10,7 @@ class SMCExpert(BaseExpert):
     role = "Структурист (SMC)"
     weight = 1.2  # slightly higher weight — structural analysis is foundational
 
-    def analyze(self, signal, market_data):
+    def analyze(self, signal: dict[str, Any], market_data: dict[str, Any]) -> Argument:
         evidence = {}
         confidence = 0.5
         reasons = []
@@ -94,7 +96,9 @@ class SMCExpert(BaseExpert):
             evidence=evidence,
         )
 
-    def challenge(self, argument, signal, market_data):
+    def challenge(
+        self, argument: Argument, signal: dict[str, Any], market_data: dict[str, Any]
+    ) -> Argument | None:
         """Challenge if another expert ignores structural risks."""
         if argument.expert_name == self.name:
             return None
@@ -124,7 +128,9 @@ class SMCExpert(BaseExpert):
                     )
         return None
 
-    def vote(self, signal, market_data, arguments):
+    def vote(
+        self, signal: dict[str, Any], market_data: dict[str, Any], arguments: list[Argument]
+    ) -> Vote:
         analysis = self._last_analysis
 
         has_structure = (

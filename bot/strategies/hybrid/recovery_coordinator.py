@@ -455,7 +455,7 @@ class RecoveryCoordinator:
         if total_size == 0:
             return Decimal("0"), Decimal("0")
 
-        return total_cost / total_size, total_size
+        return Decimal(total_cost / total_size), Decimal(total_size)
 
     def _generate_dca_signals(
         self, state: RecoveryState, current_price: Decimal

@@ -46,7 +46,7 @@ class AutomationRule:
             return (time.time() - self._last_fired) >= self.cooldown_seconds
         return True
 
-    def mark_fired(self):
+    def mark_fired(self) -> None:
         self._last_fired = time.time()
         self.fire_count += 1
 
@@ -77,26 +77,26 @@ class CrossEntityAutomation:
     def history(self) -> list[dict[str, Any]]:
         return list(self._history)
 
-    def add_rule(self, rule: AutomationRule):
+    def add_rule(self, rule: AutomationRule) -> None:
         """Register an automation rule."""
         self._rules.append(rule)
         logger.info("automation_rule_added", name=rule.name, trigger=rule.trigger_event)
 
-    def remove_rule(self, name: str):
+    def remove_rule(self, name: str) -> None:
         """Remove a rule by name."""
         self._rules = [r for r in self._rules if r.name != name]
 
-    def enable_rule(self, name: str):
+    def enable_rule(self, name: str) -> None:
         for r in self._rules:
             if r.name == name:
                 r.enabled = True
 
-    def disable_rule(self, name: str):
+    def disable_rule(self, name: str) -> None:
         for r in self._rules:
             if r.name == name:
                 r.enabled = False
 
-    async def start(self):
+    async def start(self) -> None:
         """Subscribe to all trigger events."""
         triggers = {r.trigger_event for r in self._rules}
         for trigger in triggers:
@@ -104,14 +104,14 @@ class CrossEntityAutomation:
             self._unsubscribers.append(unsub)
         logger.info("automation_started", rules=len(self._rules), triggers=len(triggers))
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Unsubscribe from all events."""
         for unsub in self._unsubscribers:
             unsub()
         self._unsubscribers.clear()
         logger.info("automation_stopped")
 
-    async def _on_event(self, event: DomainEvent):
+    async def _on_event(self, event: DomainEvent) -> None:
         """Handle incoming event — check rules and fire actions."""
         for rule in self._rules:
             if rule.trigger_event != event.event_type:
@@ -148,7 +148,9 @@ class CrossEntityAutomation:
             if len(self._history) > self._max_history:
                 self._history = self._history[: self._max_history]
 
-    async def _fire_action(self, trigger_event: DomainEvent, rule: AutomationRule, action: dict):
+    async def _fire_action(
+        self, trigger_event: DomainEvent, rule: AutomationRule, action: dict
+    ) -> None:
         """Fire a single automation action — create and publish a new event."""
         from bot.core.event_bus import DomainEvent as DE
 
@@ -193,7 +195,7 @@ class CrossEntityAutomation:
             entity=f"{entity_type}:{entity_id}",
         )
 
-    def register_defaults(self):
+    def register_defaults(self) -> None:
         """Register built-in trading automation rules."""
 
         # Rule 1: Portfolio stop-loss → deactivate all strategies

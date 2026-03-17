@@ -170,7 +170,7 @@ class ConsensusSkill(BaseTool):
     name = "form_consensus"
     description = "Group experts by position and determine consensus"
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         experts: list[dict[str, Any]] = params.get("experts", [])
         if not experts:
             return ToolResult(success=False, error="No experts provided")
@@ -241,7 +241,7 @@ class EscalationSkill(BaseTool):
         self._resolved: dict[str, dict[str, Any]] = {}
         self._callback = escalation_callback
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         escalation_id = f"esc_{uuid.uuid4().hex[:12]}"
         escalation: dict[str, Any] = {
             "escalation_id": escalation_id,

@@ -31,7 +31,7 @@ class HypothesisSkill(BaseTool):
 
     # -- public API ---------------------------------------------------------
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         """Create a new hypothesis.
 
         Parameters
@@ -147,7 +147,7 @@ class JournalSkill(BaseTool):
 
     # -- public API ---------------------------------------------------------
 
-    def execute(self, params: dict[str, Any]) -> ToolResult:
+    async def execute(self, params: dict[str, Any]) -> ToolResult:
         action = params.get("action")
         if action == "record":
             return self._record(params)

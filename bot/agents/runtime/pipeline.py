@@ -207,7 +207,7 @@ class AutoPilot:
         self._max_risk_pct: float = 0.05
         self._allowed_symbols: list[str] | None = None
         self._trade_timestamps: list[float] = []
-        self._pending_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._pending_task: asyncio.Task | None = None
 
     def set_mode(self, mode: AutoPilotMode) -> None:
         self._mode = mode
